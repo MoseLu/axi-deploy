@@ -1,9 +1,23 @@
 name: SSH Deploy
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
-      # 部署参数
+      # 调用方信息
+      caller_repo:
+        description: '调用方仓库名称'
+        required: true
+        type: string
+      caller_branch:
+        description: '调用方分支名称'
+        required: true
+        type: string
+      caller_commit:
+        description: '调用方提交哈希'
+        required: true
+        type: string
+      
+      # 部署配置
       source_path:
         description: '本地文件路径'
         required: false
@@ -27,27 +41,24 @@ on:
         required: false
         type: string
         default: '300'
-    outputs:
-      deploy_status:
-        description: '部署状态'
-        value: ${{ jobs.deploy.outputs.status }}
-      deploy_time:
-        description: '部署完成时间'
-        value: ${{ jobs.deploy.outputs.time }}
 
 jobs:
-  deploy:
+  ssh-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    outputs:
-      status: ${{ steps.deploy.outputs.status }}
-      time: ${{ steps.deploy.outputs.time }}
     
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - name: 显示部署信息
+        run: |
+          echo "🚀 开始SSH部署"
+          echo "调用方仓库: ${{ github.event.inputs.caller_repo }}"
+          echo "调用方分支: ${{ github.event.inputs.caller_branch }}"
+          echo "调用方提交: ${{ github.event.inputs.caller_commit }}"
+          echo "源路径: ${{ github.event.inputs.source_path }}"
+          echo "目标路径: ${{ github.event.inputs.target_path }}"
+          echo "部署时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
         
       - name: 设置SSH环境
         run: |
@@ -68,23 +79,29 @@ jobs:
           
       - name: 测试SSH连接
         run: |
-          echo "测试连接到: ${{ secrets.SERVER_HOST }}"
+          echo "🔍 测试SSH连接..."
+          echo "服务器: ${{ secrets.SERVER_HOST }}"
           echo "端口: ${{ secrets.SERVER_PORT }}"
           echo "用户: ${{ secrets.SERVER_USER }}"
-          echo "完整命令: ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}"
-          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
+          
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo '✅ SSH连接测试成功'"
           
       - name: 创建远程目录
         run: |
-          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ${{ inputs.target_path }}"
+          echo "📁 创建远程目录: ${{ github.event.inputs.target_path }}"
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ${{ github.event.inputs.target_path }}"
           
       - name: 传输文件
-        if: inputs.source_path != ''
+        if: github.event.inputs.source_path != ''
         run: |
+          echo "📤 开始传输文件..."
+          echo "源路径: ${{ github.event.inputs.source_path }}"
+          echo "目标路径: ${{ github.event.inputs.target_path }}"
+          
           # 构建rsync排除参数
           EXCLUDE_PARAMS=""
-          if [ -n "${{ inputs.exclude_files }}" ]; then
-            IFS=',' read -ra EXCLUDE_FILES <<< "${{ inputs.exclude_files }}"
+          if [ -n "${{ github.event.inputs.exclude_files }}" ]; then
+            IFS=',' read -ra EXCLUDE_FILES <<< "${{ github.event.inputs.exclude_files }}"
             for file in "${EXCLUDE_FILES[@]}"; do
               EXCLUDE_PARAMS="$EXCLUDE_PARAMS --exclude=$file"
             done
@@ -93,30 +110,39 @@ jobs:
           # 使用rsync传输文件
           rsync -avz --delete $EXCLUDE_PARAMS \
             -e "ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }}" \
-            "${{ inputs.source_path }}/" \
-            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ inputs.target_path }}/"
+            "${{ github.event.inputs.source_path }}/" \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ github.event.inputs.target_path }}/"
+            
+          echo "✅ 文件传输完成"
             
       - name: 执行部署命令
-        if: inputs.commands != ''
+        if: github.event.inputs.commands != ''
         run: |
+          echo "⚙️ 执行部署命令..."
+          echo "命令内容:"
+          echo "${{ github.event.inputs.commands }}"
+          
           ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           set -e
-          ${{ inputs.commands }}
+          ${{ github.event.inputs.commands }}
           EOF
+          
+          echo "✅ 部署命令执行完成"
           
       - name: 验证部署
         run: |
-          echo "部署验证:"
-          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la ${{ inputs.target_path }}"
+          echo "🔍 验证部署结果..."
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la ${{ github.event.inputs.target_path }}"
           
-      - name: 设置输出
-        id: deploy
+      - name: 部署完成
         run: |
-          echo "status=success" >> $GITHUB_OUTPUT
-          echo "time=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          echo "🎉 SSH部署完成!"
+          echo "部署时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "目标路径: ${{ github.event.inputs.target_path }}"
           
       - name: 清理SSH密钥
         if: always()
         run: |
           rm -f ~/.ssh/id_rsa
-          rm -f ~/.ssh/known_hosts 
+          rm -f ~/.ssh/known_hosts
+          echo "🧹 SSH密钥已清理" 
