@@ -22,9 +22,6 @@ jobs:
         npm install --production
         pm2 restart your-app
         sudo systemctl reload nginx
-    secrets:
-      ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-      ssh_known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
 
 # 仅执行命令的示例
 jobs:
@@ -37,7 +34,4 @@ jobs:
         cd /opt/my-api
         npm run migrate
         npm run seed
-        pm2 restart my-api
-    secrets:
-      ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-      ssh_known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }} 
+        pm2 restart my-api 

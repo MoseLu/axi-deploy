@@ -1,6 +1,6 @@
 # AXI Deploy - SSH连接公共仓库
 
-这是一个专门用于SSH连接的公共GitHub仓库，其他仓库可以通过GitHub Actions工作流调用此仓库进行远程服务器部署。
+这是一个专门用于SSH连接的公共GitHub仓库，其他仓库可以通过GitHub Actions工作流调用此仓库进行远程服务器部署。**本仓库已配置SSH密钥，其他项目无需配置密钥，只需提供服务器信息即可。**
 
 ## 功能特性
 
@@ -9,6 +9,7 @@
 - 📦 支持多种部署场景
 - 🛡️ 集中化的密钥管理
 - 📋 详细的部署日志
+- 🚀 **简化配置** - 其他项目无需配置SSH密钥
 
 ## 使用方法
 
@@ -37,34 +38,27 @@ jobs:
         cd /var/www/your-app
         npm install --production
         pm2 restart your-app
-    secrets:
-      ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-      ssh_known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
 ```
 
 ### 2. 配置Secrets
 
-在您的项目仓库中配置以下Secrets：
+在您的项目仓库中**只需要**配置以下Secrets：
 
 | Secret名称 | 描述 | 示例值 |
 |-----------|------|--------|
 | `SSH_HOST` | 目标服务器IP地址 | `192.168.1.100` |
 | `SSH_USERNAME` | SSH用户名 | `deploy` |
 | `SSH_PORT` | SSH端口号 | `22` |
-| `SSH_PRIVATE_KEY` | SSH私钥内容 | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
-| `SSH_KNOWN_HOSTS` | 服务器公钥指纹 | `github.com ssh-rsa AAAAB3NzaC1yc2E...` |
 
-### 3. 生成SSH密钥
+**注意**: SSH密钥由本仓库统一管理，其他项目无需配置 `SSH_PRIVATE_KEY` 和 `SSH_KNOWN_HOSTS`。
+
+### 3. 服务器配置
+
+确保您的服务器已配置好SSH密钥：
 
 ```bash
-# 生成SSH密钥对
-ssh-keygen -t rsa -b 4096 -C "your-email@example.com" -f ~/.ssh/deploy_key
-
-# 将公钥添加到服务器
-ssh-copy-id -i ~/.ssh/deploy_key.pub username@your-server
-
-# 获取服务器公钥指纹
-ssh-keyscan -H your-server-ip
+# 在服务器上添加本仓库的公钥到authorized_keys
+# 请联系仓库管理员获取公钥信息
 ```
 
 ## 工作流参数
@@ -122,10 +116,10 @@ ssh-keyscan -H your-server-ip
       sudo systemctl reload nginx
 ```
 
-### 数据库迁移
+### 仅执行命令
 
 ```yaml
-- uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
+- uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@main
   with:
     host: ${{ secrets.SSH_HOST }}
     username: ${{ secrets.SSH_USERNAME }}
@@ -133,14 +127,16 @@ ssh-keyscan -H your-server-ip
       cd /opt/my-api
       npm run migrate
       npm run seed
+      pm2 restart my-api
 ```
 
 ## 安全注意事项
 
-1. **密钥管理**: 确保SSH私钥安全存储，定期轮换
+1. **集中化密钥管理**: SSH密钥由本仓库统一管理，确保安全性
 2. **权限控制**: 使用专门的部署用户，限制其权限
 3. **网络安全**: 建议使用VPN或防火墙限制SSH访问
 4. **日志监控**: 定期检查部署日志，监控异常活动
+5. **密钥轮换**: 定期更新SSH密钥
 
 ## 故障排除
 
@@ -148,7 +144,7 @@ ssh-keyscan -H your-server-ip
 
 1. **SSH连接失败**
    - 检查服务器IP和端口是否正确
-   - 确认SSH密钥配置正确
+   - 确认服务器已添加本仓库的公钥
    - 验证服务器防火墙设置
 
 2. **文件传输失败**

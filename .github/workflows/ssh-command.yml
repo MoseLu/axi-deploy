@@ -32,13 +32,6 @@ on:
       command_output:
         description: '命令输出'
         value: ${{ jobs.execute.outputs.output }}
-    secrets:
-      ssh_private_key:
-        description: 'SSH私钥'
-        required: true
-      ssh_known_hosts:
-        description: '服务器公钥指纹'
-        required: true
 
 jobs:
   execute:
@@ -51,9 +44,9 @@ jobs:
       - name: 设置SSH环境
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.ssh_private_key }}" > ~/.ssh/id_rsa
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          echo "${{ secrets.ssh_known_hosts }}" > ~/.ssh/known_hosts
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
           
       - name: 测试SSH连接

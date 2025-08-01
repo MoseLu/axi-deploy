@@ -1,28 +1,8 @@
 # 快速开始指南
 
-## 🚀 5分钟快速部署
+## 🚀 3分钟快速部署
 
-### 1. 生成SSH密钥
-
-```bash
-# 克隆仓库
-git clone https://github.com/MoseLu/axi-deploy.git
-cd axi-deploy
-
-# 生成SSH密钥
-chmod +x scripts/generate-ssh-key.sh
-./scripts/generate-ssh-key.sh -e your-email@example.com
-```
-
-### 2. 配置服务器
-
-```bash
-# 在目标服务器上运行
-chmod +x scripts/setup-server.sh
-sudo ./scripts/setup-server.sh -u deploy -d /var/www/myapp
-```
-
-### 3. 配置GitHub Secrets
+### 1. 配置GitHub Secrets
 
 在您的项目仓库中配置以下Secrets：
 
@@ -31,15 +11,20 @@ sudo ./scripts/setup-server.sh -u deploy -d /var/www/myapp
 | `SSH_HOST` | 您的服务器IP地址 |
 | `SSH_USERNAME` | `deploy` |
 | `SSH_PORT` | `22` |
-| `SSH_PRIVATE_KEY` | 私钥内容 (从步骤1获取) |
-| `SSH_KNOWN_HOSTS` | 服务器公钥指纹 |
 
-获取服务器公钥指纹：
+**注意**: SSH密钥由本仓库统一管理，您无需配置密钥相关Secrets。
+
+### 2. 配置服务器
+
+确保您的服务器已添加本仓库的SSH公钥：
+
 ```bash
-ssh-keyscan -H YOUR_SERVER_IP
+# 联系仓库管理员获取公钥，然后添加到服务器
+echo "本仓库的公钥内容" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
 ```
 
-### 4. 创建部署工作流
+### 3. 创建部署工作流
 
 在您的项目仓库中创建 `.github/workflows/deploy.yml`：
 
@@ -63,12 +48,9 @@ jobs:
         cd /var/www/myapp
         npm install --production
         pm2 restart myapp
-    secrets:
-      ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-      ssh_known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
 ```
 
-### 5. 测试部署
+### 4. 测试部署
 
 推送代码到main分支，GitHub Actions将自动触发部署。
 
@@ -97,7 +79,7 @@ sudo systemctl reload nginx
 
 ### SSH连接失败
 1. 检查服务器IP和端口
-2. 确认SSH密钥配置正确
+2. 确认服务器已添加本仓库的公钥
 3. 验证服务器防火墙设置
 
 ### 文件传输失败
