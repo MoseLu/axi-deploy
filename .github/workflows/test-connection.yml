@@ -30,23 +30,23 @@ jobs:
           echo "测试连接到 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.SERVER_PORT }}"
           
           # 测试基本连接
-          ssh -o ConnectTimeout=10 -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
+          ssh -o ConnectTimeout=10 ${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
           
           # 获取系统信息
           echo "系统信息:"
-          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "uname -a"
+          ssh ${{ secrets.SERVER_HOST }} "uname -a"
           
           # 获取磁盘空间
           echo "磁盘空间:"
-          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "df -h"
+          ssh ${{ secrets.SERVER_HOST }} "df -h"
           
           # 获取内存信息
           echo "内存信息:"
-          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "free -h"
+          ssh ${{ secrets.SERVER_HOST }} "free -h"
           
           # 测试应用目录权限
           echo "应用目录权限:"
-          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la /www/wwwroot"
+          ssh ${{ secrets.SERVER_HOST }} "ls -la /www/wwwroot"
           
       - name: 清理SSH密钥
         if: always()

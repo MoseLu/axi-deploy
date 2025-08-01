@@ -47,14 +47,14 @@ jobs:
           
       - name: 测试SSH连接
         run: |
-          ssh -o ConnectTimeout=10 -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
+          ssh -o ConnectTimeout=10 ${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
           
-      - name: 执行命令
-        id: execute
-        run: |
-          echo "执行命令: ${{ inputs.commands }}"
-          OUTPUT=$(ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "${{ inputs.commands }}" 2>&1)
-          EXIT_CODE=$?
+              - name: 执行命令
+          id: execute
+          run: |
+            echo "执行命令: ${{ inputs.commands }}"
+            OUTPUT=$(ssh ${{ secrets.SERVER_HOST }} "${{ inputs.commands }}" 2>&1)
+            EXIT_CODE=$?
           
           echo "命令输出:"
           echo "$OUTPUT"

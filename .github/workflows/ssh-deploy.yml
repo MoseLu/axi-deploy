@@ -65,11 +65,11 @@ jobs:
           
       - name: 测试SSH连接
         run: |
-          ssh -o ConnectTimeout=10 -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
+          ssh -o ConnectTimeout=10 ${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
           
       - name: 创建远程目录
         run: |
-          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ${{ inputs.target_path }}"
+          ssh ${{ secrets.SERVER_HOST }} "mkdir -p ${{ inputs.target_path }}"
           
       - name: 传输文件
         if: inputs.source_path != ''
@@ -85,14 +85,14 @@ jobs:
           
           # 使用rsync传输文件
           rsync -avz --delete $EXCLUDE_PARAMS \
-            -e "ssh -p ${{ secrets.SERVER_PORT }}" \
+            -e "ssh" \
             "${{ inputs.source_path }}/" \
             "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ inputs.target_path }}/"
             
       - name: 执行部署命令
         if: inputs.commands != ''
         run: |
-          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+          ssh ${{ secrets.SERVER_HOST }} << 'EOF'
           set -e
           ${{ inputs.commands }}
           EOF
@@ -100,7 +100,7 @@ jobs:
       - name: 验证部署
         run: |
           echo "部署验证:"
-          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la ${{ inputs.target_path }}"
+          ssh ${{ secrets.SERVER_HOST }} "ls -la ${{ inputs.target_path }}"
           
       - name: 设置输出
         id: deploy
