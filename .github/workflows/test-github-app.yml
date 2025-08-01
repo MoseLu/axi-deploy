@@ -1,0 +1,121 @@
+name: Test GitHub App Configuration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查 Secrets 配置
+        run: |
+          echo "=== 检查 Secrets 配置 ==="
+          
+          # 检查 App ID
+          if [ -n "${{ secrets.APP_ID }}" ]; then
+            echo "✅ APP_ID 已配置: ${{ secrets.APP_ID }}"
+          else
+            echo "❌ APP_ID 未配置"
+          fi
+          
+          # 检查 Installation ID
+          if [ -n "${{ secrets.APP_INSTALLATION_ID }}" ]; then
+            echo "✅ APP_INSTALLATION_ID 已配置: ${{ secrets.APP_INSTALLATION_ID }}"
+          else
+            echo "❌ APP_INSTALLATION_ID 未配置"
+          fi
+          
+          # 检查私钥
+          PRIVATE_KEY="${{ secrets.APP_PRIVATE_KEY }}"
+          if [ -n "$PRIVATE_KEY" ]; then
+            echo "✅ APP_PRIVATE_KEY 已配置"
+            echo "私钥长度: ${#PRIVATE_KEY}"
+            echo "私钥开头: ${PRIVATE_KEY:0:50}..."
+            
+            # 检查私钥格式
+            if [[ "$PRIVATE_KEY" =~ "-----BEGIN" ]]; then
+              echo "✅ 私钥格式正确（包含 -----BEGIN）"
+            else
+              echo "❌ 私钥格式不正确（应该包含 -----BEGIN）"
+            fi
+            
+            if [[ "$PRIVATE_KEY" =~ "-----END" ]]; then
+              echo "✅ 私钥格式正确（包含 -----END）"
+            else
+              echo "❌ 私钥格式不正确（应该包含 -----END）"
+            fi
+          else
+            echo "❌ APP_PRIVATE_KEY 未配置"
+          fi
+      
+      - name: 测试私钥文件
+        run: |
+          echo "=== 测试私钥文件 ==="
+          
+          PRIVATE_KEY="${{ secrets.APP_PRIVATE_KEY }}"
+          
+          if [ -n "$PRIVATE_KEY" ]; then
+            # 写入私钥文件
+            echo "$PRIVATE_KEY" > /tmp/test_key.pem
+            chmod 600 /tmp/test_key.pem
+            
+            echo "私钥文件内容（前10行）:"
+            head -10 /tmp/test_key.pem
+            
+            echo ""
+            echo "私钥文件大小:"
+            ls -la /tmp/test_key.pem
+            
+            echo ""
+            echo "测试私钥格式:"
+            if openssl rsa -in /tmp/test_key.pem -check -noout 2>/dev/null; then
+              echo "✅ 私钥格式有效"
+            else
+              echo "❌ 私钥格式无效"
+              echo "OpenSSL 错误信息:"
+              openssl rsa -in /tmp/test_key.pem -check -noout 2>&1
+            fi
+            
+            # 清理
+            rm -f /tmp/test_key.pem
+          else
+            echo "❌ 无法测试：私钥未配置"
+          fi
+      
+      - name: 生成简单 JWT
+        run: |
+          echo "=== 生成简单 JWT ==="
+          
+          APP_ID="${{ secrets.APP_ID }}"
+          PRIVATE_KEY="${{ secrets.APP_PRIVATE_KEY }}"
+          
+          if [ -n "$APP_ID" ] && [ -n "$PRIVATE_KEY" ]; then
+            # 写入私钥文件
+            echo "$PRIVATE_KEY" > /tmp/jwt_key.pem
+            chmod 600 /tmp/jwt_key.pem
+            
+            # 生成简单的 JWT
+            NOW=$(date +%s)
+            EXPIRES=$((NOW + 600))
+            
+            # Header
+            HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | base64 | tr -d '=' | tr '/+' '_-')
+            echo "JWT Header: $HEADER"
+            
+            # Payload
+            PAYLOAD=$(echo -n "{\"iat\":$NOW,\"exp\":$EXPIRES,\"iss\":\"$APP_ID\"}" | base64 | tr -d '=' | tr '/+' '_-')
+            echo "JWT Payload: $PAYLOAD"
+            
+            # Signature
+            SIGNATURE=$(echo -n "$HEADER.$PAYLOAD" | openssl dgst -sha256 -sign /tmp/jwt_key.pem | base64 | tr -d '=' | tr '/+' '_-')
+            echo "JWT Signature: $SIGNATURE"
+            
+            # 完整 JWT
+            JWT="$HEADER.$PAYLOAD.$SIGNATURE"
+            echo "完整 JWT: $JWT"
+            
+            # 清理
+            rm -f /tmp/jwt_key.pem
+          else
+            echo "❌ 无法生成 JWT：缺少必要参数"
+          fi 
