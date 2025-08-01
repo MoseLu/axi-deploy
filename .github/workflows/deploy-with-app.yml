@@ -52,14 +52,29 @@ jobs:
           APP_ID="${{ secrets.APP_ID }}"
           PRIVATE_KEY="${{ secrets.APP_PRIVATE_KEY }}"
           
+          # 将私钥写入临时文件
+          echo "$PRIVATE_KEY" > /tmp/private_key.pem
+          chmod 600 /tmp/private_key.pem
+          
           # 创建 JWT payload
           NOW=$(date +%s)
           EXPIRES=$((NOW + 600)) # 10 minutes
           
-          # 生成 JWT
-          JWT=$(echo -n "{\"iat\":$NOW,\"exp\":$EXPIRES,\"iss\":\"$APP_ID\"}" | \
-                openssl dgst -sha256 -sign <(echo "$PRIVATE_KEY" | openssl rsa -in /dev/stdin -outform PEM) | \
-                base64 -w 0)
+          # 生成 JWT header
+          HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | base64 | tr -d '=' | tr '/+' '_-')
+          
+          # 生成 JWT payload
+          PAYLOAD=$(echo -n "{\"iat\":$NOW,\"exp\":$EXPIRES,\"iss\":\"$APP_ID\"}" | base64 | tr -d '=' | tr '/+' '_-')
+          
+          # 生成 JWT signature
+          SIGNATURE=$(echo -n "$HEADER.$PAYLOAD" | openssl dgst -sha256 -sign /tmp/private_key.pem | base64 | tr -d '=' | tr '/+' '_-')
+          
+          # 组合 JWT
+          JWT="$HEADER.$PAYLOAD.$SIGNATURE"
+          
+          echo "JWT Header: $HEADER"
+          echo "JWT Payload: $PAYLOAD"
+          echo "JWT Signature: $SIGNATURE"
           
           # 获取 Installation Token
           INSTALLATION_ID="${{ secrets.APP_INSTALLATION_ID }}"
@@ -67,6 +82,8 @@ jobs:
             -H "Authorization: Bearer $JWT" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/app/installations/$INSTALLATION_ID/access_tokens")
+          
+          echo "Token Response: $TOKEN_RESPONSE"
           
           ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token')
           
@@ -83,6 +100,9 @@ jobs:
           # 显示令牌信息（不包含实际令牌）
           TOKEN_EXPIRES=$(echo "$TOKEN_RESPONSE" | jq -r '.expires_at')
           echo "令牌过期时间: $TOKEN_EXPIRES"
+          
+          # 清理临时文件
+          rm -f /tmp/private_key.pem
       
       - name: 显示部署信息
         run: |
