@@ -11,6 +11,32 @@
 - 📋 详细的部署日志
 - 🚀 **极简配置** - 其他项目无需配置任何SSH参数
 
+## 配置要求
+
+### GitHub Secrets 配置
+
+本仓库需要在 GitHub Secrets 中配置以下变量：
+
+| Secret 名称 | 必需 | 描述 | 示例值 |
+|-------------|------|------|--------|
+| `SERVER_HOST` | ✅ | 服务器主机名或IP地址 | `192.168.1.100` 或 `example.com` |
+| `SERVER_PORT` | ✅ | SSH 端口号 | `22` 或 `2222` |
+| `SERVER_USER` | ✅ | SSH 用户名 | `root` 或 `deploy` |
+| `SERVER_KEY` | ✅ | SSH 私钥内容 | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+
+### 配置步骤
+
+1. **进入仓库设置**: 在 axi-deploy 仓库页面，点击 Settings
+2. **找到 Secrets**: 在左侧菜单中点击 "Secrets and variables" → "Actions"
+3. **添加 Secrets**: 点击 "New repository secret"，依次添加上述四个 secrets
+4. **验证配置**: 确保所有 secrets 都已正确配置
+
+### 安全说明
+
+- **私钥安全**: `SERVER_KEY` 包含完整的 SSH 私钥内容，请妥善保管
+- **权限控制**: 只有仓库管理员可以查看和修改 secrets
+- **访问限制**: 其他项目只能通过工作流调用，无法直接访问 secrets
+
 ## 使用方法
 
 ### 1. 在其他仓库中调用
@@ -72,7 +98,12 @@ jobs:
 
 #### 3.3 故障诊断
 
-如果SSH连接失败，请联系仓库管理员检查服务器配置。
+如果SSH连接失败，请检查：
+
+1. **Secrets 配置**: 确保 axi-deploy 仓库已配置所有必需的 secrets
+2. **服务器连接**: 检查服务器 SSH 服务是否正常运行
+3. **网络连接**: 验证 GitHub Actions 可以访问目标服务器
+4. **权限设置**: 确认 SSH 用户有足够的权限执行部署操作
 
 #### 3.4 常见问题
 

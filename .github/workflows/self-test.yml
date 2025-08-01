@@ -1,0 +1,67 @@
+name: Self SSH Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 设置SSH环境
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # 配置SSH选项，跳过主机密钥验证
+          cat > ~/.ssh/config << EOF
+          Host ${{ secrets.SERVER_HOST }}
+            HostName ${{ secrets.SERVER_HOST }}
+            Port ${{ secrets.SERVER_PORT }}
+            User ${{ secrets.SERVER_USER }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+          chmod 600 ~/.ssh/config
+          
+      - name: 显示连接信息
+        run: |
+          echo "=== SSH 连接信息 ==="
+          echo "服务器主机: ${{ secrets.SERVER_HOST }}"
+          echo "SSH 端口: ${{ secrets.SERVER_PORT }}"
+          echo "SSH 用户: ${{ secrets.SERVER_USER }}"
+          echo "私钥长度: $(echo "${{ secrets.SERVER_KEY }}" | wc -c) 字符"
+          echo "=================="
+          
+      - name: 测试SSH连接
+        run: |
+          echo "=== 开始 SSH 连接测试 ==="
+          echo "测试连接到 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.SERVER_PORT }}"
+          
+          # 测试基本连接
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
+          
+          # 获取系统信息
+          echo "系统信息:"
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "uname -a"
+          
+          # 获取磁盘空间
+          echo "磁盘空间:"
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "df -h"
+          
+          # 获取内存信息
+          echo "内存信息:"
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "free -h"
+          
+          # 测试应用目录权限
+          echo "应用目录权限:"
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la /www/wwwroot"
+          
+          echo "=== SSH 连接测试完成 ==="
+          
+      - name: 清理SSH密钥
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
+          rm -f ~/.ssh/config 
