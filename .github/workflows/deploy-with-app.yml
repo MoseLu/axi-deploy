@@ -1,4 +1,4 @@
-name: Deploy Any Project
+name: Deploy with GitHub App
 
 on:
   workflow_dispatch:
@@ -45,6 +45,45 @@ jobs:
       id-token: write
     
     steps:
+      - name: 生成 GitHub App Token
+        id: generate-token
+        run: |
+          # 生成 JWT Token
+          APP_ID="${{ secrets.APP_ID }}"
+          PRIVATE_KEY="${{ secrets.APP_PRIVATE_KEY }}"
+          
+          # 创建 JWT payload
+          NOW=$(date +%s)
+          EXPIRES=$((NOW + 600)) # 10 minutes
+          
+          # 生成 JWT
+          JWT=$(echo -n "{\"iat\":$NOW,\"exp\":$EXPIRES,\"iss\":\"$APP_ID\"}" | \
+                openssl dgst -sha256 -sign <(echo "$PRIVATE_KEY" | openssl rsa -in /dev/stdin -outform PEM) | \
+                base64 -w 0)
+          
+          # 获取 Installation Token
+          INSTALLATION_ID="${{ secrets.APP_INSTALLATION_ID }}"
+          TOKEN_RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer $JWT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/app/installations/$INSTALLATION_ID/access_tokens")
+          
+          ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token')
+          
+          # 检查令牌是否有效
+          if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+            echo "❌ GitHub App Token 生成失败"
+            echo "响应内容: $TOKEN_RESPONSE"
+            exit 1
+          fi
+          
+          echo "token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+          echo "✅ GitHub App Token 生成成功"
+          
+          # 显示令牌信息（不包含实际令牌）
+          TOKEN_EXPIRES=$(echo "$TOKEN_RESPONSE" | jq -r '.expires_at')
+          echo "令牌过期时间: $TOKEN_EXPIRES"
+      
       - name: 显示部署信息
         run: |
           echo "🚀 开始部署项目"
@@ -61,7 +100,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: dist-${{ github.event.inputs.project }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.generate-token.outputs.token }}
           run-id: ${{ github.event.inputs.artifact_id }}
       
       - name: 设置SSH环境

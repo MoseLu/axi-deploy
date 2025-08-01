@@ -1,197 +1,248 @@
-# 🚀 AXI Deploy - workflow_dispatch 解决方案
+# 🚀 AXI Deploy 解决方案
 
-## 问题背景
+## 📋 问题背景
 
-GitHub Actions 的 Reusable Workflow 存在限制：**无法访问调用方的 Secrets**，这导致无法在可重用工作流中使用 SSH 密钥等敏感信息。
+在传统的多项目部署中，每个项目都需要：
+- 配置自己的 SSH 密钥和服务器信息
+- 维护各自的部署脚本
+- 处理不同语言的构建和启动逻辑
+- 管理多个仓库的敏感信息
 
-## 解决方案
+这导致了：
+- 🔴 **安全风险** - 敏感信息分散在多个仓库
+- 🔴 **维护成本** - 每个项目都要配置部署环境
+- 🔴 **不一致性** - 不同项目的部署流程不统一
+- 🔴 **扩展困难** - 新增项目需要重复配置
 
-我们实现了基于 `workflow_dispatch` 的集中化部署方案，这是目前唯一能绕过 GitHub Actions 限制的办法。
+## ✅ 解决方案
 
-## 方案对比
+### 核心思路
 
-| 方案 | 是否能访问密钥 | 是否能复用部署逻辑 | 推荐程度 |
-|------|----------------|-------------------|----------|
-| Reusable Workflow | ❌ 不能 | ✅ 可以 | ❌ 不推荐 |
-| **公共仓库的 workflow_dispatch** | ✅ **可以（访问自己的 Secrets）** | ✅ **可以（集中部署脚本）** | ✅ **强烈推荐** |
+使用 **一个公共仓库 + workflow_dispatch** 把 Go、Node、Python 等不同类型业务库的部署动作全部收拢：
 
-## 实现架构
+- **公共仓库（axi-deploy）** 里只放一份"通用触发器"
+  - 它能拿到自己的 Secrets（SSH key、服务器地址、路径等）
+  - 通过 `inputs` 区分项目名、语言、启动方式
+- **各业务仓库** 只做构建，然后调用公共仓库的 `workflow_dispatch`，把产物或参数传过去
 
-### 1. 公共仓库（axi-deploy）
+### 架构设计
 
-**职责：**
-- 存储 SSH 密钥和服务器配置
-- 定义部署脚本和工作流
-- 执行真正的 SSH 部署操作
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   业务仓库 A     │    │   业务仓库 B     │    │   业务仓库 C     │
+│  (Node.js)      │    │  (Go)          │    │  (Python)       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │ 构建 + 上传产物        │ 构建 + 上传产物        │ 构建 + 上传产物
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │    公共仓库              │
+                    │   (axi-deploy)          │
+                    │                         │
+                    │  🔐 统一管理 Secrets    │
+                    │  📦 统一部署逻辑        │
+                    │  🌍 支持多语言          │
+                    └─────────────────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │      服务器             │
+                    │  (生产环境)             │
+                    └─────────────────────────┘
+```
 
-**核心文件：**
-- `.github/workflows/deploy-dispatch.yml` - 主要的部署工作流
-- `.github/workflows/test-dispatch.yml` - 测试连接的工作流
-- `scripts/deploy.sh` - 通用部署脚本
+## 🎯 核心优势
 
-**配置要求：**
+### 1. 🔐 集中化安全管理
+- **统一密钥管理** - 所有 SSH 配置都在公共仓库
+- **权限隔离** - 业务仓库无法访问敏感信息
+- **审计便利** - 所有部署操作集中记录
+
+### 2. 🌍 多语言支持
+- **Node.js** - React/Vue 前端、Express API
+- **Go** - 微服务、CLI 工具
+- **Python** - Django/Flask 应用、数据处理
+- **Rust** - 高性能服务
+- **Java** - 企业应用
+
+### 3. 🔄 标准化流程
+- **统一构建** - 每种语言都有标准构建流程
+- **统一部署** - 通过 workflow_dispatch 实现标准化
+- **统一监控** - 集中化的部署日志和状态
+
+### 4. 📦 极简配置
+- **业务仓库** - 只需配置构建和触发
+- **公共仓库** - 只需配置一次 SSH 信息
+- **新增项目** - 复制模板即可
+
+## 🔧 技术实现
+
+### 1. 公共仓库配置
+
+**GitHub Secrets：**
 ```bash
-# GitHub Secrets
 SERVER_HOST=192.168.1.100
 SERVER_PORT=22
-SERVER_USER=deploy
+SERVER_USER=root
 SERVER_KEY=-----BEGIN OPENSSH PRIVATE KEY-----...
 ```
 
-### 2. 业务仓库（任意项目）
-
-**职责：**
-- 构建项目（npm run build）
-- 触发公共仓库的 workflow_dispatch
-- 传递部署参数
-
-**配置示例：**
+**通用部署工作流：**
 ```yaml
-name: Deploy to Production
+# .github/workflows/deploy.yml
+name: Deploy Any Project
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        
-      - name: 构建项目
-        run: npm run build
-        
-      - name: 触发部署
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: response } = await github.rest.actions.createWorkflowDispatch({
-              owner: 'MoseLu',
-              repo: 'axi-deploy',
-              workflow_id: 'deploy-dispatch.yml',
-              ref: 'main',
-              inputs: {
-                caller_repo: '${{ github.repository }}',
-                caller_branch: '${{ github.ref_name }}',
-                caller_commit: '${{ github.sha }}',
-                source_path: './dist',
-                target_path: '/www/wwwroot/my-app',
-                commands: |
-                  cd /www/wwwroot/my-app
-                  npm install --production
-                  pm2 restart my-app
-              }
-            });
+    inputs:
+      project: { required: true, type: string }
+      lang: { required: true, type: string }
+      artifact_id: { required: true, type: string }
+      deploy_path: { required: true, type: string }
+      start_cmd: { required: true, type: string }
 ```
 
-## 核心特性
+### 2. 业务仓库配置
 
-### ✅ 优势
+**Node.js 项目示例：**
+```yaml
+# 构建阶段
+- name: 构建项目
+  run: npm run build
 
-1. **完全绕过限制**: workflow_dispatch 可以访问自己的 Secrets
-2. **集中化管理**: 所有 SSH 配置统一管理
-3. **安全性**: 业务仓库无需配置任何敏感信息
-4. **灵活性**: 支持多种部署场景和参数
-5. **可扩展性**: 易于添加新的部署功能
+- name: 上传构建产物
+  uses: actions/upload-artifact@v4
+  with:
+    name: dist-my-node-app
+    path: dist/
 
-### 🔧 功能特性
+# 触发部署
+- name: 触发部署
+  uses: actions/github-script@v7
+  with:
+    script: |
+      await github.rest.actions.createWorkflowDispatch({
+        owner: 'your-org',
+        repo: 'axi-deploy',
+        workflow_id: 'deploy.yml',
+        inputs: {
+          project: 'my-node-app',
+          lang: 'node',
+          artifact_id: '${{ needs.build.outputs.artifact-id }}',
+          deploy_path: '/www/wwwroot/my-node-app',
+          start_cmd: 'cd /www/wwwroot/my-node-app && npm ci --production && pm2 reload app'
+        }
+      });
+```
 
-- **文件传输**: 使用 rsync 高效传输文件
-- **命令执行**: 支持自定义部署命令
-- **备份机制**: 自动备份当前版本
-- **权限管理**: 安全的 SSH 密钥管理
-- **日志记录**: 详细的部署日志
-- **错误处理**: 完善的错误处理机制
+## 📊 方案对比
 
-## 使用流程
+| 特性 | 传统方案 | AXI Deploy |
+|------|----------|------------|
+| 密钥管理 | 分散在各仓库 | 集中管理 |
+| 配置复杂度 | 每个项目都要配置 | 一次配置，多处使用 |
+| 安全风险 | 高风险 | 低风险 |
+| 维护成本 | 高 | 低 |
+| 扩展性 | 差 | 优秀 |
+| 标准化 | 无 | 统一标准 |
 
-### 步骤 1: 配置公共仓库
+## 🚀 部署流程
 
-1. 在 axi-deploy 仓库中配置 GitHub Secrets
-2. 测试 SSH 连接（使用 test-dispatch.yml）
-3. 验证部署脚本功能
+### 1. 业务仓库构建
+```mermaid
+graph LR
+    A[代码提交] --> B[触发构建]
+    B --> C[安装依赖]
+    C --> D[构建项目]
+    D --> E[上传产物]
+    E --> F[触发部署]
+```
 
-### 步骤 2: 在业务仓库中配置
+### 2. 公共仓库部署
+```mermaid
+graph LR
+    A[接收部署请求] --> B[下载构建产物]
+    B --> C[SSH连接服务器]
+    C --> D[传输文件]
+    D --> E[执行启动命令]
+    E --> F[验证部署]
+```
 
-1. 创建 `.github/workflows/deploy.yml`
-2. 配置构建步骤
-3. 添加触发部署的步骤
+## 🛡️ 安全特性
 
-### 步骤 3: 测试部署
+### 1. 权限隔离
+- 业务仓库无法访问 SSH 密钥
+- 公共仓库无法访问业务代码
+- 通过 workflow_dispatch 实现安全调用
 
-1. 推送代码到主分支
-2. 查看构建和部署状态
-3. 验证部署结果
+### 2. 审计日志
+- 所有部署操作都有详细日志
+- 可追踪每次部署的来源和结果
+- 支持部署历史查询
 
-## 部署场景支持
+### 3. 错误处理
+- 部署失败时自动回滚
+- 详细的错误信息记录
+- 支持手动重试机制
 
-### 前端项目
-- Vue.js、React、Angular 等
-- 静态网站（Hugo、Jekyll 等）
-- 单页应用（SPA）
+## 📈 扩展性
 
-### 后端项目
-- Node.js API
-- Python Flask/Django
-- Java Spring Boot
-- Go 应用
+### 1. 新增语言支持
+只需在公共仓库添加新的语言处理逻辑，业务仓库无需修改。
 
-### 多环境部署
-- 开发环境
-- 测试环境
-- 生产环境
+### 2. 多环境部署
+通过不同的 `inputs` 参数支持开发、测试、生产环境。
 
-### 特殊场景
-- 数据库迁移
-- 条件部署
-- 蓝绿部署
+### 3. 自定义部署逻辑
+通过 `start_cmd` 参数支持任意自定义启动命令。
 
-## 安全考虑
+## 🔍 监控和运维
 
-1. **密钥安全**: SSH 私钥存储在公共仓库的 Secrets 中
-2. **权限控制**: 使用专门的部署用户，限制权限
-3. **网络安全**: 建议使用 VPN 或防火墙限制 SSH 访问
-4. **访问控制**: 只有授权项目可以调用此仓库的工作流
-5. **日志监控**: 定期检查部署日志，监控异常活动
+### 1. 部署状态监控
+- 实时查看部署进度
+- 部署成功/失败通知
+- 自动健康检查
 
-## 故障排除
+### 2. 日志管理
+- 集中化的部署日志
+- 结构化日志格式
+- 日志轮转和清理
 
-### 常见问题
+### 3. 故障恢复
+- 自动重试机制
+- 手动回滚功能
+- 紧急修复流程
 
-1. **SSH 连接失败**
-   - 检查 Secrets 配置
-   - 确认服务器 SSH 服务状态
-   - 验证网络连接
+## 📚 使用指南
 
-2. **权限问题**
-   - 确保业务仓库有调用权限
-   - 检查 GitHub Token 权限
+### 快速开始
+1. 配置公共仓库 Secrets
+2. 选择语言模板
+3. 修改配置参数
+4. 测试部署流程
 
-3. **部署失败**
-   - 检查目标路径权限
-   - 确认磁盘空间
-   - 查看详细日志
+### 最佳实践
+1. 使用语义化版本号
+2. 配置环境变量管理
+3. 设置监控和告警
+4. 定期备份和测试
 
-### 调试方法
+## 🎉 总结
 
-1. **使用测试工作流**: 运行 test-dispatch.yml 验证配置
-2. **查看详细日志**: 在部署工作流中启用调试模式
-3. **手动测试**: 在服务器上手动执行部署命令
+AXI Deploy 通过集中化的部署管理，解决了多项目部署中的安全、维护、一致性等问题，提供了一个安全、高效、可扩展的部署解决方案。
 
-## 最佳实践
+**核心价值：**
+- 🔐 **安全** - 集中化密钥管理
+- 🚀 **高效** - 标准化部署流程
+- 🌍 **通用** - 支持多种语言
+- 📦 **简单** - 极简配置要求
+- 🔄 **可靠** - 完善的错误处理
 
-1. **环境隔离**: 为不同环境使用不同的目标路径
-2. **备份策略**: 部署前自动备份当前版本
-3. **回滚机制**: 准备快速回滚方案
-4. **监控告警**: 部署后监控应用状态
-5. **文档维护**: 保持部署文档的更新
-
-## 总结
-
-这个 `workflow_dispatch` 方案成功解决了 GitHub Actions 的限制问题，提供了一个安全、可靠、易用的集中化部署解决方案。通过将 SSH 配置集中在公共仓库中，业务仓库可以专注于构建和触发部署，实现了职责分离和安全性提升。
-
-**推荐使用此方案进行所有项目的自动化部署！** 
+这个解决方案特别适合：
+- 拥有多个不同语言项目的团队
+- 需要统一部署流程的组织
+- 重视安全性的企业环境
+- 希望简化运维工作的开发者 

@@ -1,0 +1,63 @@
+name: Build & Deploy Node.js Project
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: 安装依赖
+        run: npm ci
+        
+      - name: 构建项目
+        run: npm run build
+        
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: dist-my-node-app
+          path: dist/
+          retention-days: 1
+
+  trigger-deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发部署
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
+          script: |
+            const { data: response } = await github.rest.actions.createWorkflowDispatch({
+              owner: 'your-org',
+              repo: 'axi-deploy',
+              workflow_id: 'deploy.yml',
+              ref: 'main',
+              inputs: {
+                project: 'my-node-app',
+                lang: 'node',
+                artifact_id: '${{ needs.build.outputs.artifact-id }}',
+                deploy_path: '/www/wwwroot/my-node-app',
+                start_cmd: 'cd /www/wwwroot/my-node-app && npm ci --production && pm2 reload ecosystem.config.js',
+                caller_repo: '${{ github.repository }}',
+                caller_branch: '${{ github.ref_name }}',
+                caller_commit: '${{ github.sha }}'
+              }
+            });
+            console.log('✅ 部署已触发:', response); 
