@@ -41,6 +41,43 @@ on:
         required: false
         type: string
         default: '300'
+  workflow_call:
+    inputs:
+      caller_repo:
+        description: '调用方仓库名称'
+        required: true
+        type: string
+      caller_branch:
+        description: '调用方分支名称'
+        required: true
+        type: string
+      caller_commit:
+        description: '调用方提交哈希'
+        required: true
+        type: string
+      source_path:
+        description: '本地文件路径'
+        required: false
+        type: string
+        default: './dist'
+      target_path:
+        description: '远程目标路径'
+        required: false
+        type: string
+        default: '/www/wwwroot'
+      commands:
+        description: '部署后执行的命令'
+        required: false
+        type: string
+      exclude_files:
+        description: '排除的文件/目录'
+        required: false
+        type: string
+      timeout:
+        description: 'SSH连接超时时间(秒)'
+        required: false
+        type: string
+        default: '300'
 
 jobs:
   deploy:
