@@ -16,7 +16,7 @@ on:
 
 jobs:
   deploy:
-    uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@master
     with:
       source_path: './dist'
       target_path: '/var/www/myapp'
@@ -38,7 +38,7 @@ jobs:
 ```yaml
 jobs:
   execute:
-    uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@master
     with:
       commands: |
         cd /opt/api

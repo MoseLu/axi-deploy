@@ -3,6 +3,7 @@ name: SSH Deploy
 on:
   workflow_call:
     inputs:
+      # 部署参数
       source_path:
         description: '本地文件路径'
         required: false
@@ -12,7 +13,7 @@ on:
         description: '远程目标路径'
         required: false
         type: string
-        default: '/var/www/app'
+        default: '/www/wwwroot'
       commands:
         description: '部署后执行的命令'
         required: false

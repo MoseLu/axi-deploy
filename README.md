@@ -27,32 +27,62 @@ on:
 
 jobs:
   deploy:
-    uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@master
     with:
+      # 部署配置
       source_path: './dist'
-      target_path: '/var/www/your-app'
+      target_path: '/www/wwwroot/your-app'
       commands: |
-        cd /var/www/your-app
+        cd /www/wwwroot/your-app
         npm install --production
         pm2 restart your-app
 ```
 
 ### 2. 配置说明
 
-**无需配置任何Secrets！** 所有SSH相关配置都由本仓库统一管理：
+**无需配置任何服务器信息！** 所有SSH配置都由本仓库统一管理：
 
-- `SERVER_HOST` - 服务器IP地址
-- `SERVER_USER` - SSH用户名
-- `SERVER_PORT` - SSH端口
-- `SERVER_KEY` - SSH私钥
+- 服务器IP地址、用户名、端口、私钥等配置都在本仓库的Secrets中
+- 调用方只需要配置部署相关的参数
 
-### 3. 服务器配置
+### 3. 使用说明
 
-确保您的服务器已配置好SSH密钥：
+#### 3.1 直接使用
+
+无需任何配置，直接在其他项目中调用即可：
+
+```yaml
+- uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@master
+  with:
+    source_path: './dist'
+    target_path: '/www/wwwroot/my-app'
+    commands: |
+      cd /www/wwwroot/my-app
+      npm install --production
+      pm2 restart my-app
+```
+
+#### 3.2 测试连接
+
+在您的项目中测试SSH连接：
+
+```yaml
+- uses: MoseLu/axi-deploy/.github/workflows/test-connection.yml@master
+```
+
+#### 3.3 故障诊断
+
+如果SSH连接失败，请联系仓库管理员检查服务器配置。
+
+#### 3.4 常见问题
+
+如果SSH连接失败，请检查：
 
 ```bash
-# 在服务器上添加本仓库的公钥到authorized_keys
-# 请联系仓库管理员获取公钥信息
+# 常见问题解决：
+# 1. 启动SSH服务: systemctl start sshd
+# 2. 配置防火墙: firewall-cmd --permanent --add-service=ssh && firewall-cmd --reload
+# 3. 检查云服务器安全组设置
 ```
 
 ## 工作流参数
@@ -62,7 +92,7 @@ jobs:
 | 参数名 | 必需 | 描述 | 默认值 |
 |--------|------|------|--------|
 | `source_path` | ❌ | 本地文件路径 | `./dist` |
-| `target_path` | ❌ | 远程目标路径 | `/var/www/app` |
+| `target_path` | ❌ | 远程目标路径 | `/www/wwwroot` |
 | `commands` | ❌ | 部署后执行的命令 | - |
 | `exclude_files` | ❌ | 排除的文件/目录 | - |
 | `timeout` | ❌ | SSH连接超时时间(秒) | `300` |
@@ -79,12 +109,12 @@ jobs:
 ### 前端项目部署
 
 ```yaml
-- uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
+- uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@master
   with:
     source_path: './dist'
-    target_path: '/var/www/my-app'
+    target_path: '/www/wwwroot/my-app'
     commands: |
-      cd /var/www/my-app
+      cd /www/wwwroot/my-app
       chmod -R 755 .
       sudo systemctl reload nginx
 ```
@@ -92,7 +122,7 @@ jobs:
 ### 后端项目部署
 
 ```yaml
-- uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
+- uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@master
   with:
     source_path: './build'
     target_path: '/opt/my-api'
@@ -106,7 +136,7 @@ jobs:
 ### 仅执行命令
 
 ```yaml
-- uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@main
+- uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@master
   with:
     commands: |
       cd /opt/my-api
@@ -122,6 +152,7 @@ jobs:
 3. **网络安全**: 建议使用VPN或防火墙限制SSH访问
 4. **日志监控**: 定期检查部署日志，监控异常活动
 5. **密钥轮换**: 定期更新SSH密钥
+6. **访问控制**: 只有授权项目可以调用此仓库的工作流
 
 ## 故障排除
 
@@ -142,16 +173,20 @@ jobs:
    - 确认命令路径正确
    - 查看服务器日志
 
+4. **权限问题**
+   - 确认您的项目有权限调用此仓库的工作流
+   - 联系仓库管理员获取访问权限
+
 ### 调试模式
 
 在调用工作流时添加调试信息：
 
 ```yaml
-- uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
+- uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@master
   with:
     commands: |
       set -x  # 启用调试模式
-      cd /var/www/app
+      cd /www/wwwroot/app
       ls -la
       pwd
 ```

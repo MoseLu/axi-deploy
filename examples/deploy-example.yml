@@ -1,7 +1,4 @@
-# 示例部署配置
-# 在您的项目仓库中创建 .github/workflows/deploy.yml
-
-name: Deploy via SSH
+name: Deploy to Production
 
 on:
   push:
@@ -10,23 +7,14 @@ on:
 
 jobs:
   deploy:
-    uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@master
     with:
+      # 部署配置
       source_path: './dist'
-      target_path: '/var/www/your-app'
+      target_path: '/www/wwwroot/my-app'
+      exclude_files: '.git,node_modules,.env'
       commands: |
-        cd /var/www/your-app
+        cd /www/wwwroot/my-app
         npm install --production
-        pm2 restart your-app
-        sudo systemctl reload nginx
-
-# 仅执行命令的示例
-jobs:
-  execute-command:
-    uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@main
-    with:
-      commands: |
-        cd /opt/my-api
-        npm run migrate
-        npm run seed
-        pm2 restart my-api 
+        pm2 restart my-app
+        sudo systemctl reload nginx 

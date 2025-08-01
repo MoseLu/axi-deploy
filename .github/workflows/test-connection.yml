@@ -39,7 +39,7 @@ jobs:
           
           # 测试应用目录权限
           echo "应用目录权限:"
-          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la /var/www/app"
+          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la /www/wwwroot"
           
       - name: 清理SSH密钥
         if: always()
