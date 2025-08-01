@@ -2,20 +2,6 @@ name: Test SSH Connection
 
 on:
   workflow_dispatch:
-    inputs:
-      host:
-        description: '目标服务器IP地址'
-        required: true
-        type: string
-      username:
-        description: 'SSH用户名'
-        required: true
-        type: string
-      port:
-        description: 'SSH端口号'
-        required: false
-        type: string
-        default: '22'
 
 jobs:
   test:
@@ -25,29 +11,33 @@ jobs:
       - name: 设置SSH环境
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          echo "${{ secrets.SERVER_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          echo "${{ secrets.SERVER_HOST }} ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC..." > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
           
       - name: 测试SSH连接
         run: |
-          echo "测试连接到 ${{ github.event.inputs.username }}@${{ github.event.inputs.host }}:${{ github.event.inputs.port }}"
+          echo "测试连接到 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.SERVER_PORT }}"
           
           # 测试基本连接
-          ssh -o ConnectTimeout=10 -p ${{ github.event.inputs.port }} ${{ github.event.inputs.username }}@${{ github.event.inputs.host }} "echo 'SSH连接测试成功'"
+          ssh -o ConnectTimeout=10 -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
           
           # 获取系统信息
           echo "系统信息:"
-          ssh -p ${{ github.event.inputs.port }} ${{ github.event.inputs.username }}@${{ github.event.inputs.host }} "uname -a"
+          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "uname -a"
           
           # 获取磁盘空间
           echo "磁盘空间:"
-          ssh -p ${{ github.event.inputs.port }} ${{ github.event.inputs.username }}@${{ github.event.inputs.host }} "df -h"
+          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "df -h"
           
           # 获取内存信息
           echo "内存信息:"
-          ssh -p ${{ github.event.inputs.port }} ${{ github.event.inputs.username }}@${{ github.event.inputs.host }} "free -h"
+          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "free -h"
+          
+          # 测试应用目录权限
+          echo "应用目录权限:"
+          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la /var/www/app"
           
       - name: 清理SSH密钥
         if: always()
