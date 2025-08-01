@@ -1,0 +1,132 @@
+name: Deploy Any Project
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目标识'
+        required: true
+        type: string
+      lang:
+        description: '项目语言'
+        required: true
+        type: string
+      artifact_id:
+        description: '构建产物ID'
+        required: true
+        type: string
+      deploy_path:
+        description: '服务器部署路径'
+        required: true
+        type: string
+      start_cmd:
+        description: '启动/重启命令'
+        required: true
+        type: string
+      caller_repo:
+        description: '调用方仓库'
+        required: true
+        type: string
+      caller_branch:
+        description: '调用方分支'
+        required: true
+        type: string
+      caller_commit:
+        description: '调用方提交'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 显示部署信息
+        run: |
+          echo "🚀 开始部署项目"
+          echo "项目: ${{ github.event.inputs.project }}"
+          echo "语言: ${{ github.event.inputs.lang }}"
+          echo "调用方: ${{ github.event.inputs.caller_repo }}"
+          echo "分支: ${{ github.event.inputs.caller_branch }}"
+          echo "提交: ${{ github.event.inputs.caller_commit }}"
+          echo "部署路径: ${{ github.event.inputs.deploy_path }}"
+          echo "启动命令: ${{ github.event.inputs.start_cmd }}"
+          echo "部署时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+      
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ github.event.inputs.project }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.inputs.artifact_id }}
+      
+      - name: 设置SSH环境
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # 配置SSH选项
+          cat > ~/.ssh/config << EOF
+          Host ${{ secrets.SERVER_HOST }}
+            HostName ${{ secrets.SERVER_HOST }}
+            Port ${{ secrets.SERVER_PORT }}
+            User ${{ secrets.SERVER_USER }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+          chmod 600 ~/.ssh/config
+      
+      - name: 测试SSH连接
+        run: |
+          echo "🔍 测试SSH连接..."
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo '✅ SSH连接测试成功'"
+      
+      - name: 创建远程目录
+        run: |
+          echo "📁 创建远程目录: ${{ github.event.inputs.deploy_path }}"
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ${{ github.event.inputs.deploy_path }}"
+      
+      - name: 传输文件
+        run: |
+          echo "📤 开始传输文件..."
+          echo "源路径: ./"
+          echo "目标路径: ${{ github.event.inputs.deploy_path }}"
+          
+          rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }}" \
+            "./" \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ github.event.inputs.deploy_path }}/"
+          
+          echo "✅ 文件传输完成"
+      
+      - name: 执行启动命令
+        run: |
+          echo "⚙️ 执行启动命令..."
+          echo "命令: ${{ github.event.inputs.start_cmd }}"
+          
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+          set -e
+          ${{ github.event.inputs.start_cmd }}
+          EOF
+          
+          echo "✅ 启动命令执行完成"
+      
+      - name: 验证部署
+        run: |
+          echo "🔍 验证部署结果..."
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la ${{ github.event.inputs.deploy_path }}"
+      
+      - name: 部署完成
+        run: |
+          echo "🎉 部署完成!"
+          echo "项目: ${{ github.event.inputs.project }}"
+          echo "部署时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "目标路径: ${{ github.event.inputs.deploy_path }}"
+      
+      - name: 清理SSH密钥
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
+          rm -f ~/.ssh/known_hosts
+          echo "🧹 SSH密钥已清理" 
