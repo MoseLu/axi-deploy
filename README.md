@@ -41,11 +41,10 @@ jobs:
 
 **无需配置任何Secrets！** 所有SSH相关配置都由本仓库统一管理：
 
-- `SSH_HOST` - 服务器IP地址
-- `SSH_USERNAME` - SSH用户名
-- `SSH_PORT` - SSH端口
-- `SSH_PRIVATE_KEY` - SSH私钥
-- `SSH_KNOWN_HOSTS` - 服务器公钥指纹
+- `SERVER_HOST` - 服务器IP地址
+- `SERVER_USER` - SSH用户名
+- `SERVER_PORT` - SSH端口
+- `SERVER_KEY` - SSH私钥
 
 ### 3. 服务器配置
 

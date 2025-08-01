@@ -48,18 +48,18 @@ jobs:
       - name: 设置SSH环境
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          echo "${{ secrets.SERVER_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          echo "${{ secrets.SERVER_HOST }} ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC..." > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
           
       - name: 测试SSH连接
         run: |
-          ssh -o ConnectTimeout=10 -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} "echo 'SSH连接测试成功'"
+          ssh -o ConnectTimeout=10 -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
           
       - name: 创建远程目录
         run: |
-          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} "mkdir -p ${{ inputs.target_path }}"
+          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ${{ inputs.target_path }}"
           
       - name: 传输文件
         if: inputs.source_path != ''
@@ -75,14 +75,14 @@ jobs:
           
           # 使用rsync传输文件
           rsync -avz --delete $EXCLUDE_PARAMS \
-            -e "ssh -p ${{ secrets.SSH_PORT }}" \
+            -e "ssh -p ${{ secrets.SERVER_PORT }}" \
             "${{ inputs.source_path }}/" \
-            "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:${{ inputs.target_path }}/"
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ inputs.target_path }}/"
             
       - name: 执行部署命令
         if: inputs.commands != ''
         run: |
-          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} << 'EOF'
+          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           set -e
           ${{ inputs.commands }}
           EOF
@@ -90,7 +90,7 @@ jobs:
       - name: 验证部署
         run: |
           echo "部署验证:"
-          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} "ls -la ${{ inputs.target_path }}"
+          ssh -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "ls -la ${{ inputs.target_path }}"
           
       - name: 设置输出
         id: deploy
