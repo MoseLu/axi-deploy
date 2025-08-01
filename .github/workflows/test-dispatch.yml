@@ -8,6 +8,20 @@ on:
         required: false
         type: string
         default: 'Hello from workflow_dispatch!'
+  workflow_call:
+    inputs:
+      caller_repo:
+        description: '调用方仓库名称'
+        required: false
+        type: string
+      caller_branch:
+        description: '调用方分支名称'
+        required: false
+        type: string
+      caller_commit:
+        description: '调用方提交哈希'
+        required: false
+        type: string
 
 jobs:
   test:
@@ -17,7 +31,10 @@ jobs:
       - name: 显示测试信息
         run: |
           echo "🧪 开始测试 workflow_dispatch"
-          echo "测试消息: ${{ github.event.inputs.test_message }}"
+          echo "测试消息: ${{ github.event.inputs.test_message || '默认测试消息' }}"
+          echo "调用方仓库: ${{ github.event.inputs.caller_repo || 'N/A' }}"
+          echo "调用方分支: ${{ github.event.inputs.caller_branch || 'N/A' }}"
+          echo "调用方提交: ${{ github.event.inputs.caller_commit || 'N/A' }}"
           echo "触发时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "触发者: ${{ github.actor }}"
           
