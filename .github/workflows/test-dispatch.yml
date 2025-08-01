@@ -1,0 +1,79 @@
+name: Test Dispatch Connection
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_message:
+        description: '测试消息'
+        required: false
+        type: string
+        default: 'Hello from workflow_dispatch!'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 显示测试信息
+        run: |
+          echo "🧪 开始测试 workflow_dispatch"
+          echo "测试消息: ${{ github.event.inputs.test_message }}"
+          echo "触发时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "触发者: ${{ github.actor }}"
+          
+      - name: 设置SSH环境
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # 配置SSH选项
+          cat > ~/.ssh/config << EOF
+          Host ${{ secrets.SERVER_HOST }}
+            HostName ${{ secrets.SERVER_HOST }}
+            Port ${{ secrets.SERVER_PORT }}
+            User ${{ secrets.SERVER_USER }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+          chmod 600 ~/.ssh/config
+          
+      - name: 测试SSH连接
+        run: |
+          echo "🔍 测试SSH连接..."
+          echo "服务器: ${{ secrets.SERVER_HOST }}"
+          echo "端口: ${{ secrets.SERVER_PORT }}"
+          echo "用户: ${{ secrets.SERVER_USER }}"
+          
+          # 测试基本连接
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo '✅ SSH连接测试成功'"
+          
+      - name: 测试服务器信息
+        run: |
+          echo "📊 获取服务器信息..."
+          
+          # 获取系统信息
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            echo '=== 系统信息 ==='
+            uname -a
+            echo '=== 磁盘空间 ==='
+            df -h
+            echo '=== 内存使用 ==='
+            free -h
+            echo '=== 当前用户 ==='
+            whoami
+            echo '=== 当前目录 ==='
+            pwd
+          "
+          
+      - name: 测试完成
+        run: |
+          echo "✅ workflow_dispatch 测试完成!"
+          echo "所有测试都通过了，您的配置是正确的。"
+          
+      - name: 清理SSH密钥
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
+          rm -f ~/.ssh/known_hosts
+          echo "🧹 SSH密钥已清理" 

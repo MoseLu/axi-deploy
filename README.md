@@ -2,6 +2,26 @@
 
 这是一个专门用于SSH连接的公共GitHub仓库，其他仓库可以通过GitHub Actions工作流调用此仓库进行远程服务器部署。**本仓库统一管理所有SSH配置，包括服务器信息，其他项目无需配置任何SSH相关参数。**
 
+## 🚀 推荐方案：workflow_dispatch
+
+我们推荐使用 `workflow_dispatch` 方案，这是目前唯一能绕过 GitHub Actions 限制的办法：
+
+| 方案 | 是否能访问密钥 | 是否能复用部署逻辑 | 推荐程度 |
+|------|----------------|-------------------|----------|
+| Reusable Workflow | ❌ 不能 | ✅ 可以 | ❌ 不推荐 |
+| **公共仓库的 workflow_dispatch** | ✅ **可以（访问自己的 Secrets）** | ✅ **可以（集中部署脚本）** | ✅ **强烈推荐** |
+
+### ✅ 正确做法（已验证可行）
+
+1. **公共仓库（如 axi-deploy）**
+   - 存储密钥（SERVER_KEY、SERVER_HOST 等）
+   - 定义部署脚本（deploy.sh）
+   - 定义 workflow_dispatch 工作流（真正执行 SSH）
+
+2. **业务仓库（如 project-a）**
+   - 只负责构建（npm run build）
+   - 触发公共仓库的 workflow_dispatch（无需密钥）
+
 ## 功能特性
 
 - 🔐 安全的SSH连接管理
@@ -39,7 +59,92 @@
 
 ## 使用方法
 
-### 1. 在其他仓库中调用
+### 🎯 推荐方案：workflow_dispatch
+
+#### 1. 在业务仓库中触发部署
+
+在您的项目仓库中创建 `.github/workflows/deploy.yml` 文件：
+
+```yaml
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: 安装依赖
+        run: npm ci
+        
+      - name: 构建项目
+        run: npm run build
+        
+      - name: 触发部署
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: response } = await github.rest.actions.createWorkflowDispatch({
+              owner: 'MoseLu',
+              repo: 'axi-deploy',
+              workflow_id: 'deploy-dispatch.yml',
+              ref: 'main',
+              inputs: {
+                caller_repo: '${{ github.repository }}',
+                caller_branch: '${{ github.ref_name }}',
+                caller_commit: '${{ github.sha }}',
+                source_path: './dist',
+                target_path: '/www/wwwroot/my-app',
+                commands: |
+                  cd /www/wwwroot/my-app
+                  npm install --production
+                  pm2 restart my-app
+                  sudo systemctl reload nginx
+              }
+            });
+            console.log('部署已触发:', response);
+```
+
+#### 2. 简单触发方式（使用 curl）
+
+如果您更喜欢使用 curl 命令：
+
+```yaml
+- name: 触发部署
+  run: |
+    curl -X POST \
+      -H "Accept: application/vnd.github.v3+json" \
+      -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+      https://api.github.com/repos/MoseLu/axi-deploy/actions/workflows/deploy-dispatch.yml/dispatches \
+      -d '{
+        "ref": "main",
+        "inputs": {
+          "caller_repo": "${{ github.repository }}",
+          "caller_branch": "${{ github.ref_name }}",
+          "caller_commit": "${{ github.sha }}",
+          "source_path": "./dist",
+          "target_path": "/www/wwwroot/my-app",
+          "commands": "cd /www/wwwroot/my-app && npm install --production && pm2 restart my-app"
+        }
+      }'
+```
+
+### 🔄 传统方案：Reusable Workflow
+
+#### 1. 在其他仓库中调用
 
 在您的项目仓库中创建 `.github/workflows/deploy.yml` 文件：
 

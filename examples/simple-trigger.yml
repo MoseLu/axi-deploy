@@ -1,0 +1,44 @@
+name: Simple Deploy Trigger
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: 安装依赖
+        run: npm ci
+        
+      - name: 构建项目
+        run: npm run build
+        
+      - name: 触发部署
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/MoseLu/axi-deploy/actions/workflows/deploy-dispatch.yml/dispatches \
+            -d '{
+              "ref": "main",
+              "inputs": {
+                "caller_repo": "${{ github.repository }}",
+                "caller_branch": "${{ github.ref_name }}",
+                "caller_commit": "${{ github.sha }}",
+                "source_path": "./dist",
+                "target_path": "/www/wwwroot/my-app",
+                "commands": "cd /www/wwwroot/my-app && npm install --production && pm2 restart my-app"
+              }
+            }' 
