@@ -1,30 +1,8 @@
 # 快速开始指南
 
-## 🚀 3分钟快速部署
+## 🚀 1分钟快速部署
 
-### 1. 配置GitHub Secrets
-
-在您的项目仓库中配置以下Secrets：
-
-| Secret名称 | 值 |
-|-----------|-----|
-| `SSH_HOST` | 您的服务器IP地址 |
-| `SSH_USERNAME` | `deploy` |
-| `SSH_PORT` | `22` |
-
-**注意**: SSH密钥由本仓库统一管理，您无需配置密钥相关Secrets。
-
-### 2. 配置服务器
-
-确保您的服务器已添加本仓库的SSH公钥：
-
-```bash
-# 联系仓库管理员获取公钥，然后添加到服务器
-echo "本仓库的公钥内容" >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-```
-
-### 3. 创建部署工作流
+### 1. 创建部署工作流
 
 在您的项目仓库中创建 `.github/workflows/deploy.yml`：
 
@@ -40,8 +18,6 @@ jobs:
   deploy:
     uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
     with:
-      host: ${{ secrets.SSH_HOST }}
-      username: ${{ secrets.SSH_USERNAME }}
       source_path: './dist'
       target_path: '/var/www/myapp'
       commands: |
@@ -50,15 +26,24 @@ jobs:
         pm2 restart myapp
 ```
 
-### 4. 测试部署
+### 2. 测试部署
 
 推送代码到main分支，GitHub Actions将自动触发部署。
 
+**就是这么简单！** 无需配置任何Secrets或SSH参数。
+
 ## 📋 常用命令
 
-### 测试SSH连接
-```bash
-ssh deploy@YOUR_SERVER_IP
+### 仅执行命令
+```yaml
+jobs:
+  execute:
+    uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@main
+    with:
+      commands: |
+        cd /opt/api
+        npm run migrate
+        pm2 restart api
 ```
 
 ### 查看部署日志
@@ -78,7 +63,7 @@ sudo systemctl reload nginx
 ## 🔧 故障排除
 
 ### SSH连接失败
-1. 检查服务器IP和端口
+1. 联系仓库管理员检查服务器配置
 2. 确认服务器已添加本仓库的公钥
 3. 验证服务器防火墙设置
 

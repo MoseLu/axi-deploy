@@ -12,9 +12,6 @@ jobs:
   deploy:
     uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
     with:
-      host: ${{ secrets.SSH_HOST }}
-      username: ${{ secrets.SSH_USERNAME }}
-      port: ${{ secrets.SSH_PORT }}
       source_path: './dist'
       target_path: '/var/www/your-app'
       commands: |
@@ -28,8 +25,6 @@ jobs:
   execute-command:
     uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@main
     with:
-      host: ${{ secrets.SSH_HOST }}
-      username: ${{ secrets.SSH_USERNAME }}
       commands: |
         cd /opt/my-api
         npm run migrate

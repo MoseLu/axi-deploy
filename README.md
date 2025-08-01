@@ -1,6 +1,6 @@
 # AXI Deploy - SSH连接公共仓库
 
-这是一个专门用于SSH连接的公共GitHub仓库，其他仓库可以通过GitHub Actions工作流调用此仓库进行远程服务器部署。**本仓库已配置SSH密钥，其他项目无需配置密钥，只需提供服务器信息即可。**
+这是一个专门用于SSH连接的公共GitHub仓库，其他仓库可以通过GitHub Actions工作流调用此仓库进行远程服务器部署。**本仓库统一管理所有SSH配置，包括服务器信息，其他项目无需配置任何SSH相关参数。**
 
 ## 功能特性
 
@@ -9,7 +9,7 @@
 - 📦 支持多种部署场景
 - 🛡️ 集中化的密钥管理
 - 📋 详细的部署日志
-- 🚀 **简化配置** - 其他项目无需配置SSH密钥
+- 🚀 **极简配置** - 其他项目无需配置任何SSH参数
 
 ## 使用方法
 
@@ -29,9 +29,6 @@ jobs:
   deploy:
     uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
     with:
-      host: ${{ secrets.SSH_HOST }}
-      username: ${{ secrets.SSH_USERNAME }}
-      port: ${{ secrets.SSH_PORT }}
       source_path: './dist'
       target_path: '/var/www/your-app'
       commands: |
@@ -40,17 +37,15 @@ jobs:
         pm2 restart your-app
 ```
 
-### 2. 配置Secrets
+### 2. 配置说明
 
-在您的项目仓库中**只需要**配置以下Secrets：
+**无需配置任何Secrets！** 所有SSH相关配置都由本仓库统一管理：
 
-| Secret名称 | 描述 | 示例值 |
-|-----------|------|--------|
-| `SSH_HOST` | 目标服务器IP地址 | `192.168.1.100` |
-| `SSH_USERNAME` | SSH用户名 | `deploy` |
-| `SSH_PORT` | SSH端口号 | `22` |
-
-**注意**: SSH密钥由本仓库统一管理，其他项目无需配置 `SSH_PRIVATE_KEY` 和 `SSH_KNOWN_HOSTS`。
+- `SSH_HOST` - 服务器IP地址
+- `SSH_USERNAME` - SSH用户名
+- `SSH_PORT` - SSH端口
+- `SSH_PRIVATE_KEY` - SSH私钥
+- `SSH_KNOWN_HOSTS` - 服务器公钥指纹
 
 ### 3. 服务器配置
 
@@ -67,9 +62,6 @@ jobs:
 
 | 参数名 | 必需 | 描述 | 默认值 |
 |--------|------|------|--------|
-| `host` | ✅ | 目标服务器IP地址 | - |
-| `username` | ✅ | SSH用户名 | - |
-| `port` | ❌ | SSH端口号 | `22` |
 | `source_path` | ❌ | 本地文件路径 | `./dist` |
 | `target_path` | ❌ | 远程目标路径 | `/var/www/app` |
 | `commands` | ❌ | 部署后执行的命令 | - |
@@ -90,8 +82,6 @@ jobs:
 ```yaml
 - uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
   with:
-    host: ${{ secrets.SSH_HOST }}
-    username: ${{ secrets.SSH_USERNAME }}
     source_path: './dist'
     target_path: '/var/www/my-app'
     commands: |
@@ -105,8 +95,6 @@ jobs:
 ```yaml
 - uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
   with:
-    host: ${{ secrets.SSH_HOST }}
-    username: ${{ secrets.SSH_USERNAME }}
     source_path: './build'
     target_path: '/opt/my-api'
     commands: |
@@ -121,8 +109,6 @@ jobs:
 ```yaml
 - uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@main
   with:
-    host: ${{ secrets.SSH_HOST }}
-    username: ${{ secrets.SSH_USERNAME }}
     commands: |
       cd /opt/my-api
       npm run migrate
@@ -132,7 +118,7 @@ jobs:
 
 ## 安全注意事项
 
-1. **集中化密钥管理**: SSH密钥由本仓库统一管理，确保安全性
+1. **完全集中化管理**: 所有SSH配置由本仓库统一管理
 2. **权限控制**: 使用专门的部署用户，限制其权限
 3. **网络安全**: 建议使用VPN或防火墙限制SSH访问
 4. **日志监控**: 定期检查部署日志，监控异常活动
@@ -143,7 +129,7 @@ jobs:
 ### 常见问题
 
 1. **SSH连接失败**
-   - 检查服务器IP和端口是否正确
+   - 联系仓库管理员检查服务器配置
    - 确认服务器已添加本仓库的公钥
    - 验证服务器防火墙设置
 
@@ -164,8 +150,6 @@ jobs:
 ```yaml
 - uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
   with:
-    host: ${{ secrets.SSH_HOST }}
-    username: ${{ secrets.SSH_USERNAME }}
     commands: |
       set -x  # 启用调试模式
       cd /var/www/app
