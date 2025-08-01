@@ -35,10 +35,6 @@ on:
         description: '调用方提交'
         required: true
         type: string
-      artifact_url:
-        description: '构建产物下载URL'
-        required: false
-        type: string
 
 jobs:
   deploy:
@@ -58,15 +54,6 @@ jobs:
           echo "部署时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
       
       - name: 下载构建产物
-        if: github.event.inputs.artifact_url != ''
-        run: |
-          echo "📥 从URL下载构建产物..."
-          curl -L -o artifact.zip "${{ github.event.inputs.artifact_url }}"
-          unzip artifact.zip -d ./dist/
-          rm artifact.zip
-      
-      - name: 下载构建产物 (GitHub Actions)
-        if: github.event.inputs.artifact_url == ''
         uses: actions/download-artifact@v4
         with:
           name: dist-${{ github.event.inputs.project }}
