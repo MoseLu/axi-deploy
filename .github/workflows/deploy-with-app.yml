@@ -56,15 +56,34 @@ jobs:
           echo "Private Key length: ${#PRIVATE_KEY}"
           echo "Private Key starts with: ${PRIVATE_KEY:0:50}..."
           
-          # 将私钥写入临时文件，确保格式正确
-          cat > /tmp/private_key.pem << 'EOF'
-          $PRIVATE_KEY
-          EOF
+          # 检查私钥是否为空
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "❌ 私钥为空，请检查 APP_PRIVATE_KEY secret 配置"
+            exit 1
+          fi
+          
+          # 检查私钥格式
+          if [[ ! "$PRIVATE_KEY" =~ "-----BEGIN" ]]; then
+            echo "❌ 私钥格式不正确，应该以 -----BEGIN 开头"
+            echo "私钥前100个字符: ${PRIVATE_KEY:0:100}"
+            exit 1
+          fi
+          
+          # 将私钥写入临时文件
+          echo "$PRIVATE_KEY" > /tmp/private_key.pem
           chmod 600 /tmp/private_key.pem
           
           # 验证私钥文件
           echo "Private key file content:"
           head -5 /tmp/private_key.pem
+          
+          # 测试私钥是否有效
+          if ! openssl rsa -in /tmp/private_key.pem -check -noout 2>/dev/null; then
+            echo "❌ 私钥格式无效，请检查私钥内容"
+            exit 1
+          fi
+          
+          echo "✅ 私钥格式验证通过"
           
           # 创建 JWT payload
           NOW=$(date +%s)
