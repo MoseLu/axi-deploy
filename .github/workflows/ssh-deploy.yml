@@ -66,6 +66,9 @@ jobs:
       - name: 测试SSH连接
         run: |
           echo "测试连接到: ${{ secrets.SERVER_HOST }}"
+          echo "端口: ${{ secrets.SERVER_PORT }}"
+          echo "用户: ${{ secrets.SERVER_USER }}"
+          echo "完整命令: ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}"
           ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH连接测试成功'"
           
       - name: 创建远程目录
