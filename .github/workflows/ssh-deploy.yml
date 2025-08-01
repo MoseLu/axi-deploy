@@ -2,15 +2,6 @@ name: SSH Deploy
 
 on:
   workflow_call:
-    secrets:
-      SERVER_HOST:
-        required: true
-      SERVER_PORT:
-        required: true
-      SERVER_USER:
-        required: true
-      SERVER_KEY:
-        required: true
     inputs:
       # 部署参数
       source_path:
