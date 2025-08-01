@@ -1,0 +1,43 @@
+# 示例部署配置
+# 在您的项目仓库中创建 .github/workflows/deploy.yml
+
+name: Deploy via SSH
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    uses: MoseLu/axi-deploy/.github/workflows/ssh-deploy.yml@main
+    with:
+      host: ${{ secrets.SSH_HOST }}
+      username: ${{ secrets.SSH_USERNAME }}
+      port: ${{ secrets.SSH_PORT }}
+      source_path: './dist'
+      target_path: '/var/www/your-app'
+      commands: |
+        cd /var/www/your-app
+        npm install --production
+        pm2 restart your-app
+        sudo systemctl reload nginx
+    secrets:
+      ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+      ssh_known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+
+# 仅执行命令的示例
+jobs:
+  execute-command:
+    uses: MoseLu/axi-deploy/.github/workflows/ssh-command.yml@main
+    with:
+      host: ${{ secrets.SSH_HOST }}
+      username: ${{ secrets.SSH_USERNAME }}
+      commands: |
+        cd /opt/my-api
+        npm run migrate
+        npm run seed
+        pm2 restart my-api
+    secrets:
+      ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+      ssh_known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }} 

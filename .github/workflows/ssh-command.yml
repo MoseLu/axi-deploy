@@ -1,0 +1,87 @@
+name: SSH Command
+
+on:
+  workflow_call:
+    inputs:
+      host:
+        description: '目标服务器IP地址'
+        required: true
+        type: string
+      username:
+        description: 'SSH用户名'
+        required: true
+        type: string
+      port:
+        description: 'SSH端口号'
+        required: false
+        type: string
+        default: '22'
+      commands:
+        description: '要执行的命令'
+        required: true
+        type: string
+      timeout:
+        description: 'SSH连接超时时间(秒)'
+        required: false
+        type: string
+        default: '300'
+    outputs:
+      command_status:
+        description: '命令执行状态'
+        value: ${{ jobs.execute.outputs.status }}
+      command_output:
+        description: '命令输出'
+        value: ${{ jobs.execute.outputs.output }}
+    secrets:
+      ssh_private_key:
+        description: 'SSH私钥'
+        required: true
+      ssh_known_hosts:
+        description: '服务器公钥指纹'
+        required: true
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.execute.outputs.status }}
+      output: ${{ steps.execute.outputs.output }}
+    
+    steps:
+      - name: 设置SSH环境
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ssh_private_key }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "${{ secrets.ssh_known_hosts }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          
+      - name: 测试SSH连接
+        run: |
+          ssh -o ConnectTimeout=10 -p ${{ inputs.port }} ${{ inputs.username }}@${{ inputs.host }} "echo 'SSH连接测试成功'"
+          
+      - name: 执行命令
+        id: execute
+        run: |
+          echo "执行命令: ${{ inputs.commands }}"
+          OUTPUT=$(ssh -p ${{ inputs.port }} ${{ inputs.username }}@${{ inputs.host }} "${{ inputs.commands }}" 2>&1)
+          EXIT_CODE=$?
+          
+          echo "命令输出:"
+          echo "$OUTPUT"
+          
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "output<<EOF" >> $GITHUB_OUTPUT
+          echo "$OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: 清理SSH密钥
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
+          rm -f ~/.ssh/known_hosts 

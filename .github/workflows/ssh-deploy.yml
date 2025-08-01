@@ -1,0 +1,125 @@
+name: SSH Deploy
+
+on:
+  workflow_call:
+    inputs:
+      host:
+        description: '目标服务器IP地址'
+        required: true
+        type: string
+      username:
+        description: 'SSH用户名'
+        required: true
+        type: string
+      port:
+        description: 'SSH端口号'
+        required: false
+        type: string
+        default: '22'
+      source_path:
+        description: '本地文件路径'
+        required: false
+        type: string
+        default: './dist'
+      target_path:
+        description: '远程目标路径'
+        required: false
+        type: string
+        default: '/var/www/app'
+      commands:
+        description: '部署后执行的命令'
+        required: false
+        type: string
+      exclude_files:
+        description: '排除的文件/目录'
+        required: false
+        type: string
+      timeout:
+        description: 'SSH连接超时时间(秒)'
+        required: false
+        type: string
+        default: '300'
+    outputs:
+      deploy_status:
+        description: '部署状态'
+        value: ${{ jobs.deploy.outputs.status }}
+      deploy_time:
+        description: '部署完成时间'
+        value: ${{ jobs.deploy.outputs.time }}
+    secrets:
+      ssh_private_key:
+        description: 'SSH私钥'
+        required: true
+      ssh_known_hosts:
+        description: '服务器公钥指纹'
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.deploy.outputs.status }}
+      time: ${{ steps.deploy.outputs.time }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置SSH环境
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ssh_private_key }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "${{ secrets.ssh_known_hosts }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          
+      - name: 测试SSH连接
+        run: |
+          ssh -o ConnectTimeout=10 -p ${{ inputs.port }} ${{ inputs.username }}@${{ inputs.host }} "echo 'SSH连接测试成功'"
+          
+      - name: 创建远程目录
+        run: |
+          ssh -p ${{ inputs.port }} ${{ inputs.username }}@${{ inputs.host }} "mkdir -p ${{ inputs.target_path }}"
+          
+      - name: 传输文件
+        if: inputs.source_path != ''
+        run: |
+          # 构建rsync排除参数
+          EXCLUDE_PARAMS=""
+          if [ -n "${{ inputs.exclude_files }}" ]; then
+            IFS=',' read -ra EXCLUDE_FILES <<< "${{ inputs.exclude_files }}"
+            for file in "${EXCLUDE_FILES[@]}"; do
+              EXCLUDE_PARAMS="$EXCLUDE_PARAMS --exclude=$file"
+            done
+          fi
+          
+          # 使用rsync传输文件
+          rsync -avz --delete $EXCLUDE_PARAMS \
+            -e "ssh -p ${{ inputs.port }}" \
+            "${{ inputs.source_path }}/" \
+            "${{ inputs.username }}@${{ inputs.host }}:${{ inputs.target_path }}/"
+            
+      - name: 执行部署命令
+        if: inputs.commands != ''
+        run: |
+          ssh -p ${{ inputs.port }} ${{ inputs.username }}@${{ inputs.host }} << 'EOF'
+          set -e
+          ${{ inputs.commands }}
+          EOF
+          
+      - name: 验证部署
+        run: |
+          echo "部署验证:"
+          ssh -p ${{ inputs.port }} ${{ inputs.username }}@${{ inputs.host }} "ls -la ${{ inputs.target_path }}"
+          
+      - name: 设置输出
+        id: deploy
+        run: |
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "time=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          
+      - name: 清理SSH密钥
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
+          rm -f ~/.ssh/known_hosts 
