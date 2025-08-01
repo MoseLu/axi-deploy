@@ -69,16 +69,16 @@ jobs:
             exit 1
           fi
           
-          # 将私钥写入临时文件
-          echo "$PRIVATE_KEY" > /tmp/private_key.pem
-          chmod 600 /tmp/private_key.pem
+          # 将私钥写入临时文件 - 使用与测试工作流相同的文件名
+          echo "$PRIVATE_KEY" > /tmp/jwt_key.pem
+          chmod 600 /tmp/jwt_key.pem
           
           # 验证私钥文件
           echo "Private key file content:"
-          head -5 /tmp/private_key.pem
+          head -5 /tmp/jwt_key.pem
           
           # 测试私钥是否有效
-          if ! openssl rsa -in /tmp/private_key.pem -check -noout 2>/dev/null; then
+          if ! openssl rsa -in /tmp/jwt_key.pem -check -noout 2>/dev/null; then
             echo "❌ 私钥格式无效，请检查私钥内容"
             exit 1
           fi
@@ -95,8 +95,14 @@ jobs:
           # 生成 JWT payload
           PAYLOAD=$(echo -n "{\"iat\":$NOW,\"exp\":$EXPIRES,\"iss\":\"$APP_ID\"}" | base64 | tr -d '=' | tr '/+' '_-')
           
-          # 生成 JWT signature
-          SIGNATURE=$(echo -n "$HEADER.$PAYLOAD" | openssl dgst -sha256 -sign /tmp/private_key.pem | base64 | tr -d '=' | tr '/+' '_-')
+          # 生成 JWT signature - 使用与测试工作流相同的方法
+          SIGNATURE=$(echo -n "$HEADER.$PAYLOAD" | openssl dgst -sha256 -sign /tmp/jwt_key.pem | base64 | tr -d '=' | tr '/+' '_-')
+          
+          # 验证签名是否生成成功
+          if [ -z "$SIGNATURE" ]; then
+            echo "❌ JWT 签名生成失败"
+            exit 1
+          fi
           
           # 组合 JWT
           JWT="$HEADER.$PAYLOAD.$SIGNATURE"
@@ -134,7 +140,7 @@ jobs:
           echo "令牌过期时间: $TOKEN_EXPIRES"
           
           # 清理临时文件
-          rm -f /tmp/private_key.pem
+          rm -f /tmp/jwt_key.pem
       
       - name: 显示部署信息
         run: |
