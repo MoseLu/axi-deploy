@@ -33,7 +33,9 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SERVER_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          echo "${{ secrets.SERVER_HOST }} ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC..." > ~/.ssh/known_hosts
+          
+          # 获取服务器公钥指纹
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
           
       - name: 测试SSH连接
