@@ -38,6 +38,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       status: ${{ steps.deploy.outputs.status }}
       time: ${{ steps.deploy.outputs.time }}
