@@ -52,9 +52,19 @@ jobs:
           APP_ID="${{ secrets.APP_ID }}"
           PRIVATE_KEY="${{ secrets.APP_PRIVATE_KEY }}"
           
-          # 将私钥写入临时文件
-          echo "$PRIVATE_KEY" > /tmp/private_key.pem
+          echo "App ID: $APP_ID"
+          echo "Private Key length: ${#PRIVATE_KEY}"
+          echo "Private Key starts with: ${PRIVATE_KEY:0:50}..."
+          
+          # 将私钥写入临时文件，确保格式正确
+          cat > /tmp/private_key.pem << 'EOF'
+          $PRIVATE_KEY
+          EOF
           chmod 600 /tmp/private_key.pem
+          
+          # 验证私钥文件
+          echo "Private key file content:"
+          head -5 /tmp/private_key.pem
           
           # 创建 JWT payload
           NOW=$(date +%s)
@@ -75,9 +85,12 @@ jobs:
           echo "JWT Header: $HEADER"
           echo "JWT Payload: $PAYLOAD"
           echo "JWT Signature: $SIGNATURE"
+          echo "Full JWT: $JWT"
           
           # 获取 Installation Token
           INSTALLATION_ID="${{ secrets.APP_INSTALLATION_ID }}"
+          echo "Installation ID: $INSTALLATION_ID"
+          
           TOKEN_RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer $JWT" \
             -H "Accept: application/vnd.github.v3+json" \
