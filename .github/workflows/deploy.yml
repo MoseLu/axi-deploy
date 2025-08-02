@@ -1,160 +1,193 @@
-name: Deploy Any Project
+name: Deploy to Server
 
 on:
   workflow_dispatch:
     inputs:
       project:
-        description: '项目标识'
+        description: '项目名称'
         required: true
         type: string
       lang:
-        description: '项目语言 (go|node|python|rust|java|static)'
+        description: '项目语言'
         required: true
         type: string
+        default: 'static'
       artifact_id:
         description: '构建产物ID'
         required: true
         type: string
       deploy_path:
-        description: '服务器部署路径'
+        description: '部署路径'
         required: true
         type: string
       start_cmd:
-        description: '启动/重启命令'
-        required: true
+        description: '启动命令'
+        required: false
         type: string
+        default: ''
       caller_repo:
-        description: '调用方仓库'
+        description: '调用者仓库'
         required: true
         type: string
       caller_branch:
-        description: '调用方分支'
+        description: '调用者分支'
         required: true
         type: string
       caller_commit:
-        description: '调用方提交'
+        description: '调用者提交'
         required: true
         type: string
       server_host:
-        description: '服务器主机名或IP地址'
+        description: '服务器主机'
         required: true
         type: string
       server_port:
-        description: 'SSH端口号'
+        description: '服务器端口'
         required: true
         type: string
       server_user:
-        description: 'SSH用户名'
+        description: '服务器用户'
         required: true
         type: string
       server_key:
-        description: 'SSH私钥内容'
+        description: '服务器密钥'
         required: true
         type: string
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-    
     steps:
-      - name: 显示部署信息
-        run: |
-          echo "🚀 开始部署项目"
-          echo "项目: ${{ github.event.inputs.project }}"
-          echo "语言: ${{ github.event.inputs.lang }}"
-          echo "调用方: ${{ github.event.inputs.caller_repo }}"
-          echo "分支: ${{ github.event.inputs.caller_branch }}"
-          echo "提交: ${{ github.event.inputs.caller_commit }}"
-          echo "部署路径: ${{ github.event.inputs.deploy_path }}"
-          echo "启动命令: ${{ github.event.inputs.start_cmd }}"
-          echo "部署时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-      
       - name: 下载构建产物
-        uses: actions/download-artifact@v4
+        uses: actions/github-script@v7
         with:
-          name: dist-${{ github.event.inputs.project }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.inputs.artifact_id }}
-      
-      - name: 设置SSH环境
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ github.event.inputs.server_key }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          script: |
+            // 解析调用者仓库信息
+            const [owner, repo] = '${{ github.event.inputs.caller_repo }}'.split('/');
+            
+            // 获取调用者仓库的最新workflow run
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: owner,
+              repo: repo,
+              branch: '${{ github.event.inputs.caller_branch }}',
+              per_page: 1
+            });
+            
+            if (runs.workflow_runs.length === 0) {
+              throw new Error('未找到调用者仓库的workflow run');
+            }
+            
+            const runId = runs.workflow_runs[0].id;
+            console.log(`找到调用者仓库的workflow run: ${runId}`);
+            
+            // 获取构建产物
+            const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: owner,
+              repo: repo,
+              run_id: runId
+            });
+            
+            const artifact = artifacts.artifacts.find(a => a.name === 'dist-${{ github.event.inputs.project }}');
+            if (!artifact) {
+              throw new Error(`未找到构建产物: dist-${{ github.event.inputs.project }}`);
+            }
+            
+            console.log(`找到构建产物: ${artifact.name}, ID: ${artifact.id}`);
+            
+            // 下载构建产物
+            const { data: download } = await github.rest.actions.downloadArtifact({
+              owner: owner,
+              repo: repo,
+              artifact_id: artifact.id,
+              archive_format: 'zip'
+            });
+            
+            // 下载文件
+            const response = await fetch(download.url);
+            const buffer = await response.arrayBuffer();
+            
+            // 解压文件
+            const JSZip = require('jszip');
+            const zip = new JSZip();
+            await zip.loadAsync(buffer);
+            
+            // 创建dist目录
+            const fs = require('fs');
+            const path = require('path');
+            fs.mkdirSync('./dist', { recursive: true });
+            
+            // 解压所有文件到dist目录
+            for (const [filename, file] of Object.entries(zip.files)) {
+              if (!file.dir) {
+                const filePath = path.join('./dist', filename);
+                const dir = path.dirname(filePath);
+                fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(filePath, await file.async('nodebuffer'));
+              }
+            }
+            
+            console.log('构建产物下载并解压完成');
+            
+      - name: 部署到服务器
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ github.event.inputs.server_host }}
+          port: ${{ github.event.inputs.server_port }}
+          username: ${{ github.event.inputs.server_user }}
+          key: ${{ github.event.inputs.server_key }}
+          script: |
+            # 创建部署目录
+            mkdir -p ${{ github.event.inputs.deploy_path }}
+            
+            # 停止现有服务（如果有）
+            echo "停止现有服务..."
+            
+            # 清理旧文件
+            rm -rf ${{ github.event.inputs.deploy_path }}/*
+            
+            # 部署新文件
+            echo "部署新文件到 ${{ github.event.inputs.deploy_path }}..."
+            
+            # 显示部署信息
+            echo "项目: ${{ github.event.inputs.project }}"
+            echo "语言: ${{ github.event.inputs.lang }}"
+            echo "调用者: ${{ github.event.inputs.caller_repo }}"
+            echo "分支: ${{ github.event.inputs.caller_branch }}"
+            echo "提交: ${{ github.event.inputs.caller_commit }}"
+            
+      - name: 上传部署文件
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ github.event.inputs.server_host }}
+          port: ${{ github.event.inputs.server_port }}
+          username: ${{ github.event.inputs.server_user }}
+          key: ${{ github.event.inputs.server_key }}
+          source: "./dist/*"
+          target: "${{ github.event.inputs.deploy_path }}/"
+          strip_components: 0
           
-          # 配置SSH选项
-          cat > ~/.ssh/config << EOF
-          Host ${{ github.event.inputs.server_host }}
-            HostName ${{ github.event.inputs.server_host }}
-            Port ${{ github.event.inputs.server_port }}
-            User ${{ github.event.inputs.server_user }}
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-          EOF
-          chmod 600 ~/.ssh/config
-      
-      - name: 测试SSH连接
-        run: |
-          echo "🔍 测试SSH连接..."
-          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${{ github.event.inputs.server_port }} ${{ github.event.inputs.server_user }}@${{ github.event.inputs.server_host }} "echo '✅ SSH连接测试成功'"
-      
-      - name: 创建远程目录
-        run: |
-          echo "📁 创建远程目录: ${{ github.event.inputs.deploy_path }}"
-          ssh -o StrictHostKeyChecking=no -p ${{ github.event.inputs.server_port }} ${{ github.event.inputs.server_user }}@${{ github.event.inputs.server_host }} "mkdir -p ${{ github.event.inputs.deploy_path }}"
-      
-      - name: 传输文件
-        run: |
-          echo "📤 开始传输文件..."
-          echo "源路径: ./"
-          echo "目标路径: ${{ github.event.inputs.deploy_path }}"
-          
-          rsync -avz --delete \
-            -e "ssh -o StrictHostKeyChecking=no -p ${{ github.event.inputs.server_port }}" \
-            "./" \
-            "${{ github.event.inputs.server_user }}@${{ github.event.inputs.server_host }}:${{ github.event.inputs.deploy_path }}/"
-          
-          echo "✅ 文件传输完成"
-      
       - name: 执行启动命令
-        if: github.event.inputs.lang != 'static'
-        run: |
-          echo "⚙️ 执行启动命令..."
-          echo "命令: ${{ github.event.inputs.start_cmd }}"
-          
-          ssh -o StrictHostKeyChecking=no -p ${{ github.event.inputs.server_port }} ${{ github.event.inputs.server_user }}@${{ github.event.inputs.server_host }} << 'EOF'
-          set -e
-          ${{ github.event.inputs.start_cmd }}
-          EOF
-          
-          echo "✅ 启动命令执行完成"
-      
-      - name: 静态网站部署完成
-        if: github.event.inputs.lang == 'static'
-        run: |
-          echo "📄 静态网站部署完成"
-          echo "无需执行启动命令"
-      
-      - name: 验证部署
-        run: |
-          echo "🔍 验证部署结果..."
-          ssh -o StrictHostKeyChecking=no -p ${{ github.event.inputs.server_port }} ${{ github.event.inputs.server_user }}@${{ github.event.inputs.server_host }} "ls -la ${{ github.event.inputs.deploy_path }}"
-      
+        if: ${{ github.event.inputs.start_cmd != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ github.event.inputs.server_host }}
+          port: ${{ github.event.inputs.server_port }}
+          username: ${{ github.event.inputs.server_user }}
+          key: ${{ github.event.inputs.server_key }}
+          script: |
+            echo "执行启动命令: ${{ github.event.inputs.start_cmd }}"
+            cd ${{ github.event.inputs.deploy_path }}
+            ${{ github.event.inputs.start_cmd }}
+            
       - name: 部署完成
         run: |
-          echo "🎉 部署完成!"
+          echo "✅ 部署完成!"
           echo "项目: ${{ github.event.inputs.project }}"
-          echo "语言: ${{ github.event.inputs.lang }}"
-          echo "部署时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-          echo "目标路径: ${{ github.event.inputs.deploy_path }}"
-      
-      - name: 清理SSH密钥
-        if: always()
-        run: |
-          rm -f ~/.ssh/id_rsa
-          rm -f ~/.ssh/known_hosts
-          echo "🧹 SSH密钥已清理" 
+          echo "部署路径: ${{ github.event.inputs.deploy_path }}"
+          echo "调用者: ${{ github.event.inputs.caller_repo }}@${{ github.event.inputs.caller_branch }}"
+          echo "提交: ${{ github.event.inputs.caller_commit }}" 
