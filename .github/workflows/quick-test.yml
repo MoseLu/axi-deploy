@@ -1,0 +1,72 @@
+name: Quick Deployment Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+        default: 'axi-docs'
+
+jobs:
+  quick-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 快速检查部署状态
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          script: |
+            echo "🚀 快速部署状态检查"
+            echo "项目: ${{ github.event.inputs.project }}"
+            echo "时间: $(date)"
+            echo ""
+            
+            # 检查部署目录
+            deploy_path="/www/wwwroot/${{ github.event.inputs.project }}"
+            if [ -d "$deploy_path" ]; then
+              echo "✅ 部署目录存在: $deploy_path"
+              
+              # 检查文件数量
+              file_count=$(find "$deploy_path" -type f | wc -l)
+              echo "📁 文件数量: $file_count"
+              
+              # 检查最新修改时间
+              latest_file=$(find "$deploy_path" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+              if [ -n "$latest_file" ]; then
+                echo "🕒 最新文件: $latest_file"
+                echo "   修改时间: $(stat -c %y "$latest_file")"
+              fi
+              
+              # 检查关键文件
+              if [ -f "$deploy_path/index.html" ]; then
+                echo "✅ index.html 存在"
+              else
+                echo "❌ index.html 不存在"
+              fi
+              
+            else
+              echo "❌ 部署目录不存在: $deploy_path"
+            fi
+            
+            echo ""
+            echo "✅ 快速检查完成"
+
+      - name: 测试网站响应
+        run: |
+          echo "🌐 测试网站响应..."
+          test_url="https://docs.axiom.top"
+          
+          # 测试HTTP响应
+          response=$(curl -s -o /dev/null -w "%{http_code}" "$test_url" 2>/dev/null || echo "000")
+          echo "HTTP响应码: $response"
+          
+          if [ "$response" = "200" ]; then
+            echo "✅ 网站正常响应"
+          else
+            echo "❌ 网站响应异常"
+          fi 

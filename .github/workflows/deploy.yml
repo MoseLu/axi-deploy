@@ -1,0 +1,45 @@
+name: Deploy Center
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+      deploy_path:
+        description: '部署路径'
+        required: true
+        type: string
+      run_id:
+        description: '构建运行ID'
+        required: true
+        type: string
+      source_repo:
+        description: '源仓库'
+        required: true
+        type: string
+      start_cmd:
+        description: '启动命令（可选）'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 部署项目
+        uses: ./.github/workflows/external-deploy.yml
+        with:
+          project: ${{ github.event.inputs.project }}
+          deploy_path: ${{ github.event.inputs.deploy_path }}
+          start_cmd: ${{ github.event.inputs.start_cmd }}
+          run_id: ${{ github.event.inputs.run_id }}
+          source_repo: ${{ github.event.inputs.source_repo }}
+        secrets:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_KEY: ${{ secrets.SERVER_KEY }}
+          DEPLOY_CENTER_PAT: ${{ secrets.DEPLOY_CENTER_PAT }} 

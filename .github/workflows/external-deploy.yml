@@ -8,6 +8,7 @@ on:
       start_cmd:    { required: false, type: string, default: '' }
       run_id:       { required: true, type: string }
       source_repo:  { required: true, type: string }
+      test_url:     { required: false, type: string, default: '' }
     
     secrets:
       SERVER_HOST:
@@ -60,5 +61,93 @@ jobs:
             cd ${{ inputs.deploy_path }}
             ${{ inputs.start_cmd }}
 
-      # 4. 打印结果
+      # 4. 部署状态检查
+      - name: Check deployment status
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.SERVER_HOST }}
+          port:     ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key:      ${{ secrets.SERVER_KEY }}
+          script: |
+            echo "🔍 检查部署状态..."
+            echo "项目: ${{ inputs.project }}"
+            echo "部署路径: ${{ inputs.deploy_path }}"
+            echo "检查时间: $(date)"
+            echo ""
+            
+            # 检查目录是否存在
+            if [ -d "${{ inputs.deploy_path }}" ]; then
+              echo "✅ 部署目录存在"
+              echo "📁 目录内容:"
+              ls -la "${{ inputs.deploy_path }}"
+              echo ""
+              
+              # 检查关键文件
+              echo "🔑 关键文件检查:"
+              if [ -f "${{ inputs.deploy_path }}/index.html" ]; then
+                echo "✅ index.html 存在"
+                echo "   大小: $(du -h "${{ inputs.deploy_path }}/index.html" | cut -f1)"
+                echo "   修改时间: $(stat -c %y "${{ inputs.deploy_path }}/index.html")"
+              else
+                echo "❌ index.html 不存在"
+              fi
+              
+              if [ -d "${{ inputs.deploy_path }}/assets" ]; then
+                echo "✅ assets 目录存在"
+                echo "   文件数量: $(find "${{ inputs.deploy_path }}/assets" -type f | wc -l)"
+              else
+                echo "❌ assets 目录不存在"
+              fi
+              
+              echo ""
+              
+              # 检查 Nginx 配置
+              echo "🌐 Nginx 配置检查:"
+              if command -v nginx &> /dev/null; then
+                echo "✅ Nginx 已安装"
+                nginx -t 2>&1 | head -5
+              else
+                echo "❌ Nginx 未安装"
+              fi
+              
+              echo ""
+              
+              # 检查端口监听
+              echo "🔌 端口监听检查:"
+              netstat -tlnp | grep :80 || echo "❌ 80端口未监听"
+              
+            else
+              echo "❌ 部署目录不存在: ${{ inputs.deploy_path }}"
+            fi
+
+      # 5. 网站可访问性测试
+      - name: Test website accessibility
+        if: ${{ inputs.test_url != '' }}
+        run: |
+          echo "🌐 测试网站可访问性..."
+          echo "测试URL: ${{ inputs.test_url }}"
+          
+          # 等待一下让部署生效
+          sleep 5
+          
+          # 使用curl测试网站响应
+          response=$(curl -s -o /dev/null -w "%{http_code}" "${{ inputs.test_url }}" || echo "000")
+          
+          if [ "$response" = "200" ]; then
+            echo "✅ 网站可正常访问 (HTTP $response)"
+          else
+            echo "❌ 网站无法访问 (HTTP $response)"
+            echo "可能的原因:"
+            echo "1. 域名解析问题"
+            echo "2. 服务器防火墙设置"
+            echo "3. Nginx配置问题"
+            echo "4. SSL证书问题"
+          fi
+          
+          # 获取网站标题
+          title=$(curl -s "${{ inputs.test_url }}" | grep -o '<title>[^<]*</title>' | sed 's/<title>\(.*\)<\/title>/\1/' || echo "无法获取标题")
+          echo "网站标题: $title"
+
+      # 6. 打印部署完成信息
       - run: echo "✅ ${{ inputs.project }} 部署完成"
