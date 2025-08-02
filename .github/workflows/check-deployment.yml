@@ -1,0 +1,79 @@
+name: Check Deployment Status
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+      deploy_path:
+        description: '部署路径'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查部署状态
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          script: |
+            echo "🔍 检查部署状态..."
+            echo "项目: ${{ github.event.inputs.project }}"
+            echo "部署路径: ${{ github.event.inputs.deploy_path }}"
+            echo "检查时间: $(date)"
+            echo ""
+            
+            # 检查目录是否存在
+            if [ -d "${{ github.event.inputs.deploy_path }}" ]; then
+              echo "✅ 部署目录存在"
+              echo "📁 目录内容:"
+              ls -la "${{ github.event.inputs.deploy_path }}"
+              echo ""
+              
+              # 检查关键文件
+              echo "🔑 关键文件检查:"
+              if [ -f "${{ github.event.inputs.deploy_path }}/index.html" ]; then
+                echo "✅ index.html 存在"
+                echo "   大小: $(du -h "${{ github.event.inputs.deploy_path }}/index.html" | cut -f1)"
+                echo "   修改时间: $(stat -c %y "${{ github.event.inputs.deploy_path }}/index.html")"
+              else
+                echo "❌ index.html 不存在"
+              fi
+              
+              if [ -d "${{ github.event.inputs.deploy_path }}/assets" ]; then
+                echo "✅ assets 目录存在"
+                echo "   文件数量: $(find "${{ github.event.inputs.deploy_path }}/assets" -type f | wc -l)"
+              else
+                echo "❌ assets 目录不存在"
+              fi
+              
+              echo ""
+              
+              # 检查 Nginx 配置
+              echo "🌐 Nginx 配置检查:"
+              if command -v nginx &> /dev/null; then
+                echo "✅ Nginx 已安装"
+                nginx -t 2>&1 | head -5
+              else
+                echo "❌ Nginx 未安装"
+              fi
+              
+              echo ""
+              
+              # 检查端口监听
+              echo "🔌 端口监听检查:"
+              netstat -tlnp | grep :80 || echo "❌ 80端口未监听"
+              
+            else
+              echo "❌ 部署目录不存在: ${{ github.event.inputs.deploy_path }}"
+            fi 
