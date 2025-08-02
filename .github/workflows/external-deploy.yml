@@ -81,18 +81,17 @@ jobs:
           # 使用更安全的方法解析server_config
           server_config="${{ github.event.inputs.server_config }}"
           
-          # 查找前三个斜杠的位置
-          first_slash=$(echo "$server_config" | awk -F'/' '{print $1}')
-          second_part=$(echo "$server_config" | cut -d'/' -f2-)
-          second_slash=$(echo "$second_part" | cut -d'/' -f1)
-          third_part=$(echo "$second_part" | cut -d'/' -f2-)
-          third_slash=$(echo "$third_part" | cut -d'/' -f1)
-          key_part=$(echo "$third_part" | cut -d'/' -f2-)
+          # 使用Python来正确解析包含多行私钥的配置
+          python3 -c "import sys; server_config = '''$server_config'''; parts = server_config.split('/', 3); print('server_host=' + parts[0] if len(parts) >= 4 else 'Error'); print('server_port=' + parts[1] if len(parts) >= 4 else 'Error'); print('server_user=' + parts[2] if len(parts) >= 4 else 'Error'); print('server_key_length=' + str(len(parts[3])) if len(parts) >= 4 else 'Error')" > server_config_parsed.txt
           
-          server_host="$first_slash"
-          server_port="$second_slash"
-          server_user="$third_slash"
-          server_key="$key_part"
+          # 读取解析结果
+          server_host=$(grep '^server_host=' server_config_parsed.txt | cut -d'=' -f2)
+          server_port=$(grep '^server_port=' server_config_parsed.txt | cut -d'=' -f2)
+          server_user=$(grep '^server_user=' server_config_parsed.txt | cut -d'=' -f2)
+          server_key_length=$(grep '^server_key_length=' server_config_parsed.txt | cut -d'=' -f2)
+          
+          # 提取完整的私钥内容
+          server_key=$(python3 -c "server_config = '''$server_config'''; parts = server_config.split('/', 3); print(parts[3] if len(parts) >= 4 else '')")
           
           echo "解析结果:"
           echo "  server_host: '$server_host'"
