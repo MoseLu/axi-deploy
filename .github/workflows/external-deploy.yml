@@ -80,13 +80,24 @@ jobs:
           
           # 检查server_config是否包含密钥
           server_config="${{ github.event.inputs.server_config }}"
-          if [[ "$server_config" == *"/"* ]]; then
-            # 如果有分隔符，尝试解析
+          
+          # 计算斜杠数量
+          slash_count=$(echo "$server_config" | tr -cd '/' | wc -c)
+          echo "斜杠数量: $slash_count"
+          
+          if [ "$slash_count" -eq 3 ]; then
+            # 如果有3个斜杠，说明格式是 host/port/user/key
             IFS='/' read -r server_host server_port server_user server_key <<< "$server_config"
+          elif [ "$slash_count" -eq 2 ]; then
+            # 如果只有2个斜杠，说明缺少密钥，使用环境变量
+            IFS='/' read -r server_host server_port server_user <<< "$server_config"
+            server_key="${{ secrets.SERVER_KEY }}"
+            echo "⚠️  从server_config中缺少密钥，尝试使用环境变量SERVER_KEY"
           else
             echo "❌ server_config 格式错误"
             echo "server_config 格式应该是: host/port/user/key"
-            echo "或者使用环境变量: SERVER_HOST, SERVER_PORT, SERVER_USER, SERVER_KEY"
+            echo "或者: host/port/user (密钥将从环境变量获取)"
+            echo "当前值: $server_config"
             exit 1
           fi
           
@@ -97,10 +108,20 @@ jobs:
           echo "  server_key: '${server_key:0:20}...'"
           
           # 验证解析结果
-          if [ -z "$server_host" ] || [ -z "$server_port" ] || [ -z "$server_user" ] || [ -z "$server_key" ]; then
+          if [ -z "$server_host" ] || [ -z "$server_port" ] || [ -z "$server_user" ]; then
             echo "❌ 服务器配置解析失败"
             echo "server_config 格式应该是: host/port/user/key"
             echo "当前值: $server_config"
+            exit 1
+          fi
+          
+          # 检查密钥是否为空
+          if [ -z "$server_key" ]; then
+            echo "❌ 服务器密钥为空"
+            echo "请检查以下配置:"
+            echo "1. axi-docs仓库的SERVER_KEY secret是否已设置"
+            echo "2. axi-deploy仓库的SERVER_KEY secret是否已设置"
+            echo "3. 密钥格式是否正确"
             exit 1
           fi
           
