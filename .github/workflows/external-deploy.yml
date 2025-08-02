@@ -78,34 +78,27 @@ jobs:
           # 解析服务器配置
           echo "原始server_config: ${{ github.event.inputs.server_config }}"
           
-          # 检查server_config是否包含密钥
+          # 使用更安全的方法解析server_config
           server_config="${{ github.event.inputs.server_config }}"
           
-          # 计算斜杠数量
-          slash_count=$(echo "$server_config" | tr -cd '/' | wc -c)
-          echo "斜杠数量: $slash_count"
+          # 查找前三个斜杠的位置
+          first_slash=$(echo "$server_config" | awk -F'/' '{print $1}')
+          second_part=$(echo "$server_config" | cut -d'/' -f2-)
+          second_slash=$(echo "$second_part" | cut -d'/' -f1)
+          third_part=$(echo "$second_part" | cut -d'/' -f2-)
+          third_slash=$(echo "$third_part" | cut -d'/' -f1)
+          key_part=$(echo "$third_part" | cut -d'/' -f2-)
           
-          if [ "$slash_count" -eq 3 ]; then
-            # 如果有3个斜杠，说明格式是 host/port/user/key
-            IFS='/' read -r server_host server_port server_user server_key <<< "$server_config"
-          elif [ "$slash_count" -eq 2 ]; then
-            # 如果只有2个斜杠，说明缺少密钥，使用环境变量
-            IFS='/' read -r server_host server_port server_user <<< "$server_config"
-            server_key="${{ secrets.SERVER_KEY }}"
-            echo "⚠️  从server_config中缺少密钥，尝试使用环境变量SERVER_KEY"
-          else
-            echo "❌ server_config 格式错误"
-            echo "server_config 格式应该是: host/port/user/key"
-            echo "或者: host/port/user (密钥将从环境变量获取)"
-            echo "当前值: $server_config"
-            exit 1
-          fi
+          server_host="$first_slash"
+          server_port="$second_slash"
+          server_user="$third_slash"
+          server_key="$key_part"
           
           echo "解析结果:"
           echo "  server_host: '$server_host'"
           echo "  server_port: '$server_port'"
           echo "  server_user: '$server_user'"
-          echo "  server_key: '${server_key:0:20}...'"
+          echo "  server_key 长度: ${#server_key} 字符"
           
           # 验证解析结果
           if [ -z "$server_host" ] || [ -z "$server_port" ] || [ -z "$server_user" ]; then
