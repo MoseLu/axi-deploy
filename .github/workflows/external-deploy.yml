@@ -38,6 +38,7 @@ permissions:
   contents: read
   actions: read
   id-token: write
+  packages: read
 
 jobs:
   deploy:
@@ -131,9 +132,9 @@ jobs:
       - name: 获取调用者仓库的构建产物
         uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.DEPLOY_CENTER_PAT }}
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
           script: |
             // 解析调用者仓库信息
             const [owner, repo] = '${{ steps.parse.outputs.caller_repo }}'.split('/');
@@ -240,8 +241,8 @@ jobs:
                 if (download && download.url) {
                   console.log(`下载URL: ${download.url}`);
                   
-                  // 使用 curl 下载文件
-                  const curlCmd = `curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "${download.url}" -o artifact.zip`;
+                                     // 使用 curl 下载文件
+                   const curlCmd = `curl -L -H "Authorization: token ${{ secrets.DEPLOY_CENTER_PAT }}" "${download.url}" -o artifact.zip`;
                   console.log('执行curl命令:', curlCmd);
                   
                   await execAsync(curlCmd);
@@ -282,7 +283,7 @@ jobs:
                 // 方法3: 尝试使用 wget 下载
                 console.log('尝试使用 wget...');
                 try {
-                  const wgetCmd = `wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" "${download.url}" -O artifact.zip`;
+                                     const wgetCmd = `wget --header="Authorization: token ${{ secrets.DEPLOY_CENTER_PAT }}" "${download.url}" -O artifact.zip`;
                   console.log('执行wget命令:', wgetCmd);
                   
                   await execAsync(wgetCmd);
