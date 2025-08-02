@@ -236,3 +236,9 @@ axi-deploy/
 MIT License
 
 <!-- 测试部署 - $(date) -->
+
+## 自动化部署
+
+本项目已配置自动化部署工作流，推送代码到main分支时会自动部署到 `https://redamancy.com.cn/docs/`。
+
+<!-- 触发部署测试 -->
