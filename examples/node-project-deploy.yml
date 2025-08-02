@@ -31,7 +31,7 @@ jobs:
         uses: actions/upload-artifact@v4
         id: upload
         with:
-          name: dist-my-node-app
+          name: dist-${{ github.event.repository.name }}
           path: dist/
           retention-days: 1
 
@@ -45,19 +45,23 @@ jobs:
           github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
           script: |
             const { data: response } = await github.rest.actions.createWorkflowDispatch({
-              owner: 'your-org',
+              owner: 'MoseLu',
               repo: 'axi-deploy',
               workflow_id: 'deploy.yml',
-              ref: 'main',
+              ref: 'master',
               inputs: {
-                project: 'my-node-app',
+                project: '${{ github.event.repository.name }}',
                 lang: 'node',
                 artifact_id: '${{ needs.build.outputs.artifact-id }}',
-                deploy_path: '/www/wwwroot/my-node-app',
-                start_cmd: 'cd /www/wwwroot/my-node-app && npm ci --production && pm2 reload ecosystem.config.js',
+                deploy_path: '/www/wwwroot/${{ github.event.repository.name }}',
+                start_cmd: 'cd /www/wwwroot/${{ github.event.repository.name }} && npm ci --production && pm2 reload ecosystem.config.js',
                 caller_repo: '${{ github.repository }}',
                 caller_branch: '${{ github.ref_name }}',
-                caller_commit: '${{ github.sha }}'
+                caller_commit: '${{ github.sha }}',
+                server_host: '${{ secrets.SERVER_HOST }}',
+                server_port: '${{ secrets.SERVER_PORT }}',
+                server_user: '${{ secrets.SERVER_USER }}',
+                server_key: '${{ secrets.SERVER_KEY }}'
               }
             });
             console.log('✅ 部署已触发:', response); 

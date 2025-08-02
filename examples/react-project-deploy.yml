@@ -1,4 +1,4 @@
-name: Build & Deploy Go Project
+name: Build & Deploy React Project
 
 on:
   push:
@@ -15,23 +15,24 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
         
-      - name: 设置 Go
-        uses: actions/setup-go@v5
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
         with:
-          go-version: '1.22'
-          cache: true
+          node-version: '20'
+          cache: 'npm'
           
+      - name: 安装依赖
+        run: npm ci
+        
       - name: 构建项目
-        run: |
-          go mod download
-          go build -o app ./cmd/main.go
-          
+        run: npm run build
+        
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         id: upload
         with:
           name: dist-${{ github.event.repository.name }}
-          path: app
+          path: build/
           retention-days: 1
 
   trigger-deploy:
@@ -50,10 +51,10 @@ jobs:
               ref: 'master',
               inputs: {
                 project: '${{ github.event.repository.name }}',
-                lang: 'go',
+                lang: 'static',
                 artifact_id: '${{ needs.build.outputs.artifact-id }}',
                 deploy_path: '/www/wwwroot/${{ github.event.repository.name }}',
-                start_cmd: 'cd /www/wwwroot/${{ github.event.repository.name }} && chmod +x app && systemctl restart ${{ github.event.repository.name }}',
+                start_cmd: 'echo "静态网站部署完成，无需启动命令"',
                 caller_repo: '${{ github.repository }}',
                 caller_branch: '${{ github.ref_name }}',
                 caller_commit: '${{ github.sha }}',
