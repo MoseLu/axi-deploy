@@ -187,4 +187,50 @@ jobs:
           echo "项目: ${{ github.event.inputs.project }}"
           echo "部署路径: ${{ github.event.inputs.deploy_path }}"
           echo "调用者: ${{ steps.parse.outputs.caller_repo }}@${{ steps.parse.outputs.caller_branch }}"
-          echo "提交: ${{ steps.parse.outputs.caller_commit }}" 
+          echo "提交: ${{ steps.parse.outputs.caller_commit }}"
+          
+      - name: 验证部署结果
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse.outputs.server_host }}
+          port: ${{ steps.parse.outputs.server_port }}
+          username: ${{ steps.parse.outputs.server_user }}
+          key: ${{ steps.parse.outputs.server_key }}
+          script: |
+            echo "🔍 验证部署结果..."
+            echo "部署路径: ${{ github.event.inputs.deploy_path }}"
+            
+            # 检查目录是否存在
+            if [ -d "${{ github.event.inputs.deploy_path }}" ]; then
+              echo "✅ 部署目录存在"
+              
+              # 显示目录内容
+              echo "📁 目录内容:"
+              ls -la "${{ github.event.inputs.deploy_path }}"
+              
+              # 显示文件数量
+              echo "📊 文件统计:"
+              find "${{ github.event.inputs.deploy_path }}" -type f | wc -l
+              
+              # 显示最新修改的文件
+              echo "🕒 最新修改的文件:"
+              find "${{ github.event.inputs.deploy_path }}" -type f -exec ls -la {} \; | head -10
+              
+              # 检查关键文件
+              if [ -f "${{ github.event.inputs.deploy_path }}/index.html" ]; then
+                echo "✅ index.html 存在"
+                echo "文件大小: $(du -h "${{ github.event.inputs.deploy_path }}/index.html" | cut -f1)"
+              else
+                echo "❌ index.html 不存在"
+              fi
+              
+            else
+              echo "❌ 部署目录不存在: ${{ github.event.inputs.deploy_path }}"
+            fi
+            
+            # 显示服务器时间
+            echo "🕐 服务器时间: $(date)"
+            
+            # 显示磁盘使用情况
+            echo "💾 磁盘使用情况:"
+            df -h "${{ github.event.inputs.deploy_path }}" 

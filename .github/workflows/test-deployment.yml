@@ -1,0 +1,97 @@
+name: Test Deployment Status
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+        default: 'axi-docs'
+      deploy_path:
+        description: '部署路径'
+        required: true
+        type: string
+        default: '/www/wwwroot/axi-docs'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查部署状态
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          script: |
+            echo "🔍 检查部署状态..."
+            echo "项目: ${{ github.event.inputs.project }}"
+            echo "部署路径: ${{ github.event.inputs.deploy_path }}"
+            echo "检查时间: $(date)"
+            echo ""
+            
+            # 检查目录是否存在
+            if [ -d "${{ github.event.inputs.deploy_path }}" ]; then
+              echo "✅ 部署目录存在"
+              echo "📁 目录内容:"
+              ls -la "${{ github.event.inputs.deploy_path }}"
+              echo ""
+              
+              # 显示文件统计
+              echo "📊 文件统计:"
+              file_count=$(find "${{ github.event.inputs.deploy_path }}" -type f | wc -l)
+              dir_count=$(find "${{ github.event.inputs.deploy_path }}" -type d | wc -l)
+              echo "文件数量: $file_count"
+              echo "目录数量: $dir_count"
+              echo ""
+              
+              # 显示最新修改的文件
+              echo "🕒 最新修改的文件 (前10个):"
+              find "${{ github.event.inputs.deploy_path }}" -type f -exec ls -la {} \; | sort -k6,7 | tail -10
+              echo ""
+              
+              # 检查关键文件
+              echo "🔑 关键文件检查:"
+              if [ -f "${{ github.event.inputs.deploy_path }}/index.html" ]; then
+                echo "✅ index.html 存在"
+                echo "   大小: $(du -h "${{ github.event.inputs.deploy_path }}/index.html" | cut -f1)"
+                echo "   修改时间: $(stat -c %y "${{ github.event.inputs.deploy_path }}/index.html")"
+              else
+                echo "❌ index.html 不存在"
+              fi
+              
+              if [ -f "${{ github.event.inputs.deploy_path }}/assets" ]; then
+                echo "✅ assets 目录存在"
+              else
+                echo "❌ assets 目录不存在"
+              fi
+              
+              echo ""
+              
+              # 显示磁盘使用情况
+              echo "💾 磁盘使用情况:"
+              df -h "${{ github.event.inputs.deploy_path }}"
+              echo ""
+              
+              # 显示目录大小
+              echo "📏 部署目录大小:"
+              du -sh "${{ github.event.inputs.deploy_path }}"
+              
+            else
+              echo "❌ 部署目录不存在: ${{ github.event.inputs.deploy_path }}"
+              echo ""
+              echo "🔍 检查父目录:"
+              parent_dir=$(dirname "${{ github.event.inputs.deploy_path }}")
+              if [ -d "$parent_dir" ]; then
+                echo "✅ 父目录存在: $parent_dir"
+                echo "📁 父目录内容:"
+                ls -la "$parent_dir"
+              else
+                echo "❌ 父目录也不存在: $parent_dir"
+              fi
+            fi 
