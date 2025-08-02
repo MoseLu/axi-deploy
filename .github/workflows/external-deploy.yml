@@ -30,7 +30,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v2
         with:
           github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
-          repository: ${{ inputs.source_repo }}
+          repo: ${{ inputs.source_repo }}
           run_id: ${{ inputs.run_id }}
           name: dist-${{ inputs.project }}
           path: ./dist
