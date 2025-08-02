@@ -220,47 +220,47 @@ jobs:
               console.log('downloadArtifact API 失败:', error.message);
             }
             
-            // 方法2: 使用actions/download-artifact action
-            console.log('尝试使用 actions/download-artifact...');
-            
-            const { exec } = require('child_process');
-            const { promisify } = require('util');
-            const execAsync = promisify(exec);
-            
-            // 使用 GitHub CLI 下载构建产物
-            const downloadCmd = `gh api repos/${owner}/${repo}/actions/artifacts/${artifact.id}/zip --silent > artifact.zip`;
-            console.log('执行命令:', downloadCmd);
-            
-            try {
-              await execAsync(downloadCmd);
-              
-              // 解压文件
-              const JSZip = require('jszip');
-              const fs = require('fs');
-              const path = require('path');
-              
-              const zipData = fs.readFileSync('artifact.zip');
-              const zip = new JSZip();
-              await zip.loadAsync(zipData);
-              
-              // 创建dist目录
-              fs.mkdirSync('./dist', { recursive: true });
-              
-              // 解压所有文件到dist目录
-              for (const [filename, file] of Object.entries(zip.files)) {
-                if (!file.dir) {
-                  const filePath = path.join('./dist', filename);
-                  const dir = path.dirname(filePath);
-                  fs.mkdirSync(dir, { recursive: true });
-                  fs.writeFileSync(filePath, await file.async('nodebuffer'));
-                }
-              }
-              
-              console.log('构建产物下载并解压完成');
-            } catch (error) {
-              console.log('GitHub CLI 下载失败:', error.message);
-              throw new Error(`无法下载构建产物: ${error.message}`);
-                         }
+                         // 方法2: 使用 GitHub CLI 下载构建产物
+             console.log('尝试使用 GitHub CLI...');
+             
+             const { exec: execCmd } = require('child_process');
+             const { promisify } = require('util');
+             const execAsync = promisify(execCmd);
+             
+             // 使用 GitHub CLI 下载构建产物
+             const downloadCmd = `gh api repos/${owner}/${repo}/actions/artifacts/${artifact.id}/zip --silent > artifact.zip`;
+             console.log('执行命令:', downloadCmd);
+             
+             try {
+               await execAsync(downloadCmd);
+               
+               // 解压文件
+               const JSZip = require('jszip');
+               const fs = require('fs');
+               const path = require('path');
+               
+               const zipData = fs.readFileSync('artifact.zip');
+               const zip = new JSZip();
+               await zip.loadAsync(zipData);
+               
+               // 创建dist目录
+               fs.mkdirSync('./dist', { recursive: true });
+               
+               // 解压所有文件到dist目录
+               for (const [filename, file] of Object.entries(zip.files)) {
+                 if (!file.dir) {
+                   const filePath = path.join('./dist', filename);
+                   const dir = path.dirname(filePath);
+                   fs.mkdirSync(dir, { recursive: true });
+                   fs.writeFileSync(filePath, await file.async('nodebuffer'));
+                 }
+               }
+               
+               console.log('构建产物下载并解压完成');
+             } catch (error) {
+               console.log('GitHub CLI 下载失败:', error.message);
+               throw new Error(`无法下载构建产物: ${error.message}`);
+             }
             
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
