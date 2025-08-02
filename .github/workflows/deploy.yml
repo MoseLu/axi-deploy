@@ -1,0 +1,55 @@
+name: External Deploy Dispatcher
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:        { required: true, type: string }  # 项目名，如 axi-docs
+      lang:           { required: true, type: string }  # 语言类型备用
+      artifact_id:    { required: true, type: string }  # 业务仓库 run_id
+      deploy_path:    { required: true, type: string }  # 服务器部署目录
+      start_cmd:      { required: true, type: string }  # 部署后执行的命令
+      caller_info:    { required: false, type: string }
+      run_id:         { required: false, type: string }
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 下载对应业务仓库的 artifact
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ inputs.project }}
+          github-token: ${{ secrets.DEPLOY_CENTER_PAT  }}  # 必须是 PAT，已存 Secrets
+          run-id: ${{ inputs.artifact_id }}
+          path: ./build
+
+      # 2. 安装 SSH key
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      # 3. 上传到服务器
+      - name: Deploy via rsync
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SERVER_PORT }}" \
+            ./build/ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ inputs.deploy_path }}
+
+      # 4. 远程执行启动/重启命令
+      - name: Execute start command
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+            "${{ inputs.start_cmd }}"
+
+      # 5. 打印信息
+      - name: Deployment summary
+        run: |
+          echo "✅ ${{ inputs.project }} 部署完成"
+          echo "📦 产物来源仓库 run_id: ${{ inputs.artifact_id }}"
+          echo "🗂 部署路径: ${{ inputs.deploy_path }}"

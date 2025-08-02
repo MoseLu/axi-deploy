@@ -3,419 +3,47 @@ name: External Deploy Handler
 on:
   workflow_dispatch:
     inputs:
-      project:
-        description: '项目名称'
-        required: true
-        type: string
-      lang:
-        description: '项目语言'
-        required: true
-        type: string
-        default: 'static'
-      artifact_id:
-        description: '构建产物ID'
-        required: true
-        type: string
-      deploy_path:
-        description: '部署路径'
-        required: true
-        type: string
-      start_cmd:
-        description: '启动命令'
-        required: false
-        type: string
-        default: ''
-      caller_info:
-        description: '调用者信息 (格式: repo/branch/commit)'
-        required: true
-        type: string
-      run_id:
-        description: '构建产物的 workflow run ID'
-        required: true
-        type: string
-      server_config:
-        description: '服务器配置 (格式: host/port/user/key)'
-        required: true
-        type: string
-
-permissions:
-  contents: read
-  actions: read
-  id-token: write
-  packages: read
+      project:      { required: true, type: string }
+      deploy_path:  { required: true, type: string }
+      start_cmd:    { required: false, type: string, default: '' }
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: 解析参数
-        id: parse
-        run: |
-          # 解析调用者信息
-          echo "原始caller_info: ${{ github.event.inputs.caller_info }}"
-          
-          # 使用更精确的分割方法
-          caller_info="${{ github.event.inputs.caller_info }}"
-          IFS='/' read -r owner repo branch commit <<< "$caller_info"
-          
-          # 重新组合caller_repo
-          caller_repo="$owner/$repo"
-          
-          echo "解析结果:"
-          echo "  owner: '$owner'"
-          echo "  repo: '$repo'"
-          echo "  caller_repo: '$caller_repo'"
-          echo "  caller_branch: '$branch'"
-          echo "  caller_commit: '$commit'"
-          
-          # 验证解析结果
-          if [ -z "$owner" ] || [ -z "$repo" ] || [ -z "$branch" ] || [ -z "$commit" ]; then
-            echo "❌ 参数解析失败"
-            echo "caller_info 格式应该是: owner/repo/branch/commit"
-            echo "例如: MoseLu/axi-docs/main/117fb57"
-            exit 1
-          fi
-          
-          echo "caller_repo=$caller_repo" >> $GITHUB_OUTPUT
-          echo "caller_branch=$branch" >> $GITHUB_OUTPUT
-          echo "caller_commit=$commit" >> $GITHUB_OUTPUT
-          
-          # 解析服务器配置
-          echo "原始server_config: ${{ github.event.inputs.server_config }}"
-          
-          # 使用更安全的方法解析server_config
-          server_config="${{ github.event.inputs.server_config }}"
-          
-          # 使用Python来正确解析包含多行私钥的配置
-          python3 -c "import sys; server_config = '''$server_config'''; parts = server_config.split('/', 3); print('server_host=' + parts[0] if len(parts) >= 4 else 'Error'); print('server_port=' + parts[1] if len(parts) >= 4 else 'Error'); print('server_user=' + parts[2] if len(parts) >= 4 else 'Error'); print('server_key_length=' + str(len(parts[3])) if len(parts) >= 4 else 'Error')" > server_config_parsed.txt
-          
-          # 读取解析结果
-          server_host=$(grep '^server_host=' server_config_parsed.txt | cut -d'=' -f2)
-          server_port=$(grep '^server_port=' server_config_parsed.txt | cut -d'=' -f2)
-          server_user=$(grep '^server_user=' server_config_parsed.txt | cut -d'=' -f2)
-          server_key_length=$(grep '^server_key_length=' server_config_parsed.txt | cut -d'=' -f2)
-          
-          # 提取完整的私钥内容
-          server_key=$(python3 -c "server_config = '''$server_config'''; parts = server_config.split('/', 3); print(parts[3] if len(parts) >= 4 else '')")
-          
-          echo "解析结果:"
-          echo "  server_host: '$server_host'"
-          echo "  server_port: '$server_port'"
-          echo "  server_user: '$server_user'"
-          echo "  server_key 长度: ${#server_key} 字符"
-          
-          # 验证解析结果
-          if [ -z "$server_host" ] || [ -z "$server_port" ] || [ -z "$server_user" ]; then
-            echo "❌ 服务器配置解析失败"
-            echo "server_config 格式应该是: host/port/user/key"
-            echo "当前值: $server_config"
-            exit 1
-          fi
-          
-          # 检查密钥是否为空
-          if [ -z "$server_key" ]; then
-            echo "❌ 服务器密钥为空"
-            echo "请检查以下配置:"
-            echo "1. axi-docs仓库的SERVER_KEY secret是否已设置"
-            echo "2. axi-deploy仓库的SERVER_KEY secret是否已设置"
-            echo "3. 密钥格式是否正确"
-            exit 1
-          fi
-          
-          echo "server_host=$server_host" >> $GITHUB_OUTPUT
-          echo "server_port=$server_port" >> $GITHUB_OUTPUT
-          echo "server_user=$server_user" >> $GITHUB_OUTPUT
-          
-          # 将密钥设置为环境变量，避免输出到日志
-          echo "SSH_KEY<<EOF" >> $GITHUB_ENV
-          echo "$server_key" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          
-          echo "✅ 参数解析完成"
-          
-      - name: 获取调用者仓库的构建产物
-        uses: actions/github-script@v7
-        env:
-          GH_TOKEN: ${{ secrets.DEPLOY_CENTER_PAT }}
+      # 1. 下载 artifact（跨仓库必须 PAT）
+      - name: Download artifact
+        uses: actions/download-artifact@v4
         with:
+          name: dist-${{ inputs.project }}
           github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
-          script: |
-            // 解析调用者仓库信息
-            const [owner, repo] = '${{ steps.parse.outputs.caller_repo }}'.split('/');
-            
-            // 使用提供的 run_id
-            const runId = '${{ github.event.inputs.run_id }}';
-            console.log(`使用提供的 workflow run ID: ${runId}`);
-            
-            // 获取构建产物
-            const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: owner,
-              repo: repo,
-              run_id: runId
-            });
-            
-            console.log('所有构建产物:', artifacts.artifacts.map(a => ({ name: a.name, id: a.id, size: a.size_in_bytes })));
-            
-            const artifact = artifacts.artifacts.find(a => a.name === 'dist-${{ github.event.inputs.project }}');
-            if (!artifact) {
-              throw new Error(`未找到构建产物: dist-${{ github.event.inputs.project }}。可用的构建产物: ${artifacts.artifacts.map(a => a.name).join(', ')}`);
-            }
-            
-            console.log(`找到构建产物: ${artifact.name}, ID: ${artifact.id}`);
-            
-            // 下载构建产物 - 使用正确的API调用方式
-            console.log('开始下载构建产物...');
-            
-            // 预先加载所需的模块
-            const fs = require('fs');
-            const path = require('path');
-            const { exec: execCmd } = require('child_process');
-            const { promisify } = require('util');
-            const execAsync = promisify(execCmd);
-            
-            // 安装 jszip 模块
-            console.log('安装 jszip 模块...');
-            await execAsync('npm install jszip');
-            const JSZip = require('jszip');
-            
-            // 方法1: 使用 GitHub CLI 下载构建产物
-            console.log('尝试使用 GitHub CLI 下载...');
-            
-            try {
-              // 使用 GitHub CLI 下载构建产物
-              const downloadCmd = `gh api repos/${owner}/${repo}/actions/artifacts/${artifact.id}/zip --silent > artifact.zip`;
-              console.log('执行命令:', downloadCmd);
-              
-              await execAsync(downloadCmd);
-              
-              // 检查文件大小
-              const stats = fs.statSync('artifact.zip');
-              console.log('下载文件大小:', stats.size, '字节');
-              
-              if (stats.size === 0) {
-                throw new Error('下载的文件为空');
-              }
-              
-              // 解压文件
-              const zipData = fs.readFileSync('artifact.zip');
-              const zip = new JSZip();
-              await zip.loadAsync(zipData);
-              
-              // 创建dist目录
-              fs.mkdirSync('./dist', { recursive: true });
-              
-              // 解压所有文件到dist目录
-              for (const [filename, file] of Object.entries(zip.files)) {
-                if (!file.dir) {
-                  const filePath = path.join('./dist', filename);
-                  const dir = path.dirname(filePath);
-                  fs.mkdirSync(dir, { recursive: true });
-                  fs.writeFileSync(filePath, await file.async('nodebuffer'));
-                }
-              }
-              
-              console.log('构建产物下载并解压完成');
-            } catch (error) {
-              console.log('GitHub CLI 下载失败:', error.message);
-              
-              // 方法2: 尝试使用 curl 下载
-              console.log('尝试使用 curl...');
-              try {
-                // 获取下载URL
-                const { data: download } = await github.rest.actions.downloadArtifact({
-                  owner: owner,
-                  repo: repo,
-                  artifact_id: artifact.id,
-                  archive_format: 'zip'
-                });
-                
-                console.log('下载响应:', JSON.stringify(download, null, 2));
-                
-                if (download && download.url) {
-                  console.log(`下载URL: ${download.url}`);
-                  
-                                     // 使用 curl 下载文件
-                   const curlCmd = `curl -L -H "Authorization: token ${{ secrets.DEPLOY_CENTER_PAT }}" "${download.url}" -o artifact.zip`;
-                  console.log('执行curl命令:', curlCmd);
-                  
-                  await execAsync(curlCmd);
-                  
-                  // 检查文件大小
-                  const stats = fs.statSync('artifact.zip');
-                  console.log('下载文件大小:', stats.size, '字节');
-                  
-                  if (stats.size === 0) {
-                    throw new Error('下载的文件为空');
-                  }
-                  
-                  // 解压文件
-                  const zipData = fs.readFileSync('artifact.zip');
-                  const zip = new JSZip();
-                  await zip.loadAsync(zipData);
-                  
-                  // 创建dist目录
-                  fs.mkdirSync('./dist', { recursive: true });
-                  
-                  // 解压所有文件到dist目录
-                  for (const [filename, file] of Object.entries(zip.files)) {
-                    if (!file.dir) {
-                      const filePath = path.join('./dist', filename);
-                      const dir = path.dirname(filePath);
-                      fs.mkdirSync(dir, { recursive: true });
-                      fs.writeFileSync(filePath, await file.async('nodebuffer'));
-                    }
-                  }
-                  
-                  console.log('构建产物下载并解压完成');
-                } else {
-                  throw new Error('无法获取下载URL');
-                }
-              } catch (curlError) {
-                console.log('curl 下载失败:', curlError.message);
-                
-                // 方法3: 尝试使用 wget 下载
-                console.log('尝试使用 wget...');
-                try {
-                                     const wgetCmd = `wget --header="Authorization: token ${{ secrets.DEPLOY_CENTER_PAT }}" "${download.url}" -O artifact.zip`;
-                  console.log('执行wget命令:', wgetCmd);
-                  
-                  await execAsync(wgetCmd);
-                  
-                  // 检查文件大小
-                  const stats = fs.statSync('artifact.zip');
-                  console.log('下载文件大小:', stats.size, '字节');
-                  
-                  if (stats.size === 0) {
-                    throw new Error('下载的文件为空');
-                  }
-                  
-                  // 解压文件
-                  const zipData = fs.readFileSync('artifact.zip');
-                  const zip = new JSZip();
-                  await zip.loadAsync(zipData);
-                  
-                  // 创建dist目录
-                  fs.mkdirSync('./dist', { recursive: true });
-                  
-                  // 解压所有文件到dist目录
-                  for (const [filename, file] of Object.entries(zip.files)) {
-                    if (!file.dir) {
-                      const filePath = path.join('./dist', filename);
-                      const dir = path.dirname(filePath);
-                      fs.mkdirSync(dir, { recursive: true });
-                      fs.writeFileSync(filePath, await file.async('nodebuffer'));
-                    }
-                  }
-                  
-                  console.log('构建产物下载并解压完成');
-                } catch (wgetError) {
-                  console.log('wget 下载失败:', wgetError.message);
-                  throw new Error(`无法下载构建产物: ${error.message}`);
-                }
-              }
-            }
-            
-      - name: 部署到服务器
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ steps.parse.outputs.server_host }}
-          port: ${{ steps.parse.outputs.server_port }}
-          username: ${{ steps.parse.outputs.server_user }}
-          key: ${{ env.SSH_KEY }}
-          script: |
-            # 创建部署目录
-            mkdir -p ${{ github.event.inputs.deploy_path }}
-            
-            # 停止现有服务（如果有）
-            echo "停止现有服务..."
-            
-            # 清理旧文件
-            rm -rf ${{ github.event.inputs.deploy_path }}/*
-            
-            # 部署新文件
-            echo "部署新文件到 ${{ github.event.inputs.deploy_path }}..."
-            
-            # 显示部署信息
-            echo "项目: ${{ github.event.inputs.project }}"
-            echo "语言: ${{ github.event.inputs.lang }}"
-            echo "调用者: ${{ steps.parse.outputs.caller_repo }}"
-            echo "分支: ${{ steps.parse.outputs.caller_branch }}"
-            echo "提交: ${{ steps.parse.outputs.caller_commit }}"
-            
-      - name: 上传部署文件
+          run-id: ${{ github.run_id }}   # 业务仓库传来的 run_id
+          path: ./dist
+
+      # 2. 上传至服务器
+      - name: Upload via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ steps.parse.outputs.server_host }}
-          port: ${{ steps.parse.outputs.server_port }}
-          username: ${{ steps.parse.outputs.server_user }}
-          key: ${{ env.SSH_KEY }}
-          source: "./dist/*"
-          target: "${{ github.event.inputs.deploy_path }}/"
+          host:     ${{ secrets.SERVER_HOST }}
+          port:     ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key:      ${{ secrets.SERVER_KEY }}
+          source:   "./dist/*"
+          target:   "${{ inputs.deploy_path }}/"
           strip_components: 0
-          
-      - name: 执行启动命令
-        if: ${{ github.event.inputs.start_cmd != '' }}
+
+      # 3. 执行启动命令（可选）
+      - name: Run start command
+        if: ${{ inputs.start_cmd != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ steps.parse.outputs.server_host }}
-          port: ${{ steps.parse.outputs.server_port }}
-          username: ${{ steps.parse.outputs.server_user }}
-          key: ${{ env.SSH_KEY }}
+          host:     ${{ secrets.SERVER_HOST }}
+          port:     ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key:      ${{ secrets.SERVER_KEY }}
           script: |
-            echo "执行启动命令: ${{ github.event.inputs.start_cmd }}"
-            cd ${{ github.event.inputs.deploy_path }}
-            ${{ github.event.inputs.start_cmd }}
-            
-      - name: 部署完成
-        run: |
-          echo "✅ 部署完成!"
-          echo "项目: ${{ github.event.inputs.project }}"
-          echo "部署路径: ${{ github.event.inputs.deploy_path }}"
-          echo "调用者: ${{ steps.parse.outputs.caller_repo }}@${{ steps.parse.outputs.caller_branch }}"
-          echo "提交: ${{ steps.parse.outputs.caller_commit }}"
-          
-      - name: 验证部署结果
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ steps.parse.outputs.server_host }}
-          port: ${{ steps.parse.outputs.server_port }}
-          username: ${{ steps.parse.outputs.server_user }}
-          key: ${{ env.SSH_KEY }}
-          script: |
-            echo "🔍 验证部署结果..."
-            echo "部署路径: ${{ github.event.inputs.deploy_path }}"
-            
-            # 检查目录是否存在
-            if [ -d "${{ github.event.inputs.deploy_path }}" ]; then
-              echo "✅ 部署目录存在"
-              
-              # 显示目录内容
-              echo "📁 目录内容:"
-              ls -la "${{ github.event.inputs.deploy_path }}"
-              
-              # 显示文件数量
-              echo "📊 文件统计:"
-              find "${{ github.event.inputs.deploy_path }}" -type f | wc -l
-              
-              # 显示最新修改的文件
-              echo "🕒 最新修改的文件:"
-              find "${{ github.event.inputs.deploy_path }}" -type f -exec ls -la {} \; | head -10
-              
-              # 检查关键文件
-              if [ -f "${{ github.event.inputs.deploy_path }}/index.html" ]; then
-                echo "✅ index.html 存在"
-                echo "文件大小: $(du -h "${{ github.event.inputs.deploy_path }}/index.html" | cut -f1)"
-              else
-                echo "❌ index.html 不存在"
-              fi
-              
-            else
-              echo "❌ 部署目录不存在: ${{ github.event.inputs.deploy_path }}"
-            fi
-            
-            # 显示服务器时间
-            echo "🕐 服务器时间: $(date)"
-            
-            # 显示磁盘使用情况
-            echo "💾 磁盘使用情况:"
-            df -h "${{ github.event.inputs.deploy_path }}" 
+            cd ${{ inputs.deploy_path }}
+            ${{ inputs.start_cmd }}
+
+      # 4. 打印结果
+      - run: echo "✅ ${{ inputs.project }} 部署完成"
