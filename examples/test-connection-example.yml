@@ -1,8 +1,0 @@
-name: Test SSH Connection
-
-on:
-  workflow_dispatch:
-
-jobs:
-  test:
-    uses: MoseLu/axi-deploy/.github/workflows/test-connection.yml@master 
