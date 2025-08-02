@@ -1,11 +1,25 @@
 name: External Deploy Handler
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       project:      { required: true, type: string }
       deploy_path:  { required: true, type: string }
       start_cmd:    { required: false, type: string, default: '' }
+      run_id:       { required: true, type: string }
+      source_repo:  { required: true, type: string }
+    
+    secrets:
+      SERVER_HOST:
+        required: true
+      SERVER_PORT:
+        required: true
+      SERVER_USER:
+        required: true
+      SERVER_KEY:
+        required: true
+      DEPLOY_CENTER_PAT:
+        required: true
 
 jobs:
   deploy:
@@ -13,11 +27,12 @@ jobs:
     steps:
       # 1. 下载 artifact（跨仓库必须 PAT）
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v2
         with:
+          github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
+          repository: ${{ inputs.source_repo }}
+          run_id: ${{ inputs.run_id }}
           name: dist-${{ inputs.project }}
-          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
-          run-id: ${{ github.run_id }}   # 业务仓库传来的 run_id
           path: ./dist
 
       # 2. 上传至服务器
