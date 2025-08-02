@@ -29,6 +29,10 @@ on:
         description: '调用者信息 (格式: repo/branch/commit)'
         required: true
         type: string
+      run_id:
+        description: '构建产物的 workflow run ID'
+        required: true
+        type: string
       server_config:
         description: '服务器配置 (格式: host/port/user/key)'
         required: true
@@ -139,20 +143,9 @@ jobs:
             // 解析调用者仓库信息
             const [owner, repo] = '${{ steps.parse.outputs.caller_repo }}'.split('/');
             
-            // 获取调用者仓库的最新workflow run
-            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
-              owner: owner,
-              repo: repo,
-              branch: '${{ steps.parse.outputs.caller_branch }}',
-              per_page: 1
-            });
-            
-            if (runs.workflow_runs.length === 0) {
-              throw new Error('未找到调用者仓库的workflow run');
-            }
-            
-            const runId = runs.workflow_runs[0].id;
-            console.log(`找到调用者仓库的workflow run: ${runId}`);
+            // 使用提供的 run_id
+            const runId = '${{ github.event.inputs.run_id }}';
+            console.log(`使用提供的 workflow run ID: ${runId}`);
             
             // 获取构建产物
             const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
