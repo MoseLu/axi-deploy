@@ -44,10 +44,14 @@ jobs:
         with:
           github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
           script: |
+            // 获取当前 workflow run ID
+            const runId = '${{ github.run_id }}';
+            console.log('当前 workflow run ID:', runId);
+            
             const { data: response } = await github.rest.actions.createWorkflowDispatch({
               owner: 'MoseLu',
               repo: 'axi-deploy',
-              workflow_id: 'deploy.yml',
+              workflow_id: 'external-deploy.yml',
               ref: 'master',
               inputs: {
                 project: '${{ github.event.repository.name }}',
@@ -55,13 +59,9 @@ jobs:
                 artifact_id: '${{ needs.build.outputs.artifact-id }}',
                 deploy_path: '/www/wwwroot/${{ github.event.repository.name }}',
                 start_cmd: 'echo "静态网站部署完成，无需启动命令"',
-                caller_repo: '${{ github.repository }}',
-                caller_branch: '${{ github.ref_name }}',
-                caller_commit: '${{ github.sha }}',
-                server_host: '${{ secrets.SERVER_HOST }}',
-                server_port: '${{ secrets.SERVER_PORT }}',
-                server_user: '${{ secrets.SERVER_USER }}',
-                server_key: '${{ secrets.SERVER_KEY }}'
+                caller_info: '${{ github.repository }}/${{ github.ref_name }}/${{ github.sha }}',
+                run_id: runId,
+                server_config: '${{ secrets.SERVER_HOST }}/${{ secrets.SERVER_PORT }}/${{ secrets.SERVER_USER }}/${{ secrets.SERVER_KEY }}'
               }
             });
             console.log('✅ 部署已触发:', response); 
