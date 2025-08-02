@@ -184,64 +184,8 @@ jobs:
             await execAsync('npm install jszip');
             const JSZip = require('jszip');
             
-            // 方法1: 使用 GitHub API 直接下载构建产物
-            console.log('尝试使用 GitHub API 直接下载...');
-            
-            try {
-              // 获取下载URL
-              const { data: download } = await github.rest.actions.downloadArtifact({
-                owner: owner,
-                repo: repo,
-                artifact_id: artifact.id,
-                archive_format: 'zip'
-              });
-              
-              console.log('下载响应:', JSON.stringify(download, null, 2));
-              
-              if (download && download.url) {
-                console.log(`下载URL: ${download.url}`);
-                
-                // 使用 curl 下载文件
-                const curlCmd = `curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "${download.url}" -o artifact.zip`;
-                console.log('执行curl命令:', curlCmd);
-                
-                await execAsync(curlCmd);
-                
-                // 检查文件大小
-                const stats = fs.statSync('artifact.zip');
-                console.log('下载文件大小:', stats.size, '字节');
-                
-                if (stats.size === 0) {
-                  throw new Error('下载的文件为空');
-                }
-                
-                // 解压文件
-                const zipData = fs.readFileSync('artifact.zip');
-                const zip = new JSZip();
-                await zip.loadAsync(zipData);
-                
-                // 创建dist目录
-                fs.mkdirSync('./dist', { recursive: true });
-                
-                // 解压所有文件到dist目录
-                for (const [filename, file] of Object.entries(zip.files)) {
-                  if (!file.dir) {
-                    const filePath = path.join('./dist', filename);
-                    const dir = path.dirname(filePath);
-                    fs.mkdirSync(dir, { recursive: true });
-                    fs.writeFileSync(filePath, await file.async('nodebuffer'));
-                  }
-                }
-                
-                console.log('构建产物下载并解压完成');
-                return;
-              }
-            } catch (error) {
-              console.log('GitHub API 下载失败:', error.message);
-            }
-            
-            // 方法2: 使用 GitHub CLI 下载构建产物
-            console.log('尝试使用 GitHub CLI...');
+            // 方法1: 使用 GitHub CLI 下载构建产物
+            console.log('尝试使用 GitHub CLI 下载...');
             
             try {
               // 使用 GitHub CLI 下载构建产物
@@ -280,44 +224,100 @@ jobs:
             } catch (error) {
               console.log('GitHub CLI 下载失败:', error.message);
               
-              // 方法3: 尝试使用 wget 下载
-              console.log('尝试使用 wget...');
+              // 方法2: 尝试使用 curl 下载
+              console.log('尝试使用 curl...');
               try {
-                const wgetCmd = `wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" "${download.url}" -O artifact.zip`;
-                console.log('执行wget命令:', wgetCmd);
+                // 获取下载URL
+                const { data: download } = await github.rest.actions.downloadArtifact({
+                  owner: owner,
+                  repo: repo,
+                  artifact_id: artifact.id,
+                  archive_format: 'zip'
+                });
                 
-                await execAsync(wgetCmd);
+                console.log('下载响应:', JSON.stringify(download, null, 2));
                 
-                // 检查文件大小
-                const stats = fs.statSync('artifact.zip');
-                console.log('下载文件大小:', stats.size, '字节');
-                
-                if (stats.size === 0) {
-                  throw new Error('下载的文件为空');
-                }
-                
-                // 解压文件
-                const zipData = fs.readFileSync('artifact.zip');
-                const zip = new JSZip();
-                await zip.loadAsync(zipData);
-                
-                // 创建dist目录
-                fs.mkdirSync('./dist', { recursive: true });
-                
-                // 解压所有文件到dist目录
-                for (const [filename, file] of Object.entries(zip.files)) {
-                  if (!file.dir) {
-                    const filePath = path.join('./dist', filename);
-                    const dir = path.dirname(filePath);
-                    fs.mkdirSync(dir, { recursive: true });
-                    fs.writeFileSync(filePath, await file.async('nodebuffer'));
+                if (download && download.url) {
+                  console.log(`下载URL: ${download.url}`);
+                  
+                  // 使用 curl 下载文件
+                  const curlCmd = `curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "${download.url}" -o artifact.zip`;
+                  console.log('执行curl命令:', curlCmd);
+                  
+                  await execAsync(curlCmd);
+                  
+                  // 检查文件大小
+                  const stats = fs.statSync('artifact.zip');
+                  console.log('下载文件大小:', stats.size, '字节');
+                  
+                  if (stats.size === 0) {
+                    throw new Error('下载的文件为空');
                   }
+                  
+                  // 解压文件
+                  const zipData = fs.readFileSync('artifact.zip');
+                  const zip = new JSZip();
+                  await zip.loadAsync(zipData);
+                  
+                  // 创建dist目录
+                  fs.mkdirSync('./dist', { recursive: true });
+                  
+                  // 解压所有文件到dist目录
+                  for (const [filename, file] of Object.entries(zip.files)) {
+                    if (!file.dir) {
+                      const filePath = path.join('./dist', filename);
+                      const dir = path.dirname(filePath);
+                      fs.mkdirSync(dir, { recursive: true });
+                      fs.writeFileSync(filePath, await file.async('nodebuffer'));
+                    }
+                  }
+                  
+                  console.log('构建产物下载并解压完成');
+                } else {
+                  throw new Error('无法获取下载URL');
                 }
+              } catch (curlError) {
+                console.log('curl 下载失败:', curlError.message);
                 
-                console.log('构建产物下载并解压完成');
-              } catch (wgetError) {
-                console.log('wget 下载失败:', wgetError.message);
-                throw new Error(`无法下载构建产物: ${error.message}`);
+                // 方法3: 尝试使用 wget 下载
+                console.log('尝试使用 wget...');
+                try {
+                  const wgetCmd = `wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" "${download.url}" -O artifact.zip`;
+                  console.log('执行wget命令:', wgetCmd);
+                  
+                  await execAsync(wgetCmd);
+                  
+                  // 检查文件大小
+                  const stats = fs.statSync('artifact.zip');
+                  console.log('下载文件大小:', stats.size, '字节');
+                  
+                  if (stats.size === 0) {
+                    throw new Error('下载的文件为空');
+                  }
+                  
+                  // 解压文件
+                  const zipData = fs.readFileSync('artifact.zip');
+                  const zip = new JSZip();
+                  await zip.loadAsync(zipData);
+                  
+                  // 创建dist目录
+                  fs.mkdirSync('./dist', { recursive: true });
+                  
+                  // 解压所有文件到dist目录
+                  for (const [filename, file] of Object.entries(zip.files)) {
+                    if (!file.dir) {
+                      const filePath = path.join('./dist', filename);
+                      const dir = path.dirname(filePath);
+                      fs.mkdirSync(dir, { recursive: true });
+                      fs.writeFileSync(filePath, await file.async('nodebuffer'));
+                    }
+                  }
+                  
+                  console.log('构建产物下载并解压完成');
+                } catch (wgetError) {
+                  console.log('wget 下载失败:', wgetError.message);
+                  throw new Error(`无法下载构建产物: ${error.message}`);
+                }
               }
             }
             
