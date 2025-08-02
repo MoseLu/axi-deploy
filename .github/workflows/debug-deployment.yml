@@ -1,0 +1,77 @@
+name: Debug Deployment Issues
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 调试部署问题
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          script: |
+            echo "🔍 调试部署问题..."
+            echo "检查时间: $(date)"
+            echo ""
+            
+            # 检查目录结构
+            echo "📁 检查 /www/wwwroot 目录:"
+            if [ -d "/www/wwwroot" ]; then
+              echo "✅ /www/wwwroot 目录存在"
+              echo "📁 目录内容:"
+              ls -la /www/wwwroot/
+            else
+              echo "❌ /www/wwwroot 目录不存在"
+              echo "🔍 检查 /www 目录:"
+              if [ -d "/www" ]; then
+                echo "✅ /www 目录存在"
+                ls -la /www/
+              else
+                echo "❌ /www 目录也不存在"
+              fi
+            fi
+            
+            echo ""
+            
+            # 检查用户权限
+            echo "👤 检查用户权限:"
+            echo "当前用户: $(whoami)"
+            echo "用户组: $(groups)"
+            echo ""
+            
+            # 检查磁盘空间
+            echo "💾 检查磁盘空间:"
+            df -h
+            echo ""
+            
+            # 检查 SSH 连接
+            echo "🔌 检查 SSH 连接:"
+            echo "SSH 服务状态:"
+            systemctl status sshd --no-pager -l || echo "无法检查 SSH 状态"
+            echo ""
+            
+            # 检查网络连接
+            echo "🌐 检查网络连接:"
+            ping -c 3 8.8.8.8 || echo "网络连接失败"
+            echo ""
+            
+            # 尝试创建测试目录
+            echo "🧪 尝试创建测试目录:"
+            mkdir -p /www/wwwroot/test-deploy
+            if [ $? -eq 0 ]; then
+              echo "✅ 可以创建目录"
+              echo "测试文件内容:" > /www/wwwroot/test-deploy/test.txt
+              echo "部署测试 - $(date)" >> /www/wwwroot/test-deploy/test.txt
+              echo "✅ 可以写入文件"
+              rm -rf /www/wwwroot/test-deploy
+            else
+              echo "❌ 无法创建目录"
+            fi 
