@@ -25,32 +25,12 @@ on:
         required: false
         type: string
         default: ''
-      caller_repo:
-        description: '调用者仓库'
+      caller_info:
+        description: '调用者信息 (格式: repo/branch/commit)'
         required: true
         type: string
-      caller_branch:
-        description: '调用者分支'
-        required: true
-        type: string
-      caller_commit:
-        description: '调用者提交'
-        required: true
-        type: string
-      server_host:
-        description: '服务器主机'
-        required: true
-        type: string
-      server_port:
-        description: '服务器端口'
-        required: true
-        type: string
-      server_user:
-        description: '服务器用户'
-        required: true
-        type: string
-      server_key:
-        description: '服务器密钥'
+      server_config:
+        description: '服务器配置 (格式: host/port/user/key)'
         required: true
         type: string
 
@@ -63,19 +43,35 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: 解析参数
+        id: parse
+        run: |
+          # 解析调用者信息
+          IFS='/' read -r caller_repo caller_branch caller_commit <<< "${{ github.event.inputs.caller_info }}"
+          echo "caller_repo=$caller_repo" >> $GITHUB_OUTPUT
+          echo "caller_branch=$caller_branch" >> $GITHUB_OUTPUT
+          echo "caller_commit=$caller_commit" >> $GITHUB_OUTPUT
+          
+          # 解析服务器配置
+          IFS='/' read -r server_host server_port server_user server_key <<< "${{ github.event.inputs.server_config }}"
+          echo "server_host=$server_host" >> $GITHUB_OUTPUT
+          echo "server_port=$server_port" >> $GITHUB_OUTPUT
+          echo "server_user=$server_user" >> $GITHUB_OUTPUT
+          echo "server_key=$server_key" >> $GITHUB_OUTPUT
+          
       - name: 获取调用者仓库的构建产物
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             // 解析调用者仓库信息
-            const [owner, repo] = '${{ github.event.inputs.caller_repo }}'.split('/');
+            const [owner, repo] = '${{ steps.parse.outputs.caller_repo }}'.split('/');
             
             // 获取调用者仓库的最新workflow run
             const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
               owner: owner,
               repo: repo,
-              branch: '${{ github.event.inputs.caller_branch }}',
+              branch: '${{ steps.parse.outputs.caller_branch }}',
               per_page: 1
             });
             
@@ -137,10 +133,10 @@ jobs:
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ github.event.inputs.server_host }}
-          port: ${{ github.event.inputs.server_port }}
-          username: ${{ github.event.inputs.server_user }}
-          key: ${{ github.event.inputs.server_key }}
+          host: ${{ steps.parse.outputs.server_host }}
+          port: ${{ steps.parse.outputs.server_port }}
+          username: ${{ steps.parse.outputs.server_user }}
+          key: ${{ steps.parse.outputs.server_key }}
           script: |
             # 创建部署目录
             mkdir -p ${{ github.event.inputs.deploy_path }}
@@ -157,17 +153,17 @@ jobs:
             # 显示部署信息
             echo "项目: ${{ github.event.inputs.project }}"
             echo "语言: ${{ github.event.inputs.lang }}"
-            echo "调用者: ${{ github.event.inputs.caller_repo }}"
-            echo "分支: ${{ github.event.inputs.caller_branch }}"
-            echo "提交: ${{ github.event.inputs.caller_commit }}"
+            echo "调用者: ${{ steps.parse.outputs.caller_repo }}"
+            echo "分支: ${{ steps.parse.outputs.caller_branch }}"
+            echo "提交: ${{ steps.parse.outputs.caller_commit }}"
             
       - name: 上传部署文件
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ github.event.inputs.server_host }}
-          port: ${{ github.event.inputs.server_port }}
-          username: ${{ github.event.inputs.server_user }}
-          key: ${{ github.event.inputs.server_key }}
+          host: ${{ steps.parse.outputs.server_host }}
+          port: ${{ steps.parse.outputs.server_port }}
+          username: ${{ steps.parse.outputs.server_user }}
+          key: ${{ steps.parse.outputs.server_key }}
           source: "./dist/*"
           target: "${{ github.event.inputs.deploy_path }}/"
           strip_components: 0
@@ -176,10 +172,10 @@ jobs:
         if: ${{ github.event.inputs.start_cmd != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ github.event.inputs.server_host }}
-          port: ${{ github.event.inputs.server_port }}
-          username: ${{ github.event.inputs.server_user }}
-          key: ${{ github.event.inputs.server_key }}
+          host: ${{ steps.parse.outputs.server_host }}
+          port: ${{ steps.parse.outputs.server_port }}
+          username: ${{ steps.parse.outputs.server_user }}
+          key: ${{ steps.parse.outputs.server_key }}
           script: |
             echo "执行启动命令: ${{ github.event.inputs.start_cmd }}"
             cd ${{ github.event.inputs.deploy_path }}
@@ -190,5 +186,5 @@ jobs:
           echo "✅ 部署完成!"
           echo "项目: ${{ github.event.inputs.project }}"
           echo "部署路径: ${{ github.event.inputs.deploy_path }}"
-          echo "调用者: ${{ github.event.inputs.caller_repo }}@${{ github.event.inputs.caller_branch }}"
-          echo "提交: ${{ github.event.inputs.caller_commit }}" 
+          echo "调用者: ${{ steps.parse.outputs.caller_repo }}@${{ steps.parse.outputs.caller_branch }}"
+          echo "提交: ${{ steps.parse.outputs.caller_commit }}" 
