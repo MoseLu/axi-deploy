@@ -1,167 +1,52 @@
-name: AXI Deploy Workflow
+name: Build & Trigger Deploy
 
 on:
-  workflow_call:
-    inputs:
-      source-repo:
-        description: '源仓库(格式: owner/repo)，用于获取构建产物'
-        required: true
-        type: string
-      run-id:
-        description: '源仓库中生成构建产物的工作流运行ID'
-        required: true
-        type: number
-      project-type:
-        description: '项目类型 (go, vitepress, py, vue-vite, node)'
-        required: true
-        type: string
-        enum:
-          - go
-          - vitepress
-          - py
-          - vue-vite
-          - node
-      deploy-path:
-        description: '服务器上的部署路径'
-        required: true
-        type: string
-      restart-command:
-        description: '部署后执行的重启命令(如适用)'
-        required: false
-        type: string
-      artifact-name:
-        description: '要下载的构建产物名称'
-        required: false
-        type: string
-        default: 'build-artifacts'
-      backup-before-deploy:
-        description: '部署前是否创建备份'
-        required: false
-        type: boolean
-        default: false
-      backup-retention-days:
-        description: '备份保留天数'
-        required: false
-        type: number
-        default: 7
-    
-    secrets:
-      SERVER_HOST:
-        required: true
-      SERVER_PORT:
-        required: false
-        default: '22'
-      SERVER_KEY:
-        required: true
-      SERVER_USER:
-        required: true
-      DEPLOY_CENTER_PAT:
-        required: true
+  push:
+    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    name: 部署到目标服务器
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 从源仓库下载构建产物
-        uses: dawidd6/action-download-artifact@v2
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v2
         with:
-          github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
-          repository: ${{ inputs.source-repo }}
-          run_id: ${{ inputs.run-id }}
-          name: ${{ inputs.artifact-name }}
-          path: ./artifacts
-        continue-on-error: false
+          version: 10.7.1
 
-      - name: 显示下载的构建产物
-        run: |
-          echo "下载的构建产物内容："
-          ls -R ./artifacts
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
 
-      - name: 验证构建产物是否存在
+      - name: 安装依赖并构建
         run: |
-          if [ -z "$(ls -A ./artifacts)" ]; then
-            echo "错误：未找到任何构建产物"
-            exit 1
-          fi
+          pnpm install
+          pnpm run docs:build
 
-      - name: 准备SSH密钥
-        run: |
-          echo "${{ secrets.SERVER_KEY }}" > id_rsa
-          chmod 600 id_rsa
-          mkdir -p ~/.ssh
-          ssh-keyscan -p ${{ secrets.SERVER_PORT }} -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.event.repository.name }}
+          path: docs/.vitepress/dist/
+          retention-days: 1
 
-      - name: 如启用则创建备份
-        if: inputs.backup-before-deploy == true
-        run: |
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          BACKUP_PATH="${{ inputs.deploy-path }}_backup_$TIMESTAMP"
-          echo "创建备份: $BACKUP_PATH"
-          ssh -i id_rsa -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} " \
-            if [ -d "${{ inputs.deploy-path }}" ]; then \
-              cp -r ${{ inputs.deploy-path }} $BACKUP_PATH; \
-            fi \
-          "
-          # 清理旧备份
-          echo "清理${{ inputs.backup-retention-days }}天前的备份"
-          ssh -i id_rsa -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} " \
-            find $(dirname ${{ inputs.deploy-path }}) -maxdepth 1 -type d -name '$(basename ${{ inputs.deploy-path }})_backup_*' \
-            -mtime +${{ inputs.backup-retention-days }} -exec rm -rf {} + \
-          "
-
-      - name: 根据项目类型部署
-        run: |
-          # 创建部署目录(如不存在)
-          ssh -i id_rsa -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ${{ inputs.deploy-path }}"
-          
-          # 根据项目类型执行部署
-          case ${{ inputs.project-type }} in
-            go)
-              echo "部署Go项目..."
-              # Go项目 - 假设是单个二进制文件
-              scp -i id_rsa -P ${{ secrets.SERVER_PORT }} ./artifacts/* ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ inputs.deploy-path }}/
-              # 确保二进制文件可执行
-              ssh -i id_rsa -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "chmod +x ${{ inputs.deploy-path }}/*"
-              ;;
-            vitepress|vue-vite)
-              echo "部署静态站点..."
-              # 静态站点 - 复制所有文件
-              scp -i id_rsa -P ${{ secrets.SERVER_PORT }} -r ./artifacts/* ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ inputs.deploy-path }}/
-              # 设置web服务器适当的权限
-              ssh -i id_rsa -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "chmod -R 755 ${{ inputs.deploy-path }}"
-              ;;
-            py)
-              echo "部署Python项目..."
-              # Python项目 - 复制所有文件
-              scp -i id_rsa -P ${{ secrets.SERVER_PORT }} -r ./artifacts/* ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ inputs.deploy-path }}/
-              # 如存在requirements.txt则安装依赖
-              ssh -i id_rsa -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} " \
-                if [ -f "${{ inputs.deploy-path }}/requirements.txt" ]; then \
-                  cd ${{ inputs.deploy-path }} && pip install -r requirements.txt; \
-                fi \
-              "
-              ;;
-            node)
-              echo "部署Node.js项目..."
-              # Node项目 - 复制所有文件
-              scp -i id_rsa -P ${{ secrets.SERVER_PORT }} -r ./artifacts/* ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ inputs.deploy-path }}/
-              # 安装生产依赖
-              ssh -i id_rsa -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "cd ${{ inputs.deploy-path }} && npm install --production"
-              ;;
-          esac
-
-      - name: 如提供则执行重启命令
-        if: inputs.restart-command != ''
-        run: |
-          echo "执行重启命令..."
-          ssh -i id_rsa -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "${{ inputs.restart-command }}"
-
-      - name: 清理敏感文件
-        if: always()
-        run: |
-          # 删除SSH密钥
-          rm -f id_rsa
+  deploy:
+    needs: build
+    uses: MoseLu/axi-deploy/.github/workflows/external-deploy.yml@master
+    with:
+      project: ${{ github.event.repository.name }}
+      deploy_path: /www/wwwroot/${{ github.event.repository.name }}
+      start_cmd: "echo \"静态网站部署完成，无需启动命令\""
+      run_id: ${{ github.run_id }}
+      source_repo: ${{ github.repository }}
+    secrets:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_KEY: ${{ secrets.SERVER_KEY }}
+      DEPLOY_CENTER_PAT: ${{ secrets.DEPLOY_CENTER_PAT }}

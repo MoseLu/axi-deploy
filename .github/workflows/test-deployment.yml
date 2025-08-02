@@ -7,12 +7,10 @@ on:
         description: '项目名称'
         required: true
         type: string
-        default: 'axi-docs'
       deploy_path:
         description: '部署路径'
         required: true
         type: string
-        default: '/www/wwwroot/axi-docs'
 
 permissions:
   contents: read
