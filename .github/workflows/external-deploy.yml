@@ -158,9 +158,11 @@ jobs:
               run_id: runId
             });
             
+            console.log('所有构建产物:', artifacts.artifacts.map(a => ({ name: a.name, id: a.id, size: a.size_in_bytes })));
+            
             const artifact = artifacts.artifacts.find(a => a.name === 'dist-${{ github.event.inputs.project }}');
             if (!artifact) {
-              throw new Error(`未找到构建产物: dist-${{ github.event.inputs.project }}`);
+              throw new Error(`未找到构建产物: dist-${{ github.event.inputs.project }}。可用的构建产物: ${artifacts.artifacts.map(a => a.name).join(', ')}`);
             }
             
             console.log(`找到构建产物: ${artifact.name}, ID: ${artifact.id}`);
@@ -173,8 +175,20 @@ jobs:
               archive_format: 'zip'
             });
             
+            console.log('下载响应:', JSON.stringify(download, null, 2));
+            
+            if (!download || !download.url) {
+              throw new Error(`下载URL为空，下载响应: ${JSON.stringify(download)}`);
+            }
+            
+            console.log(`下载URL: ${download.url}`);
+            
             // 下载文件
             const response = await fetch(download.url);
+            if (!response.ok) {
+              throw new Error(`下载失败，状态码: ${response.status}, 状态文本: ${response.statusText}`);
+            }
+            
             const buffer = await response.arrayBuffer();
             
             // 解压文件
