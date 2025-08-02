@@ -47,17 +47,46 @@ jobs:
         id: parse
         run: |
           # 解析调用者信息
+          echo "原始caller_info: ${{ github.event.inputs.caller_info }}"
           IFS='/' read -r caller_repo caller_branch caller_commit <<< "${{ github.event.inputs.caller_info }}"
+          echo "解析结果:"
+          echo "  caller_repo: '$caller_repo'"
+          echo "  caller_branch: '$caller_branch'"
+          echo "  caller_commit: '$caller_commit'"
+          
+          # 验证解析结果
+          if [ -z "$caller_repo" ] || [ -z "$caller_branch" ] || [ -z "$caller_commit" ]; then
+            echo "❌ 参数解析失败"
+            echo "caller_info 格式应该是: owner/repo/branch/commit"
+            exit 1
+          fi
+          
           echo "caller_repo=$caller_repo" >> $GITHUB_OUTPUT
           echo "caller_branch=$caller_branch" >> $GITHUB_OUTPUT
           echo "caller_commit=$caller_commit" >> $GITHUB_OUTPUT
           
           # 解析服务器配置
+          echo "原始server_config: ${{ github.event.inputs.server_config }}"
           IFS='/' read -r server_host server_port server_user server_key <<< "${{ github.event.inputs.server_config }}"
+          echo "解析结果:"
+          echo "  server_host: '$server_host'"
+          echo "  server_port: '$server_port'"
+          echo "  server_user: '$server_user'"
+          echo "  server_key: '${server_key:0:20}...'"
+          
+          # 验证解析结果
+          if [ -z "$server_host" ] || [ -z "$server_port" ] || [ -z "$server_user" ] || [ -z "$server_key" ]; then
+            echo "❌ 服务器配置解析失败"
+            echo "server_config 格式应该是: host/port/user/key"
+            exit 1
+          fi
+          
           echo "server_host=$server_host" >> $GITHUB_OUTPUT
           echo "server_port=$server_port" >> $GITHUB_OUTPUT
           echo "server_user=$server_user" >> $GITHUB_OUTPUT
           echo "server_key=$server_key" >> $GITHUB_OUTPUT
+          
+          echo "✅ 参数解析完成"
           
       - name: 获取调用者仓库的构建产物
         uses: actions/github-script@v7
