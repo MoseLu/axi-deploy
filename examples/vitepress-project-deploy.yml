@@ -47,7 +47,7 @@ jobs:
             const { data: response } = await github.rest.actions.createWorkflowDispatch({
               owner: 'MoseLu',
               repo: 'axi-deploy',
-              workflow_id: 'deploy.yml',
+              workflow_id: 'external-deploy.yml',
               ref: 'master',
               inputs: {
                 project: '${{ github.event.repository.name }}',

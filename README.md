@@ -27,13 +27,17 @@
 
 业务仓库需要配置以下 Secret：
 
-| Secret 名称 | 描述 |
-|-------------|------|
-| `DEPLOY_CENTER_PAT` | GitHub Personal Access Token，用于调用部署中心 |
-| `SERVER_HOST` | 服务器主机名或IP地址 |
-| `SERVER_PORT` | SSH端口号 |
-| `SERVER_USER` | SSH用户名 |
-| `SERVER_KEY` | SSH私钥内容 |
+| Secret 名称 | 描述 | 权限要求 |
+|-------------|------|----------|
+| `DEPLOY_CENTER_PAT` | GitHub Personal Access Token，用于调用部署中心 | `repo`, `workflow` |
+| `SERVER_HOST` | 服务器主机名或IP地址 | - |
+| `SERVER_PORT` | SSH端口号 | - |
+| `SERVER_USER` | SSH用户名 | - |
+| `SERVER_KEY` | SSH私钥内容 | - |
+
+**重要**: `DEPLOY_CENTER_PAT` 需要以下权限：
+- `repo` - 访问私有仓库
+- `workflow` - 触发工作流
 
 ## 使用方法
 
@@ -41,10 +45,10 @@
 
 在您的项目仓库中创建 `.github/workflows/deploy.yml` 文件，参考 `examples/` 目录下的示例：
 
-#### Node.js 项目示例
+#### VitePress 项目示例
 
 ```yaml
-name: Build & Deploy Node.js Project
+name: Build & Deploy VitePress Project
 
 on:
   push:
@@ -71,14 +75,14 @@ jobs:
         run: npm ci
         
       - name: 构建项目
-        run: npm run build
+        run: npm run docs:build
         
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         id: upload
         with:
           name: dist-${{ github.event.repository.name }}
-          path: dist/
+          path: docs/.vitepress/dist/
           retention-days: 1
 
   trigger-deploy:
@@ -93,14 +97,14 @@ jobs:
             const { data: response } = await github.rest.actions.createWorkflowDispatch({
               owner: 'MoseLu',
               repo: 'axi-deploy',
-              workflow_id: 'deploy.yml',
+              workflow_id: 'external-deploy.yml',
               ref: 'master',
               inputs: {
                 project: '${{ github.event.repository.name }}',
-                lang: 'node',
+                lang: 'static',
                 artifact_id: '${{ needs.build.outputs.artifact-id }}',
                 deploy_path: '/www/wwwroot/${{ github.event.repository.name }}',
-                start_cmd: 'cd /www/wwwroot/${{ github.event.repository.name }} && npm ci --production && pm2 reload ecosystem.config.js',
+                start_cmd: 'echo "静态网站部署完成，无需启动命令"',
                 caller_repo: '${{ github.repository }}',
                 caller_branch: '${{ github.ref_name }}',
                 caller_commit: '${{ github.sha }}',
@@ -119,6 +123,7 @@ jobs:
 
 - `owner`: 改为您的GitHub用户名或组织名
 - `repo`: 改为您的部署仓库名（如 `axi-deploy`）
+- `workflow_id`: 改为 `external-deploy.yml`
 - `deploy_path`: 改为您的服务器部署路径（可选，默认使用 `/www/wwwroot/仓库名`）
 - `start_cmd`: 改为您的启动命令（可选，默认使用仓库名作为服务名）
 
@@ -151,8 +156,8 @@ jobs:
 ## 部署流程
 
 1. **业务仓库构建**: 构建项目并上传产物
-2. **触发部署**: 调用中央部署仓库的 workflow_dispatch
-3. **中央部署仓库执行**: 下载产物并部署到服务器
+2. **触发部署**: 使用 `DEPLOY_CENTER_PAT` 调用中央部署仓库的 `external-deploy.yml`
+3. **中央部署仓库执行**: 从调用者仓库下载产物并部署到服务器
 4. **启动应用**: 执行指定的启动命令
 
 ## 服务器目录结构
@@ -191,6 +196,10 @@ jobs:
    - 确认 `artifact_id` 参数正确
    - 检查构建产物名称是否匹配
 
+4. **工作流触发失败**
+   - 确保 `DEPLOY_CENTER_PAT` 有正确的权限（`repo`, `workflow`）
+   - 检查工作流ID是否正确（应该是 `external-deploy.yml`）
+
 ### 调试方法
 
 1. 查看中央部署仓库的 Actions 日志
@@ -203,18 +212,19 @@ jobs:
 axi-deploy/
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml          # 核心部署工作流
-├── examples/                   # 多语言项目部署示例
+│       ├── deploy.yml              # 内部部署工作流
+│       └── external-deploy.yml     # 外部调用部署工作流
+├── examples/                       # 多语言项目部署示例
 │   ├── node-project-deploy.yml
 │   ├── go-project-deploy.yml
 │   ├── python-project-deploy.yml
 │   ├── vue-project-deploy.yml
 │   ├── react-project-deploy.yml
 │   └── vitepress-project-deploy.yml
-├── README.md                   # 项目说明文档
-├── CHANGELOG.md               # 更新日志
-├── LICENSE                    # 开源许可证
-└── .gitignore                # Git忽略文件
+├── README.md                       # 项目说明文档
+├── CHANGELOG.md                   # 更新日志
+├── LICENSE                        # 开源许可证
+└── .gitignore                     # Git忽略文件
 ```
 
 ## 贡献
