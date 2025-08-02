@@ -9,6 +9,8 @@ on:
       run_id:       { required: true, type: string }
       source_repo:  { required: true, type: string }
       test_url:     { required: false, type: string, default: '' }
+      nginx_config: { required: false, type: string, default: '' }
+      nginx_path:   { required: false, type: string, default: '' }
     
     secrets:
       SERVER_HOST:
@@ -48,7 +50,37 @@ jobs:
           target:   "${{ inputs.deploy_path }}/"
           strip_components: 0
 
-      # 3. 执行启动命令（可选）
+      # 3. 配置Nginx（如果提供了nginx配置）
+      - name: Configure Nginx
+        if: ${{ inputs.nginx_config != '' && inputs.nginx_path != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.SERVER_HOST }}
+          port:     ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key:      ${{ secrets.SERVER_KEY }}
+          script: |
+            echo "🔧 配置Nginx..."
+            echo "配置路径: ${{ inputs.nginx_path }}"
+            echo "部署路径: ${{ inputs.deploy_path }}"
+            
+            # 创建Nginx配置
+            cat > "${{ inputs.nginx_path }}" << 'EOF'
+            ${{ inputs.nginx_config }}
+            EOF
+            
+            # 测试Nginx配置
+            if nginx -t; then
+              echo "✅ Nginx配置语法正确"
+              # 重新加载Nginx
+              nginx -s reload
+              echo "✅ Nginx已重新加载"
+            else
+              echo "❌ Nginx配置语法错误"
+              exit 1
+            fi
+
+      # 4. 执行启动命令（可选）
       - name: Run start command
         if: ${{ inputs.start_cmd != '' }}
         uses: appleboy/ssh-action@v1.0.3
@@ -61,7 +93,7 @@ jobs:
             cd ${{ inputs.deploy_path }}
             ${{ inputs.start_cmd }}
 
-      # 4. 部署状态检查
+      # 5. 部署状态检查
       - name: Check deployment status
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -121,7 +153,7 @@ jobs:
               echo "❌ 部署目录不存在: ${{ inputs.deploy_path }}"
             fi
 
-      # 5. 网站可访问性测试
+      # 6. 网站可访问性测试
       - name: Test website accessibility
         if: ${{ inputs.test_url != '' }}
         run: |
@@ -149,5 +181,5 @@ jobs:
           title=$(curl -s "${{ inputs.test_url }}" | grep -o '<title>[^<]*</title>' | sed 's/<title>\(.*\)<\/title>/\1/' || echo "无法获取标题")
           echo "网站标题: $title"
 
-      # 6. 打印部署完成信息
+      # 7. 打印部署完成信息
       - run: echo "✅ ${{ inputs.project }} 部署完成"

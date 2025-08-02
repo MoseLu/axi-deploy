@@ -24,6 +24,21 @@ on:
         required: false
         type: string
         default: ''
+      nginx_config:
+        description: 'Nginx配置内容（可选）'
+        required: false
+        type: string
+        default: ''
+      nginx_path:
+        description: 'Nginx配置文件路径（可选）'
+        required: false
+        type: string
+        default: ''
+      test_url:
+        description: '测试URL（可选）'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   deploy:
@@ -37,6 +52,9 @@ jobs:
           start_cmd: ${{ github.event.inputs.start_cmd }}
           run_id: ${{ github.event.inputs.run_id }}
           source_repo: ${{ github.event.inputs.source_repo }}
+          nginx_config: ${{ github.event.inputs.nginx_config }}
+          nginx_path: ${{ github.event.inputs.nginx_path }}
+          test_url: ${{ github.event.inputs.test_url }}
         secrets:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
