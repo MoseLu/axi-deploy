@@ -35,7 +35,7 @@ jobs:
           github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
           repo: ${{ inputs.source_repo }}
           run_id: ${{ inputs.run_id }}
-          name: dist-${{ inputs.project }}
+          name: dist-axi-docs
           path: ./dist
 
       # 2. 上传至服务器
