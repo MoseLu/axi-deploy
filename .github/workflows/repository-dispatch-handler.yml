@@ -1,0 +1,24 @@
+name: Repository Dispatch Handler
+
+on:
+  repository_dispatch:
+    types: [deploy]
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/external-deploy.yml
+    with:
+      project: ${{ github.event.client_payload.project }}
+      deploy_path: ${{ github.event.client_payload.deploy_path }}
+      start_cmd: ${{ github.event.client_payload.start_cmd || '' }}
+      run_id: ${{ github.event.client_payload.run_id }}
+      source_repo: ${{ github.event.client_payload.source_repo }}
+      test_url: ${{ github.event.client_payload.test_url || '' }}
+      nginx_config: ${{ github.event.client_payload.nginx_config || '' }}
+      nginx_path: ${{ github.event.client_payload.nginx_path || '' }}
+    secrets:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_KEY: ${{ secrets.SERVER_KEY }}
+      DEPLOY_CENTER_PAT: ${{ secrets.DEPLOY_CENTER_PAT }} 
