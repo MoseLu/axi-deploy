@@ -1,0 +1,72 @@
+name: Build & Deploy Axi-Docs (PNPM)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10.7.1'
+        
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+        
+      - name: 构建项目
+        run: pnpm run docs:build
+        
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: dist-${{ github.event.repository.name }}
+          path: docs/.vitepress/dist/
+          retention-days: 1
+
+  trigger-deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发部署
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
+          script: |
+            // 获取当前 workflow run ID
+            const runId = '${{ github.run_id }}';
+            console.log('当前 workflow run ID:', runId);
+            
+            const { data: response } = await github.rest.actions.createWorkflowDispatch({
+              owner: 'MoseLu',
+              repo: 'axi-deploy',
+              workflow_id: 'external-deploy.yml',
+              ref: 'master',
+              inputs: {
+                project: '${{ github.event.repository.name }}',
+                lang: 'static',
+                artifact_id: '${{ needs.build.outputs.artifact-id }}',
+                deploy_path: '/www/wwwroot/${{ github.event.repository.name }}',
+                start_cmd: 'echo "静态网站部署完成，无需启动命令"',
+                caller_info: '${{ github.repository }}/${{ github.ref_name }}/${{ github.sha }}',
+                run_id: runId,
+                server_config: '${{ secrets.SERVER_HOST }}/${{ secrets.SERVER_PORT }}/${{ secrets.SERVER_USER }}/${{ secrets.SERVER_KEY }}'
+              }
+            });
+            console.log('✅ 部署已触发:', response); 
