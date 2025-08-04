@@ -75,11 +75,19 @@ server {
 ### axi-docs.conf
 
 ```nginx
-# axi-docs 项目配置 - 无重定向版本
+# axi-docs 项目配置 - 彻底解决重定向问题
 location /docs/ {
     alias /www/wwwroot/axi-docs/;
     index index.html;
     try_files $uri $uri/ /docs/index.html;
+    
+    # 禁用任何重定向
+    add_header X-Robots-Tag "noindex, nofollow";
+    
+    # 设置正确的Content-Type
+    location ~* \.html$ {
+        add_header Content-Type "text/html; charset=utf-8";
+    }
 }
 ```
 
