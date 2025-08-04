@@ -64,6 +64,10 @@ jobs:
             echo "配置路径: ${{ inputs.nginx_path }}"
             echo "部署路径: ${{ inputs.deploy_path }}"
             
+            # 创建includes目录（如果不存在）
+            mkdir -p /www/server/nginx/conf/vhost/includes
+            chmod 755 /www/server/nginx/conf/vhost/includes
+            
             # 创建Nginx配置
             cat > "${{ inputs.nginx_path }}" << 'EOF'
             ${{ inputs.nginx_config }}
@@ -77,6 +81,8 @@ jobs:
               echo "✅ Nginx已重新加载"
             else
               echo "❌ Nginx配置语法错误"
+              echo "配置内容:"
+              cat "${{ inputs.nginx_path }}"
               exit 1
             fi
 

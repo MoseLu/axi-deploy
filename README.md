@@ -180,6 +180,54 @@ jobs:
 
 每个项目使用其GitHub仓库名称作为子目录，确保项目间相互隔离。
 
+## Nginx配置结构
+
+为了支持多项目部署，使用Nginx的include功能：
+
+```
+/www/server/nginx/conf/vhost/
+├── redamancy.com.cn.conf          # 主域名配置文件
+└── includes/                      # 项目配置目录
+    ├── axi-docs.conf             # axi-docs项目配置
+    ├── axi-star-cloud.conf       # axi-star-cloud项目配置
+    └── other-project.conf        # 其他项目配置
+```
+
+### 多项目部署优势
+
+1. **模块化管理** - 每个项目的配置独立管理
+2. **易于维护** - 修改单个项目配置不影响其他项目
+3. **避免冲突** - 不同项目的配置相互隔离
+4. **统一部署** - 通过axi-deploy统一管理所有项目
+
+### Nginx Include配置示例
+
+主域名配置会自动包含所有项目配置：
+
+```nginx
+server {
+    listen 80;
+    listen 443 ssl http2;
+    server_name redamancy.com.cn;
+    
+    # 主项目配置
+    location / {
+        root /www/wwwroot/axi-star-cloud;
+        try_files $uri $uri/ /index.html;
+    }
+    
+    # API代理
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+    
+    # 包含其他项目配置
+    include /www/server/nginx/conf/vhost/includes/*.conf;
+}
+```
+
 ## 故障排除
 
 ### 常见问题

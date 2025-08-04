@@ -1,0 +1,136 @@
+name: Build & Deploy Axi-Star-Cloud
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.4'
+          cache: true
+          
+      - name: 构建项目
+        run: |
+          cd backend
+          go mod tidy
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o star-cloud-linux main.go
+          
+      - name: 打包部署文件
+        run: |
+          # 创建部署包
+          tar czf deployment.tar.gz \
+            backend/star-cloud-linux \
+            front/ \
+            index.html \
+            backend/config/ \
+            star-cloud.service
+          
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: dist-${{ github.event.repository.name }}
+          path: deployment.tar.gz
+          retention-days: 1
+
+  deploy:
+    needs: build
+    uses: MoseLu/axi-deploy/.github/workflows/external-deploy.yml@master
+    with:
+      project: ${{ github.event.repository.name }}
+      deploy_path: /www/wwwroot/${{ github.event.repository.name }}
+      start_cmd: |
+        # 解包部署文件
+        tar xzf deployment.tar.gz -C /www/wwwroot/${{ github.event.repository.name }}/
+        chmod +x /www/wwwroot/${{ github.event.repository.name }}/star-cloud-linux
+        
+        # 创建必要的目录
+        mkdir -p /www/wwwroot/${{ github.event.repository.name }}/uploads/{image,document,audio,video,other,avatars}
+        mkdir -p /www/wwwroot/${{ github.event.repository.name }}/logs
+        
+        # 复制systemd服务文件
+        sudo cp /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service /etc/systemd/system/
+        sudo chmod 644 /etc/systemd/system/star-cloud.service
+        
+        # 重启服务
+        sudo systemctl daemon-reload
+        sudo systemctl enable star-cloud.service
+        sudo systemctl restart star-cloud.service
+        
+        # 等待服务启动
+        sleep 5
+        
+        # 健康检查
+        if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+            echo "✅ 服务启动成功"
+        else
+            echo "❌ 服务启动失败"
+            sudo systemctl status star-cloud.service --no-pager --lines 5
+            exit 1
+        fi
+      run_id: ${{ github.run_id }}
+      source_repo: ${{ github.repository }}
+      test_url: https://redamancy.com.cn/
+      nginx_config: |
+        # 主域名配置
+        server {
+            listen 80;
+            listen 443 ssl http2;
+            server_name redamancy.com.cn;
+            
+            # SSL配置（如果有证书）
+            # ssl_certificate /path/to/cert.pem;
+            # ssl_certificate_key /path/to/key.pem;
+            
+            # 静态文件服务（axi-star-cloud）
+            location / {
+                root /www/wwwroot/axi-star-cloud;
+                try_files $uri $uri/ /index.html;
+                
+                # 设置缓存
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
+            }
+            
+            # API代理到Go后端
+            location /api/ {
+                proxy_pass http://127.0.0.1:8080/;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                
+                # 上传文件大小限制
+                client_max_body_size 100M;
+            }
+            
+            # 健康检查端点
+            location /health {
+                proxy_pass http://127.0.0.1:8080/health;
+                proxy_set_header Host $host;
+            }
+            
+            # 包含其他项目配置
+            include /www/server/nginx/conf/vhost/includes/*.conf;
+        }
+      nginx_path: /www/server/nginx/conf/vhost/redamancy.com.cn.conf
+    secrets:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_KEY: ${{ secrets.SERVER_KEY }}
+      DEPLOY_CENTER_PAT: ${{ secrets.DEPLOY_CENTER_PAT }} 
