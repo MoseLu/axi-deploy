@@ -75,16 +75,11 @@ server {
 ### axi-docs.conf
 
 ```nginx
-# axi-docs 项目配置 - 修复重定向方向
-location /docs {
-    alias /www/wwwroot/axi-docs;
+# axi-docs 项目配置 - 无重定向版本
+location /docs/ {
+    alias /www/wwwroot/axi-docs/;
     index index.html;
     try_files $uri $uri/ /docs/index.html;
-}
-
-# 处理不带尾部斜杠的访问 - 重定向到带斜杠的版本
-location = /docs {
-    return 301 /docs/;
 }
 ```
 
