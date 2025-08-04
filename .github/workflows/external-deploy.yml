@@ -49,6 +49,7 @@ jobs:
           source:   "./dist/"
           target:   "${{ inputs.deploy_path }}/"
           strip_components: 0
+          command_timeout: "10m"
 
       # 3. 配置Nginx（如果提供了nginx配置）
       - name: Configure Nginx

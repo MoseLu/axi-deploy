@@ -75,29 +75,14 @@ server {
 ### axi-docs.conf
 
 ```nginx
-# axi-docs 项目配置 - 简化版本
+# axi-docs 项目配置 - 最简版本
 location /docs/ {
     alias /www/wwwroot/axi-docs/;
     index index.html;
     try_files $uri $uri/ /docs/index.html;
-    
-    # 设置缓存
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-    
-    # 设置正确的 MIME 类型
-    location ~* \.(js)$ {
-        add_header Content-Type application/javascript;
-    }
-    
-    location ~* \.(css)$ {
-        add_header Content-Type text/css;
-    }
 }
 
-# 处理不带尾部斜杠的访问
+# 处理不带尾部斜杠的访问 - 简单重定向
 location = /docs {
     return 301 /docs/;
 }
