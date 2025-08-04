@@ -75,10 +75,16 @@ server {
 ### axi-docs.conf
 
 ```nginx
-# axi-docs 项目配置
-location /docs/ {
-    alias /www/wwwroot/axi-docs/;
+# axi-docs 项目配置 - 修复重定向问题
+location /docs {
+    alias /www/wwwroot/axi-docs;
+    index index.html;
     try_files $uri $uri/ /docs/index.html;
+    
+    # 强制添加尾部斜杠
+    if ($request_uri ~ ^/docs[^/]$) {
+        return 301 $uri/;
+    }
     
     # 设置缓存
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
@@ -93,6 +99,11 @@ location /docs/ {
     
     location ~* \.(css)$ {
         add_header Content-Type text/css;
+    }
+    
+    # 处理VitePress路由
+    location ~* \.(html)$ {
+        try_files $uri $uri/ /docs/index.html;
     }
 }
 ```
