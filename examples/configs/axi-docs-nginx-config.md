@@ -16,14 +16,14 @@
 在部署时，提供以下 Nginx 配置内容：
 
 ```nginx
-# axi-docs 项目配置 - 最简版本
-location /docs/ {
-    alias /www/wwwroot/redamancy.com.cn/docs/;
+# axi-docs 项目配置 - 修复重定向方向
+location /docs {
+    alias /www/wwwroot/redamancy.com.cn/docs;
     index index.html;
     try_files $uri $uri/ /docs/index.html;
 }
 
-# 处理不带尾部斜杠的访问 - 简单重定向
+# 处理不带尾部斜杠的访问 - 重定向到带斜杠的版本
 location = /docs {
     return 301 /docs/;
 }
@@ -33,8 +33,8 @@ location = /docs {
 
 ```nginx
 # axi-docs 项目配置 - 备用版本
-location /docs {
-    alias /www/wwwroot/redamancy.com.cn/docs;
+location /docs/ {
+    alias /www/wwwroot/redamancy.com.cn/docs/;
     index index.html;
     try_files $uri $uri/ /docs/index.html;
 }
@@ -53,7 +53,7 @@ location /docs {
 
 1. 在 GitHub Actions 中手动触发 "Deploy Center" 工作流
 2. 填写上述参数
-3. 在 `nginx_config` 字段中粘贴 Nginx 配置内容（推荐使用第一个最简版本）
+3. 在 `nginx_config` 字段中粘贴 Nginx 配置内容（推荐使用第一个修复版本）
 4. 在 `nginx_path` 字段中填写配置文件路径
 5. 在 `test_url` 字段中填写测试URL
 6. 点击运行
