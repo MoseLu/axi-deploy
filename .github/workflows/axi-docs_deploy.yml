@@ -1,4 +1,4 @@
-name: Deploy Project (External)
+name: Deploy AXI Docs
 
 on:
   repository_dispatch:
@@ -7,6 +7,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.event.client_payload.project == 'axi-docs' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -42,7 +43,7 @@ jobs:
           target: "/tmp/"
           command_timeout: "10m"
 
-      - name: Nginx环境初始化（灾后自愈/配置变更/健康巡检）
+      - name: Nginx环境初始化
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
