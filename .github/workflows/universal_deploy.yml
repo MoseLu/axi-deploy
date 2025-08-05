@@ -85,11 +85,31 @@ jobs:
             fi
             echo "✅ Nginx已安装: $(nginx -v)"
             
+            # 检查并启动Nginx服务
             if ! systemctl is-active --quiet nginx; then
               echo "⚠️  Nginx服务未运行，尝试启动..."
-              systemctl start nginx
+              if systemctl start nginx; then
+                echo "✅ Nginx服务启动成功"
+              else
+                echo "❌ Nginx服务启动失败，尝试诊断..."
+                systemctl status nginx --no-pager -l
+                echo "尝试重新加载配置..."
+                if systemctl reload nginx; then
+                  echo "✅ Nginx服务重载成功"
+                else
+                  echo "❌ Nginx服务重载失败，尝试重启..."
+                  if systemctl restart nginx; then
+                    echo "✅ Nginx服务重启成功"
+                  else
+                    echo "❌ Nginx服务重启失败，请手动检查"
+                    systemctl status nginx --no-pager -l
+                    exit 1
+                  fi
+                fi
+              fi
+            else
+              echo "✅ Nginx服务正在运行"
             fi
-            echo "✅ Nginx服务正在运行"
             
             # 1. 创建业务运行用户（灾后自愈）
             echo "👤 检查业务运行用户..."
@@ -171,14 +191,25 @@ jobs:
               echo "✅ Nginx配置语法检查通过"
             else
               echo "❌ Nginx配置语法错误"
+              echo "配置错误详情:"
+              sudo nginx -t 2>&1
               exit 1
             fi
             
+            echo "🔄 尝试重载Nginx..."
             if sudo systemctl reload nginx; then
               echo "✅ Nginx热加载完成"
             else
-              echo "❌ Nginx重载失败"
-              exit 1
+              echo "❌ Nginx重载失败，尝试重启..."
+              if sudo systemctl restart nginx; then
+                echo "✅ Nginx重启成功"
+              else
+                echo "❌ Nginx重启失败，显示详细错误:"
+                sudo systemctl status nginx --no-pager -l
+                echo "Nginx错误日志:"
+                sudo tail -n 20 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
+                exit 1
+              fi
             fi
             
             # 6. 防火墙检查（健康巡检）
