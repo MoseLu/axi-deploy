@@ -97,10 +97,17 @@ jobs:
                 echo "✅ Nginx服务状态正常"
               else
                 echo "⚠️  Nginx进程运行但systemd状态异常，尝试修复..."
-                # 停止所有Nginx进程
-                echo "🛑 停止所有Nginx进程..."
-                sudo pkill -f nginx
-                sleep 2
+                                 # 停止所有Nginx进程
+                 echo "🛑 停止所有Nginx进程..."
+                 sudo pkill -f nginx || true
+                 sleep 3
+                 
+                 # 确保进程完全停止
+                 if pgrep nginx > /dev/null; then
+                   echo "⚠️  强制停止残留的Nginx进程..."
+                   sudo pkill -9 -f nginx || true
+                   sleep 2
+                 fi
                 
                 # 清理systemd状态
                 echo "🧹 清理systemd状态..."
@@ -231,10 +238,17 @@ jobs:
               if sudo systemctl reload nginx; then
                 echo "✅ Nginx热加载完成"
               else
-                echo "❌ Nginx重载失败，尝试重启..."
-                # 停止所有Nginx进程
-                sudo pkill -f nginx
-                sleep 2
+                                 echo "❌ Nginx重载失败，尝试重启..."
+                 # 停止所有Nginx进程
+                 sudo pkill -f nginx || true
+                 sleep 3
+                 
+                 # 确保进程完全停止
+                 if pgrep nginx > /dev/null; then
+                   echo "⚠️  强制停止残留的Nginx进程..."
+                   sudo pkill -9 -f nginx || true
+                   sleep 2
+                 fi
                 
                 # 清理systemd状态
                 sudo systemctl reset-failed nginx
