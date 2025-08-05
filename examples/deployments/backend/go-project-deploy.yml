@@ -41,28 +41,43 @@ jobs:
           path: deployment.tar.gz
           retention-days: 1
 
-      # 暴露构建产物信息并触发部署
-      - name: 暴露构建产物信息并触发部署
-        run: |
-          echo "BUILD_ARTIFACTS=$(pwd)/dist" >> $GITHUB_ENV
-          echo "PROJECT_TYPE=go" >> $GITHUB_ENV
-          echo "DEPLOY_PATH=/www/wwwroot/${{ github.event.repository.name }}" >> $GITHUB_ENV
-
-      # 触发部署中心的工作流
-      - name: 触发部署中心的工作流
-        uses: peter-evans/repository-dispatch@v2
-        with:
-          token: ${{ secrets.DEPLOY_CENTER_PAT }}
-          repository: MoseLu/axi-deploy
-          event-type: deploy
-          client-payload: |
-            {
-              "project": "${{ github.event.repository.name }}",
-              "deploy_path": "${{ env.DEPLOY_PATH }}",
-              "run_id": "${{ github.run_id }}",
-              "source_repo": "${{ github.repository }}",
-              "start_cmd": "cd /www/wwwroot/${{ github.event.repository.name }} && tar xzf deployment.tar.gz && chmod +x app && mkdir -p uploads/{image,document,audio,video,other,avatars} && mkdir -p logs && sudo cp app.service /etc/systemd/system/ && sudo chmod 644 /etc/systemd/system/app.service && sudo systemctl daemon-reload && sudo systemctl enable app.service && sudo systemctl restart app.service && sleep 5 && if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then echo '✅ 服务启动成功'; else echo '❌ 服务启动失败'; sudo systemctl status app.service --no-pager --lines 5; exit 1; fi",
-              "nginx_config": "server { listen 80; listen 443 ssl http2; server_name example.com; location / { root /www/wwwroot/${{ github.event.repository.name }}; try_files $uri $uri/ /index.html; location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg)$ { expires 1y; add_header Cache-Control \"public, immutable\"; } } location /api/ { proxy_pass http://127.0.0.1:8080/; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; client_max_body_size 100M; } location /health { proxy_pass http://127.0.0.1:8080/health; proxy_set_header Host $host; } include /www/server/nginx/conf/vhost/includes/*.conf; }",
-              "nginx_path": "/www/server/nginx/conf/vhost/example.com.conf",
-              "test_url": "https://example.com/"
-            } 
+  deploy:
+    needs: build
+    uses: MoseLu/axi-deploy/.github/workflows/universal_deploy.yml@master
+    with:
+      project: ${{ github.event.repository.name }}
+      source_repo: ${{ github.repository }}
+      run_id: ${{ github.run_id }}
+      deploy_type: backend
+      nginx_config: |
+        location /api/ {
+            proxy_pass http://127.0.0.1:8080/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            client_max_body_size 100M;
+        }
+        
+        location /health {
+            proxy_pass http://127.0.0.1:8080/health;
+            proxy_set_header Host $host;
+        }
+        
+        location / {
+            root /srv/apps/${{ github.event.repository.name }}/front;
+            try_files $uri $uri/ /index.html;
+            
+            # 静态资源缓存
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+        }
+      test_url: https://redamancy.com.cn/
+    secrets:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_KEY: ${{ secrets.SERVER_KEY }}
+      DEPLOY_CENTER_PAT: ${{ secrets.DEPLOY_CENTER_PAT }} 

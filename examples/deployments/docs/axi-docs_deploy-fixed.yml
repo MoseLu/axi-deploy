@@ -32,13 +32,24 @@ jobs:
 
   deploy:
     needs: build
-    uses: MoseLu/axi-deploy/.github/workflows/external-deploy.yml@master
+    uses: MoseLu/axi-deploy/.github/workflows/universal_deploy.yml@master
     with:
       project: ${{ github.event.repository.name }}
-      deploy_path: /www/wwwroot/${{ github.event.repository.name }}
-      start_cmd: 'echo "静态网站部署完成，无需启动命令"'
-      run_id: ${{ github.run_id }}
       source_repo: ${{ github.repository }}
+      run_id: ${{ github.run_id }}
+      deploy_type: static
+      nginx_config: |
+        location /docs/ {
+            alias /srv/static/${{ github.event.repository.name }}/;
+            try_files $uri $uri/ /docs/index.html;
+            
+            # 静态资源缓存
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+        }
+      test_url: https://redamancy.com.cn/docs/
     secrets:
       SERVER_HOST: ${{ secrets.SERVER_HOST }}
       SERVER_PORT: ${{ secrets.SERVER_PORT }}

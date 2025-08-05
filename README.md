@@ -1,54 +1,47 @@
-# AXI Deploy - 通用部署中心
+# Axi Deploy - 统一部署中心
 
-这是一个专门用于多语言项目部署的公共GitHub仓库，其他仓库可以通过GitHub Actions工作流调用此仓库进行远程服务器部署。**本仓库统一管理所有SSH配置和部署逻辑，支持Go、Node.js、Python、Vue、React、VitePress等多种语言，其他项目无需配置任何SSH相关参数。**
+## 概述
 
-## 🚀 核心优势
+Axi Deploy 是一个统一的部署中心，用于管理多个项目的自动化部署。支持静态网站和后端服务的部署，并提供完整的 Nginx 配置管理。
 
-- 🔐 **集中化密钥管理** - 所有SSH配置统一在此仓库
-- 🌍 **多语言支持** - 支持Go、Node.js、Python、Vue、React、VitePress等
-- 🔄 **统一部署流程** - 通过workflow_dispatch实现标准化部署
-- 🛡️ **安全可靠** - 业务仓库无需配置敏感信息
-- 📦 **极简配置** - 新增项目只需复制示例模板
+## 最新更新
 
-## 配置要求
+### 🚀 部署脚本修复 (v2.0)
 
-### 中央部署仓库 (axi-deploy) Secrets 配置
+**解决的问题：**
+- ✅ 修复了项目间文件交叉污染问题
+- ✅ 为每个项目创建独立的临时目录
+- ✅ 添加了部署前和部署后的清理机制
+- ✅ 改进了错误处理和日志记录
 
-本仓库需要在 GitHub Secrets 中配置以下变量：
+**主要改进：**
+1. **独立临时目录**：每个项目使用 `/tmp/<project>/` 目录
+2. **部署前清理**：确保目标目录干净，避免残留文件
+3. **部署后清理**：及时清理临时文件
+4. **路径一致性**：使用项目名称确保路径正确
+5. **类型区分**：明确区分静态项目和后端项目的处理逻辑
 
-| Secret 名称 | 必需 | 描述 | 示例值 |
-|-------------|------|------|--------|
-| `SERVER_HOST` | ✅ | 服务器主机名或IP地址 | `192.168.1.100` 或 `example.com` |
-| `SERVER_PORT` | ✅ | SSH 端口号 | `22` 或 `2222` |
-| `SERVER_USER` | ✅ | SSH 用户名 | `root` 或 `deploy` |
-| `SERVER_KEY` | ✅ | SSH 私钥内容 | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+## 支持的部署类型
 
-### 业务仓库 Secrets 配置
+### 1. 静态项目 (static)
+- VitePress 文档站点
+- Vue/React 前端应用
+- 静态 HTML 网站
 
-业务仓库需要配置以下 Secret：
+### 2. 后端项目 (backend)
+- Go 后端服务
+- Node.js 应用
+- Python 应用
 
-| Secret 名称 | 描述 | 权限要求 |
-|-------------|------|----------|
-| `DEPLOY_CENTER_PAT` | GitHub Personal Access Token，用于调用部署中心 | `repo`, `workflow` |
-| `SERVER_HOST` | 服务器主机名或IP地址 | - |
-| `SERVER_PORT` | SSH端口号 | - |
-| `SERVER_USER` | SSH用户名 | - |
-| `SERVER_KEY` | SSH私钥内容 | - |
+## 快速开始
 
-**重要**: `DEPLOY_CENTER_PAT` 需要以下权限：
-- `repo` - 访问私有仓库
-- `workflow` - 触发工作流
+### 1. 配置项目部署
 
-## 使用方法
-
-### 业务仓库配置
-
-在您的项目仓库中创建 `.github/workflows/{仓库名}_deploy.yml` 文件，参考 `examples/` 目录下的示例：
-
-#### VitePress 项目示例
+#### 静态项目配置示例
 
 ```yaml
-name: Build & Deploy VitePress Project
+# .github/workflows/deploy.yml
+name: Build & Deploy
 
 on:
   push:
@@ -58,63 +51,61 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      artifact-id: ${{ steps.upload.outputs.artifact-id }}
-    
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        
+
       - name: 设置 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-          
-      - name: 安装依赖
-        run: npm ci
-        
-      - name: 构建项目
-        run: npm run docs:build
-        
+
+      - name: 安装依赖并构建
+        run: |
+          npm ci
+          npm run build
+
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
-        id: upload
         with:
           name: dist-${{ github.event.repository.name }}
-          path: docs/.vitepress/dist/
+          path: dist/
           retention-days: 1
 
-  trigger-deploy:
+  deploy:
     needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: 触发部署
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
-          script: |
-            const { data: response } = await github.rest.actions.createWorkflowDispatch({
-              owner: 'MoseLu',
-              repo: 'axi-deploy',
-              workflow_id: 'central_external_deploy.yml',
-              ref: 'main',
-              inputs: {
-                project: '${{ github.event.repository.name }}',
-                source_repo: '${{ github.repository }}',
-                run_id: '${{ needs.build.outputs.artifact-id }}',
-                deploy_type: 'static',
-                nginx_config: 'location /docs/ { alias /srv/static/${{ github.event.repository.name }}/; try_files $uri $uri/ /docs/index.html; }',
-                test_url: 'https://redamancy.com.cn/docs/'
-              }
-            });
-            console.log('部署已触发:', response);
+    uses: MoseLu/axi-deploy/.github/workflows/universal_deploy.yml@master
+    with:
+      project: ${{ github.event.repository.name }}
+      source_repo: ${{ github.repository }}
+      run_id: ${{ github.run_id }}
+      deploy_type: static
+      nginx_config: |
+        location /your-path/ {
+            alias /srv/static/${{ github.event.repository.name }}/;
+            try_files $uri $uri/ /your-path/index.html;
+            
+            # 静态资源缓存
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+        }
+      test_url: https://your-domain.com/your-path/
+    secrets:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_KEY: ${{ secrets.SERVER_KEY }}
+      DEPLOY_CENTER_PAT: ${{ secrets.DEPLOY_CENTER_PAT }}
 ```
 
-#### Go 项目示例
+#### 后端项目配置示例
 
 ```yaml
-name: Build & Deploy Go Project
+# .github/workflows/deploy.yml
+name: Build & Deploy
 
 on:
   push:
@@ -124,244 +115,247 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      artifact-id: ${{ steps.upload.outputs.artifact-id }}
-    
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
         
       - name: 设置 Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.23.4'
           cache: true
           
       - name: 构建项目
-        run: go build -o app main.go
-        
+        run: |
+          cd backend
+          go mod tidy
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app main.go
+          
+      - name: 打包部署文件
+        run: |
+          tar czf deployment.tar.gz \
+            backend/app \
+            front/ \
+            index.html \
+            backend/config/ \
+            app.service
+          
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
-        id: upload
         with:
-          name: app-${{ github.event.repository.name }}
-          path: app
+          name: dist-${{ github.event.repository.name }}
+          path: deployment.tar.gz
           retention-days: 1
 
-  trigger-deploy:
+  deploy:
     needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: 触发部署
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
-          script: |
-            const { data: response } = await github.rest.actions.createWorkflowDispatch({
-              owner: 'MoseLu',
-              repo: 'axi-deploy',
-              workflow_id: 'central_external_deploy.yml',
-              ref: 'main',
-              inputs: {
-                project: '${{ github.event.repository.name }}',
-                source_repo: '${{ github.repository }}',
-                run_id: '${{ needs.build.outputs.artifact-id }}',
-                deploy_type: 'backend',
-                start_cmd: './app',
-                nginx_config: 'location /api/ { proxy_pass http://127.0.0.1:8080/; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }',
-                test_url: 'https://redamancy.com.cn/api/health'
-              }
-            });
-            console.log('部署已触发:', response);
+    uses: MoseLu/axi-deploy/.github/workflows/universal_deploy.yml@master
+    with:
+      project: ${{ github.event.repository.name }}
+      source_repo: ${{ github.repository }}
+      run_id: ${{ github.run_id }}
+      deploy_type: backend
+      nginx_config: |
+        location /api/ {
+            proxy_pass http://127.0.0.1:8080/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            client_max_body_size 100M;
+        }
+        
+        location /health {
+            proxy_pass http://127.0.0.1:8080/health;
+            proxy_set_header Host $host;
+        }
+        
+        location / {
+            root /srv/apps/${{ github.event.repository.name }}/front;
+            try_files $uri $uri/ /index.html;
+            
+            # 静态资源缓存
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+        }
+      test_url: https://your-domain.com/
+    secrets:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_KEY: ${{ secrets.SERVER_KEY }}
+      DEPLOY_CENTER_PAT: ${{ secrets.DEPLOY_CENTER_PAT }}
 ```
+
+### 2. 配置服务器密钥
+
+在项目仓库的 Settings > Secrets and variables > Actions 中添加以下密钥：
+
+- `SERVER_HOST`: 服务器 IP 地址
+- `SERVER_PORT`: SSH 端口 (通常是 22)
+- `SERVER_USER`: SSH 用户名
+- `SERVER_KEY`: SSH 私钥
+- `DEPLOY_CENTER_PAT`: GitHub Personal Access Token
+
+### 3. 手动触发部署
+
+在 GitHub Actions 页面手动触发部署工作流，或推送代码到主分支自动触发。
 
 ## 部署流程
 
-### 1. 构建阶段
-- 在业务仓库中构建项目
-- 上传构建产物到 GitHub Actions
-- 获取构建运行ID
+### 静态项目部署流程
 
-### 2. 触发部署
-- 调用中央部署仓库的工作流
-- 传递项目信息和构建运行ID
-- 自动执行部署流程
+1. **构建产物上传** → `/tmp/<project>/`
+2. **清理目标目录** → `/srv/static/<project>/`
+3. **复制文件** → 目标目录
+4. **清理临时目录** → `/tmp/<project>/`
+5. **配置 Nginx 路由**
 
-### 3. 部署执行
-- 下载构建产物
-- 上传到服务器指定目录
-- 配置Nginx路由（如果提供）
-- 执行启动命令（后端项目）
-- 测试网站可访问性
+### 后端项目部署流程
 
-## 优势
+1. **构建产物上传** → `/tmp/<project>/`
+2. **清理目标目录** → `/srv/apps/<project>/`
+3. **解压 deployment.tar.gz**
+4. **设置文件权限**
+5. **启动服务**
+6. **清理临时目录** → `/tmp/<project>/`
+7. **配置 Nginx 路由**
 
-1. **集中管理** - 所有SSH配置和部署逻辑统一管理
-2. **安全可靠** - 业务仓库无需配置敏感信息
-3. **易于维护** - 新增项目只需复制示例模板
-4. **避免冲突** - 不同项目的配置相互隔离
-5. **统一部署** - 通过axi-deploy统一管理所有项目
+## 验证部署
 
-### Nginx Include配置示例
+### 使用验证脚本
 
-主域名配置会自动包含所有项目配置：
+```bash
+# 在服务器上运行验证脚本
+sudo bash /path/to/verify_deployment.sh
+```
 
-```nginx
-server {
-    listen 80;
-    listen 443 ssl http2;
-    server_name redamancy.com.cn;
-    
-    # 主项目配置
-    location / {
-        root /www/wwwroot/axi-star-cloud;
-        try_files $uri $uri/ /index.html;
-    }
-    
-    # API代理
-    location /api/ {
-        proxy_pass http://127.0.0.1:8080/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-    
-    # 包含其他项目配置
-    include /www/server/nginx/conf/vhost/includes/*.conf;
-}
+验证脚本会检查：
+- ✅ 目录结构是否正确
+- ✅ 文件交叉污染
+- ✅ 服务状态
+- ✅ 端口占用
+- ✅ 健康检查
+- ✅ Nginx 配置
+- ✅ SSL 证书
+- ✅ 网站访问
+
+### 手动验证
+
+```bash
+# 检查目录结构
+ls -la /srv/apps/axi-star-cloud/
+ls -la /srv/static/axi-docs/
+
+# 检查服务状态
+sudo systemctl status star-cloud.service
+sudo systemctl status nginx
+
+# 检查端口
+sudo netstat -tlnp | grep -E ":(80|443|8080)"
+
+# 测试健康检查
+curl -f http://127.0.0.1:8080/health
+
+# 测试网站访问
+curl -I https://your-domain.com/
+```
+
+## 目录结构
+
+```
+/srv/
+├── apps/                    # 后端项目目录
+│   └── axi-star-cloud/     # 后端项目
+│       ├── star-cloud-linux
+│       ├── star-cloud.service
+│       ├── backend/
+│       ├── front/
+│       ├── uploads/
+│       └── logs/
+└── static/                  # 静态项目目录
+    └── axi-docs/           # 静态项目
+        ├── index.html
+        ├── assets/
+        └── ...
+
+/www/server/nginx/conf/conf.d/redamancy/
+├── 00-main.conf           # 主配置文件
+├── route-axi-star-cloud.conf  # 后端项目路由
+└── route-axi-docs.conf        # 静态项目路由
 ```
 
 ## 故障排除
 
 ### 常见问题
 
-1. **SSH连接失败**
-   - 检查 `SERVER_HOST`、`SERVER_PORT`、`SERVER_USER` 配置
-   - 验证 `SERVER_KEY` 私钥格式是否正确
+1. **临时目录不存在**
+   - 检查 SCP 上传是否成功
+   - 确认项目名称正确
 
-2. **权限不足**
-   - 确保服务器用户有目标目录的写入权限
-   - 检查启动命令的执行权限
+2. **权限问题**
+   - 确保 deploy 用户有足够权限
+   - 检查文件所有者设置
 
-3. **构建产物下载失败**
-   - 确认 `artifact_id` 参数正确
-   - 检查构建产物名称是否匹配
+3. **服务启动失败**
+   - 检查二进制文件权限
+   - 查看服务日志
+   - 确认端口未被占用
 
-4. **工作流触发失败**
-   - 确保 `DEPLOY_CENTER_PAT` 有正确的权限（`repo`, `workflow`）
-   - 检查工作流ID是否正确（应该是 `external-deploy.yml`）
+4. **Nginx 配置错误**
+   - 检查配置文件语法
+   - 确认路径正确
+   - 查看错误日志
 
-### 调试方法
+### 调试命令
 
-1. 查看中央部署仓库的 Actions 日志
-2. 检查业务仓库的构建日志
-3. 验证服务器上的文件传输情况
+```bash
+# 查看部署日志
+sudo journalctl -u star-cloud.service -f
 
-## 项目结构
+# 检查 Nginx 状态
+sudo systemctl status nginx
 
-```
-axi-deploy/
-├── .github/
-│   └── workflows/
-│       ├── central_deploy_handler.yml      # 中央部署处理器
-│       ├── central_external_deploy.yml     # 外部项目部署工作流
-│       └── repository_dispatch_handler.yml # 仓库调度处理器
-├── docs/                          # 📚 文档中心
-│   ├── workflow-standards/        # 工作流标准
-│   ├── guides/                    # 使用指南
-│   ├── improvements/              # 改进记录
-│   └── README.md                  # 文档索引
-├── examples/                      # 多语言项目部署示例
-│   ├── backend/                   # 后端项目示例
-│   ├── frontend/                  # 前端项目示例
-│   └── docs/                      # 文档项目示例
-├── README.md                      # 项目说明文档
-├── LICENSE                        # 开源许可证
-└── .gitignore                     # Git忽略文件
+# 查看 Nginx 错误日志
+sudo tail -f /var/log/nginx/error.log
+
+# 检查端口占用
+sudo netstat -tlnp | grep :8080
+
+# 检查文件权限
+ls -la /srv/apps/axi-star-cloud/
+ls -la /srv/static/axi-docs/
 ```
 
-## 📚 文档中心
+## 配置参数
 
-更多详细文档请查看 [docs/](docs/) 目录：
+### universal_deploy.yml 参数
 
-- [📋 工作流标准](docs/workflow-standards/) - 工作流命名规范和标准
-- [🔧 使用指南](docs/guides/) - 部署和使用相关指南
-- [🚀 改进记录](docs/improvements/) - 项目改进和优化记录
-- [📖 详细部署指南](docs/DEPLOYMENT_GUIDE.md) - 完整的部署说明和故障排查
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| `project` | string | ✅ | 项目名称 |
+| `source_repo` | string | ✅ | 源仓库 (格式: owner/repo) |
+| `run_id` | string | ✅ | 构建运行ID |
+| `deploy_type` | choice | ✅ | 部署类型 (static/backend) |
+| `nginx_config` | string | ❌ | Nginx配置 |
+| `test_url` | string | ❌ | 测试URL |
+| `start_cmd` | string | ❌ | 启动命令（后端项目） |
+| `skip_init` | boolean | ❌ | 跳过服务器初始化 |
 
-## 工作流重组历史
+## 示例项目
 
-### 重组目标
-将原有的多工作流同时触发模式改为自动化分步骤触发模式，每次部署都会自动触发初始化工作流，提高部署的可控性和安全性。
+### 静态项目
+- [axi-docs](https://github.com/MoseLu/axi-docs) - VitePress 文档站点
 
-### 变更内容
-
-#### 删除的工作流
-- `axi-star-cloud_deploy.yml` - 特定项目工作流
-- `axi-docs_deploy.yml` - 特定项目工作流
-
-#### 新增的工作流
-- `server_init.yml` - 服务器初始化工作流（支持自动触发）
-- `universal_deploy.yml` - 通用部署工作流（自动包含初始化）
-
-#### 保留的工作流
-- `central_deploy_handler.yml` - 中央部署处理器
-- `central_external_deploy.yml` - 外部部署处理器
-- `repository_dispatch_handler.yml` - 仓库分发处理器（已更新）
-
-### 新的自动化部署流程
-
-#### 步骤1: 自动服务器初始化
-- 每次部署前自动执行
-- 检查并修复服务器环境
-- 验证Nginx配置和证书状态
-- 确保目录结构和权限正确
-
-#### 步骤2: 项目部署
-- 下载构建产物
-- 上传到服务器
-- 根据项目类型执行部署
-- 配置Nginx路由（如果提供）
-- 执行启动命令（后端项目）
-- 测试网站可访问性
-
-### 初始化工作流的触发方式
-
-#### 1. 自动触发
-- 每次部署前自动调用
-- 确保环境状态一致
-- 无需手动干预
-
-#### 2. 手动触发
-- **灾后自愈**: 检测并修复缺失的目录、配置文件
-- **配置变更管理**: 支持声明式配置更新
-- **强制重建**: 设置 `force_rebuild: true` 重新生成配置
-
-#### 3. 定时触发
-- 每周一凌晨2点自动健康巡检
-- 检查证书软链、Nginx配置、防火墙状态
-- 发现问题时CI会标红提醒
-
-### 优势
-
-1. **自动化** - 每次部署自动初始化，无需手动干预
-2. **可控性** - 分步骤执行，可以独立控制每个环节
-3. **安全性** - 初始化步骤自动执行，减少误操作风险
-4. **通用性** - 支持任意项目的部署，统一的部署流程
-5. **可维护性** - 工作流结构更清晰，代码复用性更高
-6. **灾后自愈能力** - 自动检测并修复缺失的目录和配置文件
+### 后端项目
+- [axi-star-cloud](https://github.com/MoseLu/axi-star-cloud) - Go 后端服务
 
 ## 贡献
 
-欢迎提交 Issue 和 Pull Request 来改进这个部署系统！
+欢迎提交 Issue 和 Pull Request 来改进这个部署中心。
 
 ## 许可证
 
 MIT License
-
-<!-- 测试部署 - $(date) -->
-
-## 自动化部署
-
-本项目已配置自动化部署工作流，推送代码到main分支时会自动部署到 `https://redamancy.com.cn/docs/`。
-
-<!-- 触发部署测试 -->

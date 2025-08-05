@@ -240,6 +240,7 @@ jobs:
               else
                                  echo "❌ Nginx重载失败，尝试重启..."
                  # 停止所有Nginx进程
+                 echo "🛑 停止所有Nginx进程..."
                  sudo pkill -f nginx || true
                  sleep 3
                  
@@ -359,7 +360,7 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           source: "./dist/*"
-          target: "/tmp/"
+          target: "/tmp/${{ inputs.project }}/"
           command_timeout: "10m"
 
       - name: 部署到服务器
@@ -376,15 +377,19 @@ jobs:
             APPS_ROOT="/srv/apps"
             STATIC_ROOT="/srv/static"
             NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
+            PROJECT="${{ inputs.project }}"
+            TEMP_DIR="/tmp/$PROJECT"
+            
+            echo "📁 项目临时目录: $TEMP_DIR"
             
             # 根据部署类型确定部署路径
             if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
               # 后端项目部署到应用目录
-              DEPLOY_PATH="$APPS_ROOT/${{ inputs.project }}"
+              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
               echo "📁 后端项目部署到: $DEPLOY_PATH"
             else
               # 静态项目部署到静态文件目录
-              DEPLOY_PATH="$STATIC_ROOT/${{ inputs.project }}"
+              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
               echo "📁 静态项目部署到: $DEPLOY_PATH"
             fi
             
@@ -392,9 +397,25 @@ jobs:
             sudo mkdir -p $DEPLOY_PATH
             sudo chown deploy:deploy $DEPLOY_PATH
             
+            # 清理目标部署目录（避免残留文件）
+            echo "🧹 清理目标部署目录..."
+            sudo rm -rf $DEPLOY_PATH/*
+            
+            # 检查临时目录是否存在
+            if [ ! -d "$TEMP_DIR" ]; then
+              echo "❌ 临时目录不存在: $TEMP_DIR"
+              echo "📁 /tmp 目录内容:"
+              ls -la /tmp/
+              exit 1
+            fi
+            
+            # 进入项目临时目录
+            cd $TEMP_DIR
+            echo "📁 当前临时目录内容:"
+            ls -la
+            
             # 解压并部署文件
             echo "📦 解压部署文件..."
-            cd /tmp
             if [ -f "deployment.tar.gz" ]; then
               # 后端项目部署
               if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
@@ -469,6 +490,11 @@ jobs:
               sudo chown -R deploy:deploy $DEPLOY_PATH
               echo "✅ 静态项目部署完成"
             fi
+            
+            # 清理临时目录
+            echo "🧹 清理临时目录..."
+            sudo rm -rf $TEMP_DIR
+            echo "✅ 临时目录已清理: $TEMP_DIR"
             
             echo "✅ 项目部署完成: ${{ inputs.project }}"
 
