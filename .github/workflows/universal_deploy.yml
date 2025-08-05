@@ -337,7 +337,7 @@ jobs:
           name: dist-${{ inputs.project }}
           path: ./dist
           repo: ${{ inputs.source_repo }}
-          workflow: build
+          workflow: ${{ inputs.project }}_deploy.yml
           run_id: ${{ inputs.run_id }}
           github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
 
