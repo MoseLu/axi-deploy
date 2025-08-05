@@ -414,13 +414,15 @@ jobs:
                 sudo mkdir -p $DEPLOY_PATH/logs
                 sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
                 
-                # 重启服务
-                echo "🔄 重启宝塔面板网站..."
-                bt restart
+                # 启动服务
+                echo "🚀 启动后端服务..."
+                sudo systemctl daemon-reload
+                sudo systemctl enable star-cloud.service
+                sudo systemctl restart star-cloud.service
                 
                 # 等待服务启动
                 echo "⏳ 等待服务启动..."
-                sleep 5
+                sleep 10
                 
                 # 健康检查
                 echo "🔍 检查服务健康状态..."
@@ -429,7 +431,9 @@ jobs:
                 else
                   echo "❌ 服务启动失败 - 健康检查失败"
                   echo "📊 服务状态:"
-                  bt status
+                  sudo systemctl status star-cloud.service --no-pager -l
+                  echo "📋 服务日志:"
+                  sudo journalctl -u star-cloud.service --no-pager -n 20
                   exit 1
                 fi
               else
