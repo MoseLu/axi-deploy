@@ -98,107 +98,109 @@ jobs:
               owner: 'MoseLu',
               repo: 'axi-deploy',
               workflow_id: 'central_external_deploy.yml',
-              ref: 'master',
+              ref: 'main',
               inputs: {
                 project: '${{ github.event.repository.name }}',
-                lang: 'static',
-                artifact_id: '${{ needs.build.outputs.artifact-id }}',
-                deploy_path: '/www/wwwroot/${{ github.event.repository.name }}',
-                start_cmd: 'echo "静态网站部署完成，无需启动命令"',
-                caller_repo: '${{ github.repository }}',
-                caller_branch: '${{ github.ref_name }}',
-                caller_commit: '${{ github.sha }}',
-                server_host: '${{ secrets.SERVER_HOST }}',
-                server_port: '${{ secrets.SERVER_PORT }}',
-                server_user: '${{ secrets.SERVER_USER }}',
-                server_key: '${{ secrets.SERVER_KEY }}'
+                source_repo: '${{ github.repository }}',
+                run_id: '${{ needs.build.outputs.artifact-id }}',
+                deploy_type: 'static',
+                nginx_config: 'location /docs/ { alias /srv/static/${{ github.event.repository.name }}/; try_files $uri $uri/ /docs/index.html; }',
+                test_url: 'https://redamancy.com.cn/docs/'
               }
             });
-            console.log('✅ 部署已触发:', response);
+            console.log('部署已触发:', response);
 ```
 
-### 修改配置参数
+#### Go 项目示例
 
-在示例代码中，需要修改以下参数：
+```yaml
+name: Build & Deploy Go Project
 
-- `owner`: 改为您的GitHub用户名或组织名
-- `repo`: 改为您的部署仓库名（如 `axi-deploy`）
-- `workflow_id`: 改为 `external-deploy.yml`
-- `deploy_path`: 改为您的服务器部署路径（可选，默认使用 `/www/wwwroot/仓库名`）
-- `start_cmd`: 改为您的启动命令（可选，默认使用仓库名作为服务名）
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
 
-**注意**: 
-- `project` 参数会自动使用仓库名称，无需手动修改
-- 所有项目默认部署到 `/www/wwwroot/` 目录下，每个项目使用仓库名作为子目录
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置 Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache: true
+          
+      - name: 构建项目
+        run: go build -o app main.go
+        
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: app-${{ github.event.repository.name }}
+          path: app
+          retention-days: 1
 
-## 支持的语言
-
-| 语言 | 构建命令 | 启动命令示例 | 示例文件 |
-|------|----------|-------------|----------|
-| Node.js | `npm run build` | `npm ci --production && pm2 reload app` | `node-project-deploy.yml` |
-| Go | `go build -o app` | `chmod +x app && systemctl restart app` | `go-project-deploy.yml` |
-| Python | 无需构建 | `pip install -r requirements.txt && systemctl restart app` | `python-project-deploy.yml` |
-| **Vue.js** | `npm run build` | 无需启动命令 | `vue-project-deploy.yml` |
-| **React** | `npm run build` | 无需启动命令 | `react-project-deploy.yml` |
-| **VitePress** | `npm run docs:build` | 无需启动命令 | `vitepress-project-deploy.yml` |
-
-## 示例文件
-
-查看 `examples/` 目录下的完整示例：
-
-- `node-project-deploy.yml` - Node.js项目部署示例
-- `go-project-deploy.yml` - Go项目部署示例  
-- `python-project-deploy.yml` - Python项目部署示例
-- `vue-project-deploy.yml` - Vue.js静态网站部署示例
-- `react-project-deploy.yml` - React静态网站部署示例
-- `vitepress-project-deploy.yml` - VitePress静态网站部署示例
+  trigger-deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发部署
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
+          script: |
+            const { data: response } = await github.rest.actions.createWorkflowDispatch({
+              owner: 'MoseLu',
+              repo: 'axi-deploy',
+              workflow_id: 'central_external_deploy.yml',
+              ref: 'main',
+              inputs: {
+                project: '${{ github.event.repository.name }}',
+                source_repo: '${{ github.repository }}',
+                run_id: '${{ needs.build.outputs.artifact-id }}',
+                deploy_type: 'backend',
+                start_cmd: './app',
+                nginx_config: 'location /api/ { proxy_pass http://127.0.0.1:8080/; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }',
+                test_url: 'https://redamancy.com.cn/api/health'
+              }
+            });
+            console.log('部署已触发:', response);
+```
 
 ## 部署流程
 
-1. **业务仓库构建**: 构建项目并上传产物
-2. **触发部署**: 使用 `DEPLOY_CENTER_PAT` 调用中央部署仓库的 `external-deploy.yml`
-3. **中央部署仓库执行**: 从调用者仓库下载产物并部署到服务器
-4. **启动应用**: 执行指定的启动命令
+### 1. 构建阶段
+- 在业务仓库中构建项目
+- 上传构建产物到 GitHub Actions
+- 获取构建运行ID
 
-## 服务器目录结构
+### 2. 触发部署
+- 调用中央部署仓库的工作流
+- 传递项目信息和构建运行ID
+- 自动执行部署流程
 
-所有项目统一部署到 `/www/wwwroot/` 目录下：
+### 3. 部署执行
+- 下载构建产物
+- 上传到服务器指定目录
+- 配置Nginx路由（如果提供）
+- 执行启动命令（后端项目）
+- 测试网站可访问性
 
-```
-/www/wwwroot/
-├── project-a/          # 项目A的部署目录
-│   ├── app            # Go应用可执行文件
-│   └── ...
-├── project-b/          # 项目B的部署目录
-│   ├── dist/          # Node.js构建产物
-│   └── ...
-├── project-c/          # 项目C的部署目录
-│   ├── .vitepress/    # VitePress静态文件
-│   └── ...
-└── ...
-```
+## 优势
 
-每个项目使用其GitHub仓库名称作为子目录，确保项目间相互隔离。
-
-## Nginx配置结构
-
-为了支持多项目部署，使用Nginx的include功能：
-
-```
-/www/server/nginx/conf/vhost/
-├── redamancy.com.cn.conf          # 主域名配置文件
-└── includes/                      # 项目配置目录
-    ├── axi-docs.conf             # axi-docs项目配置
-    ├── axi-star-cloud.conf       # axi-star-cloud项目配置
-    └── other-project.conf        # 其他项目配置
-```
-
-### 多项目部署优势
-
-1. **模块化管理** - 每个项目的配置独立管理
-2. **易于维护** - 修改单个项目配置不影响其他项目
-3. **避免冲突** - 不同项目的配置相互隔离
-4. **统一部署** - 通过axi-deploy统一管理所有项目
+1. **集中管理** - 所有SSH配置和部署逻辑统一管理
+2. **安全可靠** - 业务仓库无需配置敏感信息
+3. **易于维护** - 新增项目只需复制示例模板
+4. **避免冲突** - 不同项目的配置相互隔离
+5. **统一部署** - 通过axi-deploy统一管理所有项目
 
 ### Nginx Include配置示例
 
@@ -273,7 +275,6 @@ axi-deploy/
 │   ├── frontend/                  # 前端项目示例
 │   └── docs/                      # 文档项目示例
 ├── README.md                      # 项目说明文档
-├── CHANGELOG.md                   # 更新日志
 ├── LICENSE                        # 开源许可证
 └── .gitignore                     # Git忽略文件
 ```
@@ -285,6 +286,69 @@ axi-deploy/
 - [📋 工作流标准](docs/workflow-standards/) - 工作流命名规范和标准
 - [🔧 使用指南](docs/guides/) - 部署和使用相关指南
 - [🚀 改进记录](docs/improvements/) - 项目改进和优化记录
+- [📖 详细部署指南](docs/DEPLOYMENT_GUIDE.md) - 完整的部署说明和故障排查
+
+## 工作流重组历史
+
+### 重组目标
+将原有的多工作流同时触发模式改为自动化分步骤触发模式，每次部署都会自动触发初始化工作流，提高部署的可控性和安全性。
+
+### 变更内容
+
+#### 删除的工作流
+- `axi-star-cloud_deploy.yml` - 特定项目工作流
+- `axi-docs_deploy.yml` - 特定项目工作流
+
+#### 新增的工作流
+- `server_init.yml` - 服务器初始化工作流（支持自动触发）
+- `universal_deploy.yml` - 通用部署工作流（自动包含初始化）
+
+#### 保留的工作流
+- `central_deploy_handler.yml` - 中央部署处理器
+- `central_external_deploy.yml` - 外部部署处理器
+- `repository_dispatch_handler.yml` - 仓库分发处理器（已更新）
+
+### 新的自动化部署流程
+
+#### 步骤1: 自动服务器初始化
+- 每次部署前自动执行
+- 检查并修复服务器环境
+- 验证Nginx配置和证书状态
+- 确保目录结构和权限正确
+
+#### 步骤2: 项目部署
+- 下载构建产物
+- 上传到服务器
+- 根据项目类型执行部署
+- 配置Nginx路由（如果提供）
+- 执行启动命令（后端项目）
+- 测试网站可访问性
+
+### 初始化工作流的触发方式
+
+#### 1. 自动触发
+- 每次部署前自动调用
+- 确保环境状态一致
+- 无需手动干预
+
+#### 2. 手动触发
+- **灾后自愈**: 检测并修复缺失的目录、配置文件
+- **配置变更管理**: 支持声明式配置更新
+- **强制重建**: 设置 `force_rebuild: true` 重新生成配置
+
+#### 3. 定时触发
+- 每周一凌晨2点自动健康巡检
+- 检查证书软链、Nginx配置、防火墙状态
+- 发现问题时CI会标红提醒
+
+### 优势
+
+1. **自动化** - 每次部署自动初始化，无需手动干预
+2. **可控性** - 分步骤执行，可以独立控制每个环节
+3. **安全性** - 初始化步骤自动执行，减少误操作风险
+4. **通用性** - 支持任意项目的部署，统一的部署流程
+5. **可维护性** - 工作流结构更清晰，代码复用性更高
+6. **灾后自愈能力** - 自动检测并修复缺失的目录和配置文件
 
 ## 贡献
 

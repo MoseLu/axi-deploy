@@ -12,13 +12,9 @@ jobs:
         run: |
           echo "📋 收到部署请求:"
           echo "- 项目: ${{ github.event.client_payload.project }}"
-          echo "- 部署路径: ${{ github.event.client_payload.deploy_path }}"
+          echo "- 部署类型: ${{ github.event.client_payload.deploy_type || 'static' }}"
           echo "- 源仓库: ${{ github.event.client_payload.source_repo }}"
           echo "- 构建ID: ${{ github.event.client_payload.run_id }}"
-          echo "- 部署类型: ${{ github.event.client_payload.deploy_type || 'static' }}"
-          
-          # 这里可以添加额外的处理逻辑
-          echo "✅ 部署请求已处理"
           
           # 记录部署请求到日志
           echo "📝 部署日志:"
@@ -28,4 +24,43 @@ jobs:
           echo "构建ID: ${{ github.event.client_payload.run_id }}"
           echo "部署类型: ${{ github.event.client_payload.deploy_type || 'static' }}"
           
-          echo "💡 提示: 请手动触发 Universal Deploy 工作流进行实际部署" 
+          echo "✅ 部署请求已处理"
+
+      - name: 自动触发部署工作流
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
+          script: |
+            try {
+              console.log('🚀 自动触发部署工作流...');
+              console.log('目标工作流: universal_deploy.yml');
+              
+              const { data: response } = await github.rest.actions.createWorkflowDispatch({
+                owner: 'MoseLu',
+                repo: 'axi-deploy',
+                workflow_id: 'universal_deploy.yml',
+                ref: 'master',
+                inputs: {
+                  project: '${{ github.event.client_payload.project }}',
+                  source_repo: '${{ github.event.client_payload.source_repo }}',
+                  run_id: '${{ github.event.client_payload.run_id }}',
+                  deploy_type: '${{ github.event.client_payload.deploy_type || 'static' }}',
+                  nginx_config: '${{ github.event.client_payload.nginx_config || '' }}',
+                  test_url: '${{ github.event.client_payload.test_url || '' }}',
+                  start_cmd: '${{ github.event.client_payload.start_cmd || '' }}',
+                  skip_init: 'false'
+                }
+              });
+              
+              console.log('✅ 部署工作流已成功触发!');
+              console.log('响应状态:', response ? '成功' : '无数据返回(正常)');
+              
+              if (response) {
+                console.log('响应详情:', JSON.stringify(response, null, 2));
+              }
+              
+            } catch (error) {
+              console.error('❌ 触发部署工作流失败:', error.message);
+              console.error('错误详情:', error);
+              throw error;
+            } 

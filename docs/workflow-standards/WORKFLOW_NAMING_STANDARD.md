@@ -35,20 +35,31 @@
 - `health_check.yml` - 健康检查工作流
 - `nginx_init.yml` - Nginx 初始化工作流
 
-## 3. 迁移计划
+## 3. 重命名计划
 
-### 第一阶段：重命名现有工作流
-1. `deploy.yml` → `central_deploy_handler.yml`
-2. `external-deploy.yml` → `central_external_deploy.yml`
-3. `repository-dispatch-handler.yml` → `repository_dispatch_handler.yml`
+### 已完成的中央部署仓库重命名
+- ✅ `deploy.yml` → `central_deploy_handler.yml`
+- ✅ `external-deploy.yml` → `central_external_deploy.yml`
+- ✅ `repository-dispatch-handler.yml` → `repository_dispatch_handler.yml`
 
-### 第二阶段：更新业务仓库工作流
-1. `axi-star-cloud/.github/workflows/deploy.yml` → `axi-star-cloud_deploy.yml`
-2. `axi-docs/.github/workflows/axi-docs_deploy.yml` → `axi-docs_deploy.yml`（已符合标准）
+### 已完成的业务仓库重命名
+- ✅ `axi-star-cloud/.github/workflows/deploy.yml` → `axi-star-cloud_deploy.yml`
+- ✅ `axi-docs/.github/workflows/axi-docs_deploy.yml` → `axi-docs_deploy.yml`（已符合标准）
 
-### 第三阶段：更新示例文件
-1. 更新 `examples/deployments/` 下的所有示例文件
-2. 统一使用 `{项目名}_deploy.yml` 格式
+### 示例文件重命名规则
+
+#### Backend 示例
+- `go-project-deploy.yml` → `go-project_deploy.yml`
+- `node-project-deploy.yml` → `node-project_deploy.yml`
+- `python-project-deploy.yml` → `python-project_deploy.yml`
+
+#### Frontend 示例
+- `vue-project-deploy.yml` → `vue-project_deploy.yml`
+- `react-project-deploy.yml` → `react-project_deploy.yml`
+
+#### Docs 示例
+- `vitepress-project-deploy.yml` → `vitepress-project_deploy.yml`
+- `axi-docs-pnpm-deploy.yml` → `axi-docs-pnpm_deploy.yml`
 
 ## 4. 优势
 
@@ -62,4 +73,10 @@
 1. 创建新的工作流文件
 2. 更新所有引用
 3. 删除旧的工作流文件
-4. 更新文档和示例 
+4. 更新文档和示例
+
+## 6. 注意事项
+
+1. 重命名后需要更新所有引用这些文件的地方
+2. 确保新的命名规范在所有文档中保持一致
+3. 更新 README 和示例文档中的文件引用 
