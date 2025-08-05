@@ -1,49 +1,53 @@
-name: Deploy AXI Docs
+name: Universal Deploy
 
 on:
-  repository_dispatch:
-    types: [deploy]
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+      source_repo:
+        description: '源仓库 (格式: owner/repo)'
+        required: true
+        type: string
+      run_id:
+        description: '构建运行ID'
+        required: true
+        type: string
+      deploy_type:
+        description: '部署类型'
+        required: true
+        default: 'static'
+        type: choice
+        options:
+          - static
+          - backend
+      nginx_config:
+        description: 'Nginx配置（可选）'
+        required: false
+        type: string
+      test_url:
+        description: '测试URL（可选）'
+        required: false
+        type: string
+      start_cmd:
+        description: '启动命令（后端项目）'
+        required: false
+        type: string
+      skip_init:
+        description: '跳过服务器初始化'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
-  deploy:
+  # 步骤1: 服务器初始化
+  server-init:
     runs-on: ubuntu-latest
-    if: ${{ github.event.client_payload.project == 'axi-docs' }}
+    if: ${{ !inputs.skip_init }}
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 下载构建产物
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          name: dist-${{ inputs.project }}
-          path: ./dist
-          repo: ${{ inputs.source_repo }}
-          workflow: build
-          run_id: ${{ inputs.run_id }}
-          github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
-
-      - name: 显示构建产物信息
-        run: |
-          echo "📦 构建产物信息:"
-          ls -la ./dist/
-          echo "📋 部署参数:"
-          echo "- 项目: ${{ inputs.project }}"
-          echo "- 部署路径: ${{ inputs.deploy_path }}"
-          echo "- 源仓库: ${{ inputs.source_repo }}"
-          echo "- 构建ID: ${{ inputs.run_id }}"
-
-      - name: 上传到服务器
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
-          source: "./dist/*"
-          target: "/tmp/"
-          command_timeout: "10m"
-
-      - name: Nginx环境初始化
+      - name: 服务器初始化
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -51,16 +55,17 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            echo "🔧 开始Nginx环境初始化..."
+            echo "🚀 开始服务器初始化..."
             
-            # 标准化配置
+            # 获取输入参数
             DOMAIN="redamancy.com.cn"
             RUN_USER="deploy"
             APPS_ROOT="/srv/apps"
             STATIC_ROOT="/srv/static"
             NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
-            CERT_SRC="/www/server/panel/vhost/cert/$DOMAIN"
+            CERT_SRC="/www/server/panel/vhost/cert/redamancy.com.cn"
             CERT_DST="/www/server/nginx/ssl/redamancy"
+            FORCE_REBUILD="false"
             
             echo "📋 初始化配置:"
             echo "- 域名: $DOMAIN"
@@ -70,11 +75,12 @@ jobs:
             echo "- Nginx配置: $NGINX_CONF_DIR"
             echo "- 证书源: $CERT_SRC"
             echo "- 证书目标: $CERT_DST"
+            echo "- 强制重建: $FORCE_REBUILD"
             
-            # 1. 前置检查
+            # 0. 前置检查
             echo "🔍 前置检查..."
             if ! command -v nginx &> /dev/null; then
-              echo "❌ Nginx未安装，无法继续部署"
+              echo "❌ Nginx未安装，无法继续初始化"
               exit 1
             fi
             echo "✅ Nginx已安装: $(nginx -v)"
@@ -85,7 +91,7 @@ jobs:
             fi
             echo "✅ Nginx服务正在运行"
             
-            # 2. 创建业务运行用户（灾后自愈）
+            # 1. 创建业务运行用户（灾后自愈）
             echo "👤 检查业务运行用户..."
             if ! id "$RUN_USER" &>/dev/null; then
               echo "🆕 创建用户 $RUN_USER..."
@@ -95,14 +101,14 @@ jobs:
               echo "✅ 用户 $RUN_USER 已存在"
             fi
             
-            # 3. 创建所需目录（灾后自愈）
+            # 2. 创建所需目录（灾后自愈）
             echo "📁 检查并创建目录..."
             sudo mkdir -p $APPS_ROOT $STATIC_ROOT $NGINX_CONF_DIR $CERT_DST
             sudo chown $RUN_USER:$RUN_USER $APPS_ROOT $STATIC_ROOT
             sudo chmod 755 $NGINX_CONF_DIR $CERT_DST
             echo "✅ 目录结构检查完成"
             
-            # 4. 软链宝塔证书（健康巡检）
+            # 3. 软链宝塔证书（健康巡检）
             echo "🔗 检查证书软链..."
             if [ ! -d "$CERT_SRC" ]; then
               echo "❌ 证书源目录不存在: $CERT_SRC"
@@ -127,12 +133,12 @@ jobs:
               exit 1
             fi
             
-            # 5. 写入/更新主配置（配置变更）
+            # 4. 写入/更新主配置（配置变更）
             echo "📝 更新主配置文件..."
             MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
             
             # 检查是否需要重新生成配置
-            if [ ! -f "$MAIN_CONF" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ]; then
+            if [ ! -f "$MAIN_CONF" ] || [ "$FORCE_REBUILD" = "true" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ]; then
               echo "🔄 重新生成主配置文件..."
               sudo tee $MAIN_CONF <<'EOF'
             server {
@@ -159,7 +165,7 @@ jobs:
               echo "✅ 主配置文件无需更新"
             fi
             
-            # 6. 检查并重载Nginx（健康巡检）
+            # 5. 检查并重载Nginx（健康巡检）
             echo "🔄 检查Nginx配置..."
             if sudo nginx -t; then
               echo "✅ Nginx配置语法检查通过"
@@ -175,7 +181,7 @@ jobs:
               exit 1
             fi
             
-            # 7. 防火墙检查（健康巡检）
+            # 6. 防火墙检查（健康巡检）
             echo "🔥 检查防火墙规则..."
             if command -v firewall-cmd &> /dev/null; then
               if ! sudo firewall-cmd --list-services | grep -q http; then
@@ -191,7 +197,7 @@ jobs:
               echo "未检测到 firewalld，跳过防火墙配置"
             fi
             
-            # 8. 最终验证
+            # 7. 最终验证
             echo "🔍 最终验证..."
             echo "📁 配置文件:"
             ls -la $NGINX_CONF_DIR/
@@ -209,7 +215,56 @@ jobs:
               echo "⚠️  HTTPS访问测试失败（可能尚未部署项目）"
             fi
             
-            echo "✅ Nginx环境初始化完成！"
+            echo "✅ 服务器初始化完成！"
+            echo ""
+            echo "📋 初始化摘要:"
+            echo "- 域名: $DOMAIN"
+            echo "- 运行用户: $RUN_USER"
+            echo "- 应用目录: $APPS_ROOT"
+            echo "- 静态目录: $STATIC_ROOT"
+            echo "- Nginx配置: $NGINX_CONF_DIR"
+            echo "- 证书源: $CERT_SRC"
+            echo "- 证书目标: $CERT_DST"
+
+  # 步骤2: 项目部署
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [server-init]
+    if: ${{ !inputs.skip_init }} || always()
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载构建产物
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          name: dist-${{ inputs.project }}
+          path: ./dist
+          repo: ${{ inputs.source_repo }}
+          workflow: build
+          run_id: ${{ inputs.run_id }}
+          github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
+
+      - name: 显示构建产物信息
+        run: |
+          echo "📦 构建产物信息:"
+          ls -la ./dist/
+          echo "📋 部署参数:"
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 构建ID: ${{ inputs.run_id }}"
+
+      - name: 上传到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          source: "./dist/*"
+          target: "/tmp/"
+          command_timeout: "10m"
 
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
@@ -226,11 +281,11 @@ jobs:
             STATIC_ROOT="/srv/static"
             NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
             
-            # 根据项目类型确定部署路径
-            if [[ "${{ inputs.project }}" == "axi-star-cloud" ]]; then
-              # Go项目部署到应用目录
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              # 后端项目部署到应用目录
               DEPLOY_PATH="$APPS_ROOT/${{ inputs.project }}"
-              echo "📁 Go项目部署到: $DEPLOY_PATH"
+              echo "📁 后端项目部署到: $DEPLOY_PATH"
             else
               # 静态项目部署到静态文件目录
               DEPLOY_PATH="$STATIC_ROOT/${{ inputs.project }}"
@@ -245,41 +300,49 @@ jobs:
             echo "📦 解压部署文件..."
             cd /tmp
             if [ -f "deployment.tar.gz" ]; then
-              # Go项目部署
-              echo "🔧 部署Go项目..."
-              sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
-              sudo chown -R deploy:deploy $DEPLOY_PATH
-              
-              # 设置可执行权限
-              if [ -f "$DEPLOY_PATH/backend/star-cloud-linux" ]; then
-                sudo chmod +x $DEPLOY_PATH/backend/star-cloud-linux
-              fi
-              
-              # 创建必要目录
-              sudo mkdir -p $DEPLOY_PATH/uploads/{image,document,audio,video,other,avatars}
-              sudo mkdir -p $DEPLOY_PATH/logs
-              sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
-              
-              # 重启服务
-              echo "🔄 重启宝塔面板网站..."
-              bt restart
-              
-              # 等待服务启动
-              echo "⏳ 等待服务启动..."
-              sleep 5
-              
-              # 健康检查
-              echo "🔍 检查服务健康状态..."
-              if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
-                echo "✅ 服务启动成功 - 健康检查通过"
+              # 后端项目部署
+              if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+                echo "🔧 部署后端项目..."
+                sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
+                sudo chown -R deploy:deploy $DEPLOY_PATH
+                
+                # 设置可执行权限
+                if [ -f "$DEPLOY_PATH/backend/star-cloud-linux" ]; then
+                  sudo chmod +x $DEPLOY_PATH/backend/star-cloud-linux
+                fi
+                
+                # 创建必要目录
+                sudo mkdir -p $DEPLOY_PATH/uploads/{image,document,audio,video,other,avatars}
+                sudo mkdir -p $DEPLOY_PATH/logs
+                sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
+                
+                # 重启服务
+                echo "🔄 重启宝塔面板网站..."
+                bt restart
+                
+                # 等待服务启动
+                echo "⏳ 等待服务启动..."
+                sleep 5
+                
+                # 健康检查
+                echo "🔍 检查服务健康状态..."
+                if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+                  echo "✅ 服务启动成功 - 健康检查通过"
+                else
+                  echo "❌ 服务启动失败 - 健康检查失败"
+                  echo "📊 服务状态:"
+                  bt status
+                  exit 1
+                fi
               else
-                echo "❌ 服务启动失败 - 健康检查失败"
-                echo "📊 服务状态:"
-                bt status
-                exit 1
+                # 静态项目部署
+                echo "📁 部署静态项目..."
+                sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
+                sudo chown -R deploy:deploy $DEPLOY_PATH
+                echo "✅ 静态项目部署完成"
               fi
             else
-              # 静态项目部署
+              # 静态项目部署（非压缩包）
               echo "📁 部署静态项目..."
               sudo cp -r * $DEPLOY_PATH/
               sudo chown -R deploy:deploy $DEPLOY_PATH
@@ -328,6 +391,19 @@ jobs:
               exit 1
             fi
 
+      - name: 执行启动命令（后端项目）
+        if: inputs.start_cmd != '' && inputs.deploy_type == 'backend'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🚀 执行启动命令..."
+            cd /srv/apps/${{ inputs.project }}
+            ${{ inputs.start_cmd }}
+
       - name: 测试网站可访问性
         if: inputs.test_url != ''
         uses: appleboy/ssh-action@v1.0.3
@@ -369,7 +445,7 @@ jobs:
           echo ""
           echo "📋 部署摘要:"
           echo "- 项目: ${{ inputs.project }}"
-          echo "- 部署路径: ${{ inputs.deploy_path }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
           echo "- 源仓库: ${{ inputs.source_repo }}"
           echo "- 构建ID: ${{ inputs.run_id }}"
           if [ "${{ inputs.test_url }}" != "" ]; then

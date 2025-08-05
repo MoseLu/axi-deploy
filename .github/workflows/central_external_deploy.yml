@@ -1,4 +1,4 @@
-name: Deploy Project (External)
+name: Universal Deploy Workflow
 
 on:
   repository_dispatch:
@@ -11,25 +11,29 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 显示部署信息
+        run: |
+          echo "📋 部署参数:"
+          echo "- 项目: ${{ github.event.client_payload.project }}"
+          echo "- 部署路径: ${{ github.event.client_payload.deploy_path }}"
+          echo "- 源仓库: ${{ github.event.client_payload.source_repo }}"
+          echo "- 构建ID: ${{ github.event.client_payload.run_id }}"
+          echo "- 项目类型: ${{ github.event.client_payload.project_type || 'static' }}"
+
       - name: 下载构建产物
         uses: dawidd6/action-download-artifact@v2
         with:
-          name: dist-${{ inputs.project }}
+          name: dist-${{ github.event.client_payload.project }}
           path: ./dist
-          repo: ${{ inputs.source_repo }}
+          repo: ${{ github.event.client_payload.source_repo }}
           workflow: build
-          run_id: ${{ inputs.run_id }}
+          run_id: ${{ github.event.client_payload.run_id }}
           github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
 
       - name: 显示构建产物信息
         run: |
           echo "📦 构建产物信息:"
           ls -la ./dist/
-          echo "📋 部署参数:"
-          echo "- 项目: ${{ inputs.project }}"
-          echo "- 部署路径: ${{ inputs.deploy_path }}"
-          echo "- 源仓库: ${{ inputs.source_repo }}"
-          echo "- 构建ID: ${{ inputs.run_id }}"
 
       - name: 上传到服务器
         uses: appleboy/scp-action@v0.1.7
@@ -42,7 +46,7 @@ jobs:
           target: "/tmp/"
           command_timeout: "10m"
 
-      - name: Nginx环境初始化（灾后自愈/配置变更/健康巡检）
+      - name: 环境初始化和部署
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -50,7 +54,14 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            echo "🔧 开始Nginx环境初始化..."
+            echo "🔧 开始部署流程..."
+            
+            # 获取部署参数
+            PROJECT="${{ github.event.client_payload.project }}"
+            DEPLOY_PATH="${{ github.event.client_payload.deploy_path }}"
+            PROJECT_TYPE="${{ github.event.client_payload.project_type || 'static' }}"
+            NGINX_CONFIG="${{ github.event.client_payload.nginx_config || '' }}"
+            NGINX_PATH="${{ github.event.client_payload.nginx_path || '' }}"
             
             # 标准化配置
             DOMAIN="redamancy.com.cn"
@@ -61,14 +72,11 @@ jobs:
             CERT_SRC="/www/server/panel/vhost/cert/$DOMAIN"
             CERT_DST="/www/server/nginx/ssl/redamancy"
             
-            echo "📋 初始化配置:"
+            echo "📋 部署配置:"
+            echo "- 项目: $PROJECT"
+            echo "- 部署路径: $DEPLOY_PATH"
+            echo "- 项目类型: $PROJECT_TYPE"
             echo "- 域名: $DOMAIN"
-            echo "- 运行用户: $RUN_USER"
-            echo "- 应用目录: $APPS_ROOT"
-            echo "- 静态目录: $STATIC_ROOT"
-            echo "- Nginx配置: $NGINX_CONF_DIR"
-            echo "- 证书源: $CERT_SRC"
-            echo "- 证书目标: $CERT_DST"
             
             # 1. 前置检查
             echo "🔍 前置检查..."
@@ -98,281 +106,70 @@ jobs:
             echo "📁 检查并创建目录..."
             sudo mkdir -p $APPS_ROOT $STATIC_ROOT $NGINX_CONF_DIR $CERT_DST
             sudo chown $RUN_USER:$RUN_USER $APPS_ROOT $STATIC_ROOT
-            sudo chmod 755 $NGINX_CONF_DIR $CERT_DST
-            echo "✅ 目录结构检查完成"
             
-            # 4. 软链宝塔证书（健康巡检）
-            echo "🔗 检查证书软链..."
-            if [ ! -d "$CERT_SRC" ]; then
-              echo "❌ 证书源目录不存在: $CERT_SRC"
-              echo "请确保宝塔面板已为域名 $DOMAIN 配置SSL证书"
-              exit 1
-            fi
-            
-            # 检查并重新创建软链
-            if [ -f "$CERT_SRC/fullchain.pem" ]; then
-              sudo ln -sf $CERT_SRC/fullchain.pem $CERT_DST/fullchain.pem
-              echo "✅ 软链 fullchain.pem 完成"
-            else
-              echo "❌ 证书文件不存在: $CERT_SRC/fullchain.pem"
-              exit 1
-            fi
-            
-            if [ -f "$CERT_SRC/privkey.pem" ]; then
-              sudo ln -sf $CERT_SRC/privkey.pem $CERT_DST/privkey.pem
-              echo "✅ 软链 privkey.pem 完成"
-            else
-              echo "❌ 私钥文件不存在: $CERT_SRC/privkey.pem"
-              exit 1
-            fi
-            
-            # 5. 写入/更新主配置（配置变更）
-            echo "📝 更新主配置文件..."
-            MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
-            
-            # 检查是否需要重新生成配置
-            if [ ! -f "$MAIN_CONF" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ]; then
-              echo "🔄 重新生成主配置文件..."
-              sudo tee $MAIN_CONF <<'EOF'
-            server {
-                listen 443 ssl http2;
-                server_name redamancy.com.cn;
-            
-                ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
-                ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
-            
-                client_max_body_size 100m;
-            
-                # 这里自动加载 route-*.conf（项目路由）——主配置永远不用再改
-                include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
-            }
-            
-            server {
-                listen 80;
-                server_name redamancy.com.cn;
-                return 301 https://$host$request_uri;
-            }
-            EOF
-              echo "✅ 主配置文件已更新"
-            else
-              echo "✅ 主配置文件无需更新"
-            fi
-            
-            # 6. 检查并重载Nginx（健康巡检）
-            echo "🔄 检查Nginx配置..."
-            if sudo nginx -t; then
-              echo "✅ Nginx配置语法检查通过"
-            else
-              echo "❌ Nginx配置语法错误"
-              exit 1
-            fi
-            
-            if sudo systemctl reload nginx; then
-              echo "✅ Nginx热加载完成"
-            else
-              echo "❌ Nginx重载失败"
-              exit 1
-            fi
-            
-            # 7. 防火墙检查（健康巡检）
-            echo "🔥 检查防火墙规则..."
-            if command -v firewall-cmd &> /dev/null; then
-              if ! sudo firewall-cmd --list-services | grep -q http; then
-                echo "⚠️  HTTP端口未开放，尝试开放..."
-                sudo firewall-cmd --add-service=http --permanent
-                sudo firewall-cmd --add-service=https --permanent
-                sudo firewall-cmd --reload
-                echo "✅ HTTP/HTTPS端口已开放"
-              else
-                echo "✅ HTTP/HTTPS端口已开放"
-              fi
-            else
-              echo "未检测到 firewalld，跳过防火墙配置"
-            fi
-            
-            # 8. 最终验证
-            echo "🔍 最终验证..."
-            echo "📁 配置文件:"
-            ls -la $NGINX_CONF_DIR/
-            echo "🔗 证书软链:"
-            ls -la $CERT_DST/
-            echo "📂 目录权限:"
-            ls -la $APPS_ROOT/
-            ls -la $STATIC_ROOT/
-            
-            # 测试HTTPS访问
-            echo "🌐 测试HTTPS访问:"
-            if curl -f -s https://$DOMAIN > /dev/null 2>&1; then
-              echo "✅ HTTPS访问正常"
-            else
-              echo "⚠️  HTTPS访问测试失败（可能尚未部署项目）"
-            fi
-            
-            echo "✅ Nginx环境初始化完成！"
-
-      - name: 部署到服务器
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
-          script: |
-            echo "🚀 开始部署项目: ${{ inputs.project }}"
-            
-            # 标准化目录结构
-            APPS_ROOT="/srv/apps"
-            STATIC_ROOT="/srv/static"
-            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
-            
-            # 根据项目类型确定部署路径
-            if [[ "${{ inputs.project }}" == "axi-star-cloud" ]]; then
-              # Go项目部署到应用目录
-              DEPLOY_PATH="$APPS_ROOT/${{ inputs.project }}"
-              echo "📁 Go项目部署到: $DEPLOY_PATH"
-            else
-              # 静态项目部署到静态文件目录
-              DEPLOY_PATH="$STATIC_ROOT/${{ inputs.project }}"
-              echo "📁 静态项目部署到: $DEPLOY_PATH"
-            fi
-            
-            # 创建部署目录
+            # 4. 部署文件
+            echo "📦 开始部署文件..."
             sudo mkdir -p $DEPLOY_PATH
-            sudo chown deploy:deploy $DEPLOY_PATH
+            sudo cp -r /tmp/* $DEPLOY_PATH/
+            sudo chown -R $RUN_USER:$RUN_USER $DEPLOY_PATH
+            echo "✅ 文件部署完成"
             
-            # 解压并部署文件
-            echo "📦 解压部署文件..."
-            cd /tmp
-            if [ -f "deployment.tar.gz" ]; then
-              # Go项目部署
-              echo "🔧 部署Go项目..."
-              sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
-              sudo chown -R deploy:deploy $DEPLOY_PATH
+            # 5. 配置Nginx（如果提供了配置）
+            if [ ! -z "$NGINX_CONFIG" ] && [ ! -z "$NGINX_PATH" ]; then
+              echo "🔧 配置Nginx..."
+              echo "$NGINX_CONFIG" | sudo tee "$NGINX_PATH" > /dev/null
               
-              # 设置可执行权限
-              if [ -f "$DEPLOY_PATH/backend/star-cloud-linux" ]; then
-                sudo chmod +x $DEPLOY_PATH/backend/star-cloud-linux
-              fi
-              
-              # 创建必要目录
-              sudo mkdir -p $DEPLOY_PATH/uploads/{image,document,audio,video,other,avatars}
-              sudo mkdir -p $DEPLOY_PATH/logs
-              sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
-              
-              # 重启服务
-              echo "🔄 重启宝塔面板网站..."
-              bt restart
-              
-              # 等待服务启动
-              echo "⏳ 等待服务启动..."
-              sleep 5
-              
-              # 健康检查
-              echo "🔍 检查服务健康状态..."
-              if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
-                echo "✅ 服务启动成功 - 健康检查通过"
+              # 测试Nginx配置
+              if nginx -t; then
+                echo "✅ Nginx配置语法正确"
+                # 重新加载Nginx
+                nginx -s reload
+                echo "✅ Nginx已重新加载"
               else
-                echo "❌ 服务启动失败 - 健康检查失败"
-                echo "📊 服务状态:"
-                bt status
+                echo "❌ Nginx配置语法错误"
                 exit 1
               fi
             else
-              # 静态项目部署
-              echo "📁 部署静态项目..."
-              sudo cp -r * $DEPLOY_PATH/
-              sudo chown -R deploy:deploy $DEPLOY_PATH
-              echo "✅ 静态项目部署完成"
+              echo "ℹ️  未提供Nginx配置，跳过配置步骤"
             fi
             
-            echo "✅ 项目部署完成: ${{ inputs.project }}"
+            # 6. 项目特定处理
+            case $PROJECT_TYPE in
+              "vitepress"|"static")
+                echo "📄 静态网站部署完成"
+                ;;
+              "node"|"express")
+                echo "🟢 Node.js应用部署完成"
+                # 这里可以添加Node.js特定的启动逻辑
+                ;;
+              "go")
+                echo "🔵 Go应用部署完成"
+                # 这里可以添加Go特定的启动逻辑
+                ;;
+              *)
+                echo "ℹ️  未知项目类型: $PROJECT_TYPE"
+                ;;
+            esac
+            
+            echo "✅ 部署完成!"
 
-      - name: 配置Nginx（如果提供配置）
-        if: inputs.nginx_config != ''
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
-          script: |
-            echo "🔧 配置Nginx..."
-            
-            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
-            PROJECT="${{ inputs.project }}"
-            
-            # 生成项目路由配置
-            ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
-            
-            # 写入项目配置
-            sudo tee $ROUTE_CONF <<'EOF'
-            ${{ inputs.nginx_config }}
-            EOF
-            
-            echo "✅ Nginx配置已写入: $ROUTE_CONF"
-            
-            # 检查Nginx配置语法
-            if sudo nginx -t; then
-              echo "✅ Nginx配置语法检查通过"
-            else
-              echo "❌ Nginx配置语法错误"
-              exit 1
-            fi
-            
-            # 重载Nginx配置
-            if sudo systemctl reload nginx; then
-              echo "✅ Nginx配置重载完成"
-            else
-              echo "❌ Nginx重载失败"
-              exit 1
-            fi
-
-      - name: 测试网站可访问性
-        if: inputs.test_url != ''
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
-          script: |
-            echo "🌐 测试网站可访问性..."
-            测试URL: ${{ inputs.test_url }}
-            
-            # 等待一段时间让服务完全启动
-            sleep 10
-            
-            # 测试网站访问
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ inputs.test_url }})
-            
-            if [ "$HTTP_STATUS" = "200" ]; then
-              echo "✅ 网站可访问 (HTTP $HTTP_STATUS)"
-            elif [ "$HTTP_STATUS" = "404" ]; then
-              echo "⚠️  网站返回404 (可能尚未部署项目)"
-            else
-              echo "❌ 网站无法访问 (HTTP $HTTP_STATUS)"
-              echo "可能的原因:"
-              echo "1. 域名解析问题"
-              echo "2. 服务器防火墙设置"
-              echo "3. Nginx配置问题"
-              echo "4. SSL证书问题"
-              
-              # 显示网站标题
-              TITLE=$(curl -s ${{ inputs.test_url }} | grep -o '<title>[^<]*</title>' | sed 's/<title>\(.*\)<\/title>/\1/')
-              echo "网站标题: $TITLE"
-            fi
-
-      - name: 部署完成通知
+      - name: 部署验证
+        if: ${{ github.event.client_payload.test_url != '' }}
         run: |
-          echo "🎉 部署完成！"
-          echo ""
-          echo "📋 部署摘要:"
-          echo "- 项目: ${{ inputs.project }}"
-          echo "- 部署路径: ${{ inputs.deploy_path }}"
-          echo "- 源仓库: ${{ inputs.source_repo }}"
-          echo "- 构建ID: ${{ inputs.run_id }}"
-          if [ "${{ inputs.test_url }}" != "" ]; then
-            echo "- 测试URL: ${{ inputs.test_url }}"
-          fi
-          echo ""
-          echo "✅ 项目已成功部署到服务器" 
+          echo "🔍 开始部署验证..."
+          TEST_URL="${{ github.event.client_payload.test_url }}"
+          echo "测试URL: $TEST_URL"
+          
+          # 等待服务启动
+          sleep 10
+          
+          # 简单的HTTP状态检查
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$TEST_URL" || echo "000")
+          echo "HTTP状态码: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✅ 部署验证成功"
+          else
+            echo "⚠️  部署验证失败，状态码: $HTTP_STATUS"
+            # 不退出，因为某些静态文件可能返回404
+          fi 
