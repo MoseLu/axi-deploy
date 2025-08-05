@@ -4,16 +4,48 @@
 
 axi-star-cloud 部署后出现 403 错误，而 axi-docs 部署正常。本指南帮助诊断和解决这个问题。
 
-## 主要差异分析
+## 正确的部署方式
 
-### 1. 项目类型差异
+### 1. 使用通用部署工作流
+
+**不要使用特定项目的部署配置**，应该使用通用的部署方式：
+
+```yaml
+# 正确的做法：使用 universal_deploy.yml
+trigger-deploy:
+  needs: build
+  runs-on: ubuntu-latest
+  steps:
+    - name: 触发部署
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
+        script: |
+          const { data: response } = await github.rest.actions.createWorkflowDispatch({
+            owner: 'MoseLu',
+            repo: 'axi-deploy',
+            workflow_id: 'universal_deploy.yml',
+            ref: 'master',
+            inputs: {
+              project: '${{ github.event.repository.name }}',
+              source_repo: '${{ github.repository }}',
+              run_id: '${{ needs.build.outputs.run_id }}',
+              deploy_type: 'backend',
+              nginx_config: '...',
+              test_url: 'https://example.com/',
+              start_cmd: '...'
+            }
+          });
+```
+
+### 2. 项目类型差异
 
 | 项目 | 类型 | 部署方式 | 服务管理 |
 |------|------|----------|----------|
 | axi-docs | 静态网站 | 直接部署到 Nginx | 无需后台服务 |
 | axi-star-cloud | Go 后端 + 前端 | 需要 systemd 服务 | 需要后台进程 |
 
-### 2. 部署路径问题
+### 3. 部署路径问题
 
 **问题**: systemd 服务配置与部署路径不匹配
 - 部署路径: `/www/wwwroot/axi-star-cloud`
@@ -21,7 +53,7 @@ axi-star-cloud 部署后出现 403 错误，而 axi-docs 部署正常。本指�
 
 **解决方案**: 已修复 systemd 服务文件路径
 
-### 3. Nginx 配置差异
+### 4. Nginx 配置差异
 
 **axi-docs** (静态网站):
 ```nginx
