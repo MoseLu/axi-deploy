@@ -1,4 +1,4 @@
-name: Build & Deploy Go Project (Fixed)
+name: Build & Deploy Go Project
 
 on:
   push:
