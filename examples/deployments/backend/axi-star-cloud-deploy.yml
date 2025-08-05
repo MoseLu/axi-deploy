@@ -53,16 +53,21 @@ jobs:
       deploy_path: /www/wwwroot/${{ github.event.repository.name }}
       start_cmd: |
         # 解包部署文件
+        echo "📦 开始解包部署文件..."
         tar xzf deployment.tar.gz -C /www/wwwroot/${{ github.event.repository.name }}/
+        
+        # 检查解包结果
+        echo "🔍 检查解包结果..."
+        ls -la /www/wwwroot/${{ github.event.repository.name }}/
+        
+        # 设置可执行权限
+        echo "🔧 设置可执行权限..."
         chmod +x /www/wwwroot/${{ github.event.repository.name }}/star-cloud-linux
         
         # 创建必要的目录
+        echo "📁 创建必要的目录..."
         mkdir -p /www/wwwroot/${{ github.event.repository.name }}/uploads/{image,document,audio,video,other,avatars}
         mkdir -p /www/wwwroot/${{ github.event.repository.name }}/logs
-        
-        # 修复systemd服务文件中的路径
-        sed -i 's|WorkingDirectory=/srv/apps/axi-star-cloud|WorkingDirectory=/www/wwwroot/axi-star-cloud|g' /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service
-        sed -i 's|ExecStart=/srv/apps/axi-star-cloud/star-cloud-linux|ExecStart=/www/wwwroot/axi-star-cloud/star-cloud-linux|g' /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service
         
         # 检查文件权限和路径
         echo "🔍 检查部署文件..."
@@ -72,7 +77,17 @@ jobs:
         echo "🔍 检查配置文件..."
         ls -la /www/wwwroot/${{ github.event.repository.name }}/backend/config/
         
+        # 检查配置文件内容
+        echo "🔍 检查配置文件内容..."
+        cat /www/wwwroot/${{ github.event.repository.name }}/backend/config/config.yaml || echo "配置文件不存在"
+        
+        # 修复systemd服务文件中的路径
+        echo "🔧 修复systemd服务文件路径..."
+        sed -i 's|WorkingDirectory=/srv/apps/axi-star-cloud|WorkingDirectory=/www/wwwroot/axi-star-cloud|g' /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service
+        sed -i 's|ExecStart=/srv/apps/axi-star-cloud/star-cloud-linux|ExecStart=/www/wwwroot/axi-star-cloud/star-cloud-linux|g' /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service
+        
         # 复制systemd服务文件
+        echo "📋 复制systemd服务文件..."
         sudo cp /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service /etc/systemd/system/
         sudo chmod 644 /etc/systemd/system/star-cloud.service
         
@@ -81,24 +96,30 @@ jobs:
         cat /etc/systemd/system/star-cloud.service
         
         # 停止可能存在的旧服务
-        sudo systemctl stop star-cloud.service 2>/dev/null || true
+        echo "🛑 停止旧服务..."
+        sudo systemctl stop star-cloud.service 2>/dev/null || echo "服务不存在或已停止"
         
         # 重启服务
+        echo "🔄 重启服务..."
         sudo systemctl daemon-reload
         sudo systemctl enable star-cloud.service
         sudo systemctl restart star-cloud.service
         
         # 等待服务启动
         echo "⏳ 等待服务启动..."
-        sleep 10
+        sleep 15
         
         # 检查服务状态
         echo "🔍 检查服务状态..."
-        sudo systemctl status star-cloud.service --no-pager --lines 5
+        sudo systemctl status star-cloud.service --no-pager --lines 10
         
         # 检查端口监听
         echo "🔍 检查端口监听..."
         netstat -tlnp | grep :8080 || ss -tlnp | grep :8080 || echo "端口8080未监听"
+        
+        # 检查进程
+        echo "🔍 检查进程..."
+        ps aux | grep star-cloud || echo "进程未找到"
         
         # 健康检查
         echo "🔍 执行健康检查..."
@@ -107,11 +128,13 @@ jobs:
         else
             echo "❌ 服务启动失败"
             echo "🔍 详细错误信息:"
-            sudo systemctl status star-cloud.service --no-pager --lines 10
-            sudo journalctl -u star-cloud.service --no-pager --lines 20
+            sudo systemctl status star-cloud.service --no-pager --lines 15
+            sudo journalctl -u star-cloud.service --no-pager --lines 30
             echo "🔍 尝试直接运行应用..."
             cd /www/wwwroot/${{ github.event.repository.name }}/
-            timeout 10s ./star-cloud-linux || echo "直接运行也失败"
+            timeout 15s ./star-cloud-linux || echo "直接运行也失败"
+            echo "🔍 检查应用日志..."
+            tail -n 50 /www/wwwroot/${{ github.event.repository.name }}/logs/*.log 2>/dev/null || echo "无日志文件"
             exit 1
         fi
         
@@ -120,10 +143,18 @@ jobs:
         nginx -t
         nginx -s reload
         
+        # 检查文件权限
+        echo "🔍 检查文件权限..."
+        ls -la /www/wwwroot/${{ github.event.repository.name }}/star-cloud-linux
+        ls -la /www/wwwroot/${{ github.event.repository.name }}/backend/config/
+        
         # 最终测试
         echo "🔍 最终访问测试..."
         curl -I http://127.0.0.1:8080/health
         curl -I https://redamancy.com.cn/health
+        curl -I https://redamancy.com.cn/
+        
+        echo "✅ 部署完成"
       run_id: ${{ github.run_id }}
       source_repo: ${{ github.repository }}
       test_url: https://redamancy.com.cn/
