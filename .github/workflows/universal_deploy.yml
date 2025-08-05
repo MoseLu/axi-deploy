@@ -86,8 +86,38 @@ jobs:
             echo "✅ Nginx已安装: $(nginx -v)"
             
             # 检查并启动Nginx服务
-            if ! systemctl is-active --quiet nginx; then
-              echo "⚠️  Nginx服务未运行，尝试启动..."
+            echo "🔍 检查Nginx进程状态..."
+            if pgrep nginx > /dev/null; then
+              echo "✅ 发现Nginx进程正在运行"
+              NGINX_PIDS=$(pgrep nginx)
+              echo "Nginx进程ID: $NGINX_PIDS"
+              
+              # 检查systemd服务状态
+              if systemctl is-active --quiet nginx; then
+                echo "✅ Nginx服务状态正常"
+              else
+                echo "⚠️  Nginx进程运行但systemd状态异常，尝试修复..."
+                # 停止所有Nginx进程
+                echo "🛑 停止所有Nginx进程..."
+                sudo pkill -f nginx
+                sleep 2
+                
+                # 清理systemd状态
+                echo "🧹 清理systemd状态..."
+                sudo systemctl reset-failed nginx
+                
+                # 重新启动服务
+                echo "🚀 重新启动Nginx服务..."
+                if systemctl start nginx; then
+                  echo "✅ Nginx服务启动成功"
+                else
+                  echo "❌ Nginx服务启动失败"
+                  systemctl status nginx --no-pager -l
+                  exit 1
+                fi
+              fi
+            else
+              echo "⚠️  Nginx进程未运行，尝试启动服务..."
               if systemctl start nginx; then
                 echo "✅ Nginx服务启动成功"
               else
@@ -107,8 +137,6 @@ jobs:
                   fi
                 fi
               fi
-            else
-              echo "✅ Nginx服务正在运行"
             fi
             
             # 1. 创建业务运行用户（灾后自愈）
@@ -197,14 +225,37 @@ jobs:
             fi
             
             echo "🔄 尝试重载Nginx..."
-            if sudo systemctl reload nginx; then
-              echo "✅ Nginx热加载完成"
-            else
-              echo "❌ Nginx重载失败，尝试重启..."
-              if sudo systemctl restart nginx; then
-                echo "✅ Nginx重启成功"
+            # 先检查Nginx进程是否正在运行
+            if pgrep nginx > /dev/null; then
+              echo "✅ Nginx进程正在运行，尝试重载..."
+              if sudo systemctl reload nginx; then
+                echo "✅ Nginx热加载完成"
               else
-                echo "❌ Nginx重启失败，显示详细错误:"
+                echo "❌ Nginx重载失败，尝试重启..."
+                # 停止所有Nginx进程
+                sudo pkill -f nginx
+                sleep 2
+                
+                # 清理systemd状态
+                sudo systemctl reset-failed nginx
+                
+                # 重新启动
+                if sudo systemctl start nginx; then
+                  echo "✅ Nginx重启成功"
+                else
+                  echo "❌ Nginx重启失败，显示详细错误:"
+                  sudo systemctl status nginx --no-pager -l
+                  echo "Nginx错误日志:"
+                  sudo tail -n 20 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
+                  exit 1
+                fi
+              fi
+            else
+              echo "⚠️  Nginx进程未运行，尝试启动..."
+              if sudo systemctl start nginx; then
+                echo "✅ Nginx启动成功"
+              else
+                echo "❌ Nginx启动失败，显示详细错误:"
                 sudo systemctl status nginx --no-pager -l
                 echo "Nginx错误日志:"
                 sudo tail -n 20 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
