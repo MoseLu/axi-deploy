@@ -402,9 +402,11 @@ jobs:
                 sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
                 sudo chown -R deploy:deploy $DEPLOY_PATH
                 
-                # 设置可执行权限
+                # 设置可执行权限并移动到正确位置
                 if [ -f "$DEPLOY_PATH/backend/star-cloud-linux" ]; then
                   sudo chmod +x $DEPLOY_PATH/backend/star-cloud-linux
+                  # 将二进制文件移动到根目录，因为服务文件期望它在那里
+                  sudo mv $DEPLOY_PATH/backend/star-cloud-linux $DEPLOY_PATH/star-cloud-linux
                 fi
                 
                 # 创建必要目录
@@ -510,7 +512,7 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           script: |
             echo "🌐 测试网站可访问性..."
-            测试URL: ${{ inputs.test_url }}
+            echo "测试URL: ${{ inputs.test_url }}"
             
             # 等待一段时间让服务完全启动
             sleep 10
