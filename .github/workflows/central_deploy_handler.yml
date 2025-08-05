@@ -1,4 +1,4 @@
-name: External Deploy Handler
+name: Central Deploy Handler
 
 on:
   workflow_call:
@@ -157,4 +157,4 @@ jobs:
           echo "网站标题: $title"
 
       # 7. 打印部署完成信息
-      - run: echo "✅ ${{ inputs.project }} 部署完成"
+      - run: echo "✅ ${{ inputs.project }} 部署完成" 

@@ -43,7 +43,7 @@
 
 ### 业务仓库配置
 
-在您的项目仓库中创建 `.github/workflows/deploy.yml` 文件，参考 `examples/` 目录下的示例：
+在您的项目仓库中创建 `.github/workflows/{仓库名}_deploy.yml` 文件，参考 `examples/` 目录下的示例：
 
 #### VitePress 项目示例
 
@@ -97,7 +97,7 @@ jobs:
             const { data: response } = await github.rest.actions.createWorkflowDispatch({
               owner: 'MoseLu',
               repo: 'axi-deploy',
-              workflow_id: 'external-deploy.yml',
+              workflow_id: 'central_external_deploy.yml',
               ref: 'master',
               inputs: {
                 project: '${{ github.event.repository.name }}',
@@ -260,20 +260,31 @@ server {
 axi-deploy/
 ├── .github/
 │   └── workflows/
-│       ├── deploy.yml              # 内部部署工作流
-│       └── external-deploy.yml     # 外部调用部署工作流
-├── examples/                       # 多语言项目部署示例
-│   ├── node-project-deploy.yml
-│   ├── go-project-deploy.yml
-│   ├── python-project-deploy.yml
-│   ├── vue-project-deploy.yml
-│   ├── react-project-deploy.yml
-│   └── vitepress-project-deploy.yml
-├── README.md                       # 项目说明文档
+│       ├── central_deploy_handler.yml      # 中央部署处理器
+│       ├── central_external_deploy.yml     # 外部项目部署工作流
+│       └── repository_dispatch_handler.yml # 仓库调度处理器
+├── docs/                          # 📚 文档中心
+│   ├── workflow-standards/        # 工作流标准
+│   ├── guides/                    # 使用指南
+│   ├── improvements/              # 改进记录
+│   └── README.md                  # 文档索引
+├── examples/                      # 多语言项目部署示例
+│   ├── backend/                   # 后端项目示例
+│   ├── frontend/                  # 前端项目示例
+│   └── docs/                      # 文档项目示例
+├── README.md                      # 项目说明文档
 ├── CHANGELOG.md                   # 更新日志
 ├── LICENSE                        # 开源许可证
 └── .gitignore                     # Git忽略文件
 ```
+
+## 📚 文档中心
+
+更多详细文档请查看 [docs/](docs/) 目录：
+
+- [📋 工作流标准](docs/workflow-standards/) - 工作流命名规范和标准
+- [🔧 使用指南](docs/guides/) - 部署和使用相关指南
+- [🚀 改进记录](docs/improvements/) - 项目改进和优化记录
 
 ## 贡献
 

@@ -1,0 +1,20 @@
+name: Repository Dispatch Handler
+
+on:
+  repository_dispatch:
+    types: [deploy]
+
+jobs:
+  handle-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Handle deploy request
+        run: |
+          echo "📋 收到部署请求:"
+          echo "- 项目: ${{ github.event.client_payload.project }}"
+          echo "- 部署路径: ${{ github.event.client_payload.deploy_path }}"
+          echo "- 源仓库: ${{ github.event.client_payload.source_repo }}"
+          echo "- 构建ID: ${{ github.event.client_payload.run_id }}"
+          
+          # 这里可以添加额外的处理逻辑
+          echo "✅ 部署请求已处理" 
