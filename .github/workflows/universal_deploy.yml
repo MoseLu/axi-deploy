@@ -362,6 +362,38 @@ jobs:
           source: "./dist/*"
           target: "/tmp/${{ inputs.project }}/"
           command_timeout: "10m"
+          
+      - name: 验证上传
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🔍 验证上传文件..."
+            TEMP_DIR="/tmp/${{ inputs.project }}"
+            
+            if [ -d "$TEMP_DIR" ]; then
+              echo "✅ 临时目录存在: $TEMP_DIR"
+              echo "📁 临时目录内容:"
+              ls -la $TEMP_DIR/
+              
+              if [ -f "$TEMP_DIR/deployment.tar.gz" ]; then
+                echo "✅ deployment.tar.gz 存在"
+                echo "📦 文件大小: $(ls -lh $TEMP_DIR/deployment.tar.gz | awk '{print $5}')"
+                echo "📋 压缩包内容预览:"
+                tar -tzf $TEMP_DIR/deployment.tar.gz | head -10
+              else
+                echo "❌ deployment.tar.gz 不存在"
+                echo "📁 查找所有文件:"
+                find $TEMP_DIR -type f
+              fi
+            else
+              echo "❌ 临时目录不存在: $TEMP_DIR"
+              echo "📁 /tmp 目录内容:"
+              ls -la /tmp/
+            fi
 
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
@@ -414,6 +446,19 @@ jobs:
             echo "📁 当前临时目录内容:"
             ls -la
             
+            # 检查是否有 deployment.tar.gz
+            if [ -f "deployment.tar.gz" ]; then
+              echo "✅ 找到 deployment.tar.gz"
+              echo "📦 文件大小: $(ls -lh deployment.tar.gz | awk '{print $5}')"
+              echo "📋 压缩包内容预览:"
+              tar -tzf deployment.tar.gz | head -10
+            else
+              echo "❌ 未找到 deployment.tar.gz"
+              echo "📁 当前目录所有文件:"
+              find . -type f
+              exit 1
+            fi
+            
             # 解压并部署文件
             echo "📦 解压部署文件..."
             if [ -f "deployment.tar.gz" ]; then
@@ -423,11 +468,15 @@ jobs:
                 sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
                 sudo chown -R deploy:deploy $DEPLOY_PATH
                 
-                # 设置可执行权限并移动到正确位置
-                if [ -f "$DEPLOY_PATH/backend/star-cloud-linux" ]; then
-                  sudo chmod +x $DEPLOY_PATH/backend/star-cloud-linux
-                  # 将二进制文件移动到根目录，因为服务文件期望它在那里
-                  sudo mv $DEPLOY_PATH/backend/star-cloud-linux $DEPLOY_PATH/star-cloud-linux
+                # 设置可执行权限
+                if [ -f "$DEPLOY_PATH/star-cloud-linux" ]; then
+                  sudo chmod +x $DEPLOY_PATH/star-cloud-linux
+                  echo "✅ 二进制文件权限设置完成"
+                else
+                  echo "❌ 二进制文件不存在: $DEPLOY_PATH/star-cloud-linux"
+                  echo "📁 部署目录内容:"
+                  ls -la $DEPLOY_PATH/
+                  exit 1
                 fi
                 
                 # 创建必要目录
@@ -435,20 +484,45 @@ jobs:
                 sudo mkdir -p $DEPLOY_PATH/logs
                 sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
                 
-                                 # 检查文件权限和目录结构
-                 echo "🔍 检查文件权限和目录结构..."
-                 echo "📁 部署目录内容:"
-                 ls -la $DEPLOY_PATH/
-                 echo "📁 二进制文件:"
-                 ls -la $DEPLOY_PATH/star-cloud-linux
-                 echo "📁 服务文件:"
-                 ls -la $DEPLOY_PATH/star-cloud.service
-                 echo "📁 配置文件:"
-                 ls -la $DEPLOY_PATH/backend/config/
+                # 检查文件权限和目录结构
+                echo "🔍 检查文件权限和目录结构..."
+                echo "📁 部署目录内容:"
+                ls -la $DEPLOY_PATH/
+                
+                if [ -f "$DEPLOY_PATH/star-cloud-linux" ]; then
+                  echo "✅ 二进制文件:"
+                  ls -la $DEPLOY_PATH/star-cloud-linux
+                else
+                  echo "❌ 二进制文件不存在"
+                  echo "📁 查找二进制文件:"
+                  find $DEPLOY_PATH -name "star-cloud-linux" -type f
+                fi
+                
+                if [ -f "$DEPLOY_PATH/star-cloud.service" ]; then
+                  echo "✅ 服务文件:"
+                  ls -la $DEPLOY_PATH/star-cloud.service
+                else
+                  echo "❌ 服务文件不存在"
+                  echo "📁 查找服务文件:"
+                  find $DEPLOY_PATH -name "star-cloud.service" -type f
+                fi
+                
+                if [ -d "$DEPLOY_PATH/backend/config" ]; then
+                  echo "✅ 配置文件:"
+                  ls -la $DEPLOY_PATH/backend/config/
+                else
+                  echo "❌ 配置文件目录不存在"
+                  echo "📁 查找配置文件:"
+                  find $DEPLOY_PATH -name "config" -type d
+                fi
                  
                  # 检查服务文件内容
-                 echo "📋 服务文件内容:"
-                 cat $DEPLOY_PATH/star-cloud.service
+                 if [ -f "$DEPLOY_PATH/star-cloud.service" ]; then
+                   echo "📋 服务文件内容:"
+                   cat $DEPLOY_PATH/star-cloud.service
+                 else
+                   echo "❌ 服务文件不存在，无法显示内容"
+                 fi
                  
                  # 启动服务
                  echo "🚀 启动后端服务..."
