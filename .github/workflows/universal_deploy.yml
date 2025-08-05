@@ -446,12 +446,14 @@ jobs:
             echo "📁 当前临时目录内容:"
             ls -la
             
-            # 检查是否有 deployment.tar.gz
+            # 查找 deployment.tar.gz 文件
+            DEPLOYMENT_FILE=""
             if [ -f "deployment.tar.gz" ]; then
-              echo "✅ 找到 deployment.tar.gz"
-              echo "📦 文件大小: $(ls -lh deployment.tar.gz | awk '{print $5}')"
-              echo "📋 压缩包内容预览:"
-              tar -tzf deployment.tar.gz | head -10
+              DEPLOYMENT_FILE="deployment.tar.gz"
+              echo "✅ 在根目录找到 deployment.tar.gz"
+            elif [ -f "dist/deployment.tar.gz" ]; then
+              DEPLOYMENT_FILE="dist/deployment.tar.gz"
+              echo "✅ 在 dist 目录找到 deployment.tar.gz"
             else
               echo "❌ 未找到 deployment.tar.gz"
               echo "📁 当前目录所有文件:"
@@ -459,13 +461,17 @@ jobs:
               exit 1
             fi
             
+            echo "📦 文件大小: $(ls -lh $DEPLOYMENT_FILE | awk '{print $5}')"
+            echo "📋 压缩包内容预览:"
+            tar -tzf $DEPLOYMENT_FILE | head -10
+            
             # 解压并部署文件
             echo "📦 解压部署文件..."
-            if [ -f "deployment.tar.gz" ]; then
+            if [ -f "$DEPLOYMENT_FILE" ]; then
               # 后端项目部署
               if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
                 echo "🔧 部署后端项目..."
-                sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
+                sudo tar xzf $DEPLOYMENT_FILE -C $DEPLOY_PATH
                 sudo chown -R deploy:deploy $DEPLOY_PATH
                 
                 # 设置可执行权限
@@ -553,7 +559,7 @@ jobs:
               else
                 # 静态项目部署
                 echo "📁 部署静态项目..."
-                sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
+                sudo tar xzf $DEPLOYMENT_FILE -C $DEPLOY_PATH
                 sudo chown -R deploy:deploy $DEPLOY_PATH
                 echo "✅ 静态项目部署完成"
               fi
