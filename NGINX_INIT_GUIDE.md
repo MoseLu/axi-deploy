@@ -1,19 +1,39 @@
-# Nginx 服务器初始化指南
+# Nginx 环境初始化指南
 
 ## 概述
 
-本指南介绍如何使用 axi-deploy 的 Nginx 初始化工作流来标准化服务器环境，确保所有项目部署的一致性和可靠性。
+Nginx环境初始化现在是部署流程的**自动步骤**，每次项目部署都会自动执行。这确保了服务器环境的标准化和一致性。
 
-## 初始化流程
+## 自动化初始化流程
 
-### 1. 前置要求
+### 1. 灾后自愈功能
 
-- ✅ 服务器已安装 Nginx
-- ✅ 宝塔面板已配置 SSL 证书
-- ✅ 域名已解析到服务器
-- ✅ GitHub Actions 已配置服务器密钥
+如果服务器上的关键文件被误删，部署时会自动恢复：
 
-### 2. 标准化目录结构
+- ✅ **业务运行用户** - 自动创建 `deploy` 用户
+- ✅ **目录结构** - 自动创建 `/srv/apps`、`/srv/static` 等目录
+- ✅ **权限设置** - 自动设置正确的文件权限
+- ✅ **Nginx配置** - 自动恢复主配置文件
+
+### 2. 配置变更功能
+
+当需要更新配置时，系统会自动检测并重新生成：
+
+- ✅ **主配置文件** - 自动更新 `00-main.conf`
+- ✅ **证书软链** - 自动重新创建证书软链
+- ✅ **防火墙规则** - 自动检查并开放必要端口
+
+### 3. 健康巡检功能
+
+每次部署前都会进行全面的健康检查：
+
+- ✅ **Nginx服务状态** - 检查服务是否运行
+- ✅ **配置语法** - 验证Nginx配置语法
+- ✅ **证书有效性** - 检查SSL证书软链
+- ✅ **端口监听** - 检查80/443端口
+- ✅ **HTTPS访问** - 测试HTTPS连接
+
+## 标准化目录结构
 
 初始化后，服务器将具有以下标准化目录结构：
 
@@ -36,168 +56,159 @@
 └── privkey.pem             # 私钥文件（软链）
 ```
 
-### 3. 执行初始化
+## 部署流程
 
-#### 方法1：使用 GitHub Actions
+### 1. 自动初始化步骤
 
-1. 进入 `axi-deploy` 仓库
-2. 点击 "Actions" 标签
-3. 选择 "Nginx 服务器初始化" 工作流
-4. 点击 "Run workflow"
-5. 填写参数：
-   - **服务器IP地址**: 你的服务器IP
-   - **SSH用户名**: 通常是 `root`
-   - **域名**: `redamancy.com.cn`
-   - **业务运行用户**: `deploy`
-   - 其他参数保持默认值
+每次部署时，系统会自动执行以下步骤：
 
-#### 方法2：手动执行
+1. **前置检查**
+   - 检查Nginx是否安装
+   - 检查Nginx服务状态
+   - 启动服务（如果未运行）
 
-如果无法使用 GitHub Actions，可以手动在服务器上执行：
+2. **灾后自愈**
+   - 创建业务运行用户（如果不存在）
+   - 创建标准化目录结构
+   - 设置正确的文件权限
 
-```bash
-# 1. 前置检查
-nginx -v
-systemctl is-active --quiet nginx
+3. **证书管理**
+   - 检查宝塔证书源目录
+   - 重新创建证书软链
+   - 验证证书文件完整性
 
-# 2. 创建业务运行用户
-sudo useradd -m -s /bin/bash deploy
+4. **配置更新**
+   - 检查主配置文件是否需要更新
+   - 重新生成配置（如果需要）
+   - 验证配置语法
 
-# 3. 创建所需目录
-sudo mkdir -p /srv/apps /srv/static /www/server/nginx/conf/conf.d/redamancy /www/server/nginx/ssl/redamancy
-sudo chown deploy:deploy /srv/apps /srv/static
+5. **健康巡检**
+   - 检查Nginx配置语法
+   - 重载Nginx配置
+   - 检查防火墙规则
+   - 测试HTTPS访问
 
-# 4. 软链宝塔证书
-sudo ln -sf /www/server/panel/vhost/cert/redamancy.com.cn/fullchain.pem /www/server/nginx/ssl/redamancy/fullchain.pem
-sudo ln -sf /www/server/panel/vhost/cert/redamancy.com.cn/privkey.pem /www/server/nginx/ssl/redamancy/privkey.pem
+6. **最终验证**
+   - 显示所有配置文件
+   - 验证目录权限
+   - 确认初始化完成
 
-# 5. 写入固定主配置
-sudo tee /www/server/nginx/conf/conf.d/redamancy/00-main.conf <<'EOF'
-server {
-    listen 443 ssl http2;
-    server_name redamancy.com.cn;
+### 2. 项目部署
 
-    ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
-    ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
+初始化完成后，继续执行项目部署：
 
-    client_max_body_size 100m;
-
-    # 这里自动加载 route-*.conf（项目路由）——主配置永远不用再改
-    include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
-}
-
-server {
-    listen 80;
-    server_name redamancy.com.cn;
-    return 301 https://$host$request_uri;
-}
-EOF
-
-# 6. 检查并重载Nginx
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-### 4. 验证初始化结果
-
-初始化完成后，验证以下项目：
-
-```bash
-# 检查目录结构
-ls -la /srv/apps/
-ls -la /srv/static/
-ls -la /www/server/nginx/conf/conf.d/redamancy/
-
-# 检查证书软链
-ls -la /www/server/nginx/ssl/redamancy/
-
-# 测试HTTPS访问
-curl -I https://redamancy.com.cn
-```
-
-## 项目部署适配
-
-### 1. Go项目部署
-
-Go项目（如 axi-star-cloud）将部署到：
-- **部署路径**: `/srv/apps/axi-star-cloud`
-- **Nginx配置**: `/www/server/nginx/conf/conf.d/redamancy/route-axi-star-cloud.conf`
-
-### 2. 静态项目部署
-
-静态项目（如 axi-docs）将部署到：
-- **部署路径**: `/srv/static/axi-docs`
-- **Nginx配置**: `/www/server/nginx/conf/conf.d/redamancy/route-axi-docs.conf`
+- **Go项目** 部署到 `/srv/apps/<project-name>`
+- **静态项目** 部署到 `/srv/static/<project-name>`
+- **Nginx配置** 自动生成到 `/www/server/nginx/conf/conf.d/redamancy/route-<project>.conf`
 
 ## 优势
 
-### 1. 标准化
-- 所有项目使用统一的目录结构
-- 配置文件集中管理
-- 部署流程一致
+### 1. 自动化
+- **无需手动初始化** - 每次部署自动执行
+- **智能检测** - 只修复需要修复的部分
+- **容错性强** - 即使部分文件被删除也能自动恢复
 
-### 2. 安全性
-- 业务进程以非root用户运行
-- 证书自动软链，避免版本不一致
-- 权限分离，降低安全风险
+### 2. 标准化
+- **统一环境** - 所有部署使用相同的目录结构
+- **配置一致** - 主配置文件固定，项目配置独立
+- **权限规范** - 统一的用户和权限设置
 
-### 3. 可维护性
-- 主配置文件固定，无需重复修改
-- 项目配置独立，互不影响
-- 自动加载机制，新增项目无需重启
+### 3. 安全性
+- **非root运行** - 业务进程以deploy用户运行
+- **证书管理** - 自动软链，避免版本不一致
+- **权限分离** - 最小权限原则
 
-### 4. 兼容性
-- 兼容宝塔面板的SSL证书管理
-- 支持自动续期
-- 不影响现有服务
+### 4. 可维护性
+- **配置集中** - 所有配置在固定位置
+- **自动恢复** - 灾后自愈功能
+- **健康监控** - 每次部署都有健康检查
 
 ## 故障排除
 
 ### 常见问题
 
-1. **Nginx配置语法错误**
-   ```bash
-   sudo nginx -t
+1. **Nginx未安装**
    ```
+   ❌ Nginx未安装，无法继续部署
+   ```
+   **解决方案**: 在服务器上安装Nginx
 
 2. **证书文件不存在**
-   ```bash
-   ls -la /www/server/panel/vhost/cert/redamancy.com.cn/
    ```
+   ❌ 证书文件不存在: /www/server/panel/vhost/cert/redamancy.com.cn/fullchain.pem
+   ```
+   **解决方案**: 在宝塔面板中为域名配置SSL证书
 
 3. **权限问题**
-   ```bash
-   sudo chown -R deploy:deploy /srv/apps /srv/static
    ```
-
-4. **防火墙问题**
-   ```bash
-   sudo firewall-cmd --list-services
+   ❌ 无法创建目录或文件
    ```
+   **解决方案**: 确保SSH用户有sudo权限
 
-### 调试命令
+### 调试信息
 
-```bash
-# 检查Nginx状态
-sudo systemctl status nginx
+部署日志会显示详细的初始化过程：
 
-# 查看Nginx错误日志
-sudo tail -f /var/log/nginx/error.log
+```
+🔧 开始Nginx环境初始化...
+📋 初始化配置:
+- 域名: redamancy.com.cn
+- 运行用户: deploy
+- 应用目录: /srv/apps
+- 静态目录: /srv/static
+- Nginx配置: /www/server/nginx/conf/conf.d/redamancy
+- 证书源: /www/server/panel/vhost/cert/redamancy.com.cn
+- 证书目标: /www/server/nginx/ssl/redamancy
 
-# 查看Nginx访问日志
-sudo tail -f /var/log/nginx/access.log
+🔍 前置检查...
+✅ Nginx已安装: nginx version: nginx/1.20.1
+✅ Nginx服务正在运行
 
-# 检查端口监听
-sudo netstat -tlnp | grep :80
-sudo netstat -tlnp | grep :443
+👤 检查业务运行用户...
+✅ 用户 deploy 已存在
+
+📁 检查并创建目录...
+✅ 目录结构检查完成
+
+🔗 检查证书软链...
+✅ 软链 fullchain.pem 完成
+✅ 软链 privkey.pem 完成
+
+📝 更新主配置文件...
+✅ 主配置文件已更新
+
+🔄 检查Nginx配置...
+✅ Nginx配置语法检查通过
+✅ Nginx热加载完成
+
+🔥 检查防火墙规则...
+✅ HTTP/HTTPS端口已开放
+
+🔍 最终验证...
+✅ Nginx环境初始化完成！
 ```
 
-## 后续步骤
+## 使用说明
 
-初始化完成后，可以：
+### 对于开发者
 
-1. **部署 axi-star-cloud** - Go后端项目
-2. **部署 axi-docs** - VitePress文档项目
-3. **添加新项目** - 按照相同模式部署其他项目
+1. **正常部署** - 直接触发项目部署，初始化会自动执行
+2. **无需手动操作** - 不需要单独执行初始化步骤
+3. **自动恢复** - 如果服务器有问题，重新部署会自动修复
 
-所有项目都将自动使用标准化的目录结构和配置管理。 
+### 对于运维人员
+
+1. **监控部署日志** - 查看初始化步骤的执行情况
+2. **检查健康状态** - 通过日志确认所有检查都通过
+3. **故障排查** - 如果初始化失败，根据错误信息进行修复
+
+## 总结
+
+Nginx环境初始化现在是完全自动化的过程，每次部署都会：
+
+1. **自动检查** 服务器环境状态
+2. **自动修复** 缺失的文件和配置
+3. **自动验证** 所有必要的服务
+4. **自动部署** 项目到标准化目录
+
+这确保了所有部署的一致性和可靠性，无需手动干预。 
