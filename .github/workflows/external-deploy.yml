@@ -11,6 +11,17 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 显示项目信息
+        run: |
+          echo "🚀 开始部署项目: ${{ inputs.project }}"
+          echo "📋 项目信息:"
+          echo "- 项目名称: ${{ inputs.project }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 构建ID: ${{ inputs.run_id }}"
+          echo "- 部署路径: ${{ inputs.deploy_path }}"
+          echo "- 测试URL: ${{ inputs.test_url }}"
+          echo ""
+
       - name: 下载构建产物
         uses: dawidd6/action-download-artifact@v2
         with:
@@ -23,9 +34,9 @@ jobs:
 
       - name: 显示构建产物信息
         run: |
-          echo "📦 构建产物信息:"
+          echo "📦 [${{ inputs.project }}] 构建产物信息:"
           ls -la ./dist/
-          echo "📋 部署参数:"
+          echo "📋 [${{ inputs.project }}] 部署参数:"
           echo "- 项目: ${{ inputs.project }}"
           echo "- 部署路径: ${{ inputs.deploy_path }}"
           echo "- 源仓库: ${{ inputs.source_repo }}"
@@ -51,7 +62,7 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            echo "🔧 开始Nginx环境初始化..."
+            echo "🔧 [${{ inputs.project }}] 开始Nginx环境初始化..."
             
             # 标准化配置
             DOMAIN="redamancy.com.cn"
@@ -62,7 +73,7 @@ jobs:
             CERT_SRC="/www/server/panel/vhost/cert/$DOMAIN"
             CERT_DST="/www/server/nginx/ssl/redamancy"
             
-            echo "📋 初始化配置:"
+            echo "📋 [${{ inputs.project }}] 初始化配置:"
             echo "- 域名: $DOMAIN"
             echo "- 运行用户: $RUN_USER"
             echo "- 应用目录: $APPS_ROOT"
@@ -72,40 +83,40 @@ jobs:
             echo "- 证书目标: $CERT_DST"
             
             # 1. 前置检查
-            echo "🔍 前置检查..."
+            echo "🔍 [${{ inputs.project }}] 前置检查..."
             if ! command -v nginx &> /dev/null; then
-              echo "❌ Nginx未安装，无法继续部署"
+              echo "❌ [${{ inputs.project }}] Nginx未安装，无法继续部署"
               exit 1
             fi
-            echo "✅ Nginx已安装: $(nginx -v)"
+            echo "✅ [${{ inputs.project }}] Nginx已安装: $(nginx -v)"
             
             if ! systemctl is-active --quiet nginx; then
-              echo "⚠️  Nginx服务未运行，尝试启动..."
+              echo "⚠️  [${{ inputs.project }}] Nginx服务未运行，尝试启动..."
               systemctl start nginx
             fi
-            echo "✅ Nginx服务正在运行"
+            echo "✅ [${{ inputs.project }}] Nginx服务正在运行"
             
             # 2. 创建业务运行用户（灾后自愈）
-            echo "👤 检查业务运行用户..."
+            echo "👤 [${{ inputs.project }}] 检查业务运行用户..."
             if ! id "$RUN_USER" &>/dev/null; then
-              echo "🆕 创建用户 $RUN_USER..."
+              echo "🆕 [${{ inputs.project }}] 创建用户 $RUN_USER..."
               sudo useradd -m -s /bin/bash $RUN_USER
-              echo "✅ 用户 $RUN_USER 创建完成"
+              echo "✅ [${{ inputs.project }}] 用户 $RUN_USER 创建完成"
             else
-              echo "✅ 用户 $RUN_USER 已存在"
+              echo "✅ [${{ inputs.project }}] 用户 $RUN_USER 已存在"
             fi
             
             # 3. 创建所需目录（灾后自愈）
-            echo "📁 检查并创建目录..."
+            echo "📁 [${{ inputs.project }}] 检查并创建目录..."
             sudo mkdir -p $APPS_ROOT $STATIC_ROOT $NGINX_CONF_DIR $CERT_DST
             sudo chown $RUN_USER:$RUN_USER $APPS_ROOT $STATIC_ROOT
             sudo chmod 755 $NGINX_CONF_DIR $CERT_DST
-            echo "✅ 目录结构检查完成"
+            echo "✅ [${{ inputs.project }}] 目录结构检查完成"
             
             # 4. 软链宝塔证书（健康巡检）
-            echo "🔗 检查证书软链..."
+            echo "🔗 [${{ inputs.project }}] 检查证书软链..."
             if [ ! -d "$CERT_SRC" ]; then
-              echo "❌ 证书源目录不存在: $CERT_SRC"
+              echo "❌ [${{ inputs.project }}] 证书源目录不存在: $CERT_SRC"
               echo "请确保宝塔面板已为域名 $DOMAIN 配置SSL证书"
               exit 1
             fi
@@ -113,27 +124,27 @@ jobs:
             # 检查并重新创建软链
             if [ -f "$CERT_SRC/fullchain.pem" ]; then
               sudo ln -sf $CERT_SRC/fullchain.pem $CERT_DST/fullchain.pem
-              echo "✅ 软链 fullchain.pem 完成"
+              echo "✅ [${{ inputs.project }}] 软链 fullchain.pem 完成"
             else
-              echo "❌ 证书文件不存在: $CERT_SRC/fullchain.pem"
+              echo "❌ [${{ inputs.project }}] 证书文件不存在: $CERT_SRC/fullchain.pem"
               exit 1
             fi
             
             if [ -f "$CERT_SRC/privkey.pem" ]; then
               sudo ln -sf $CERT_SRC/privkey.pem $CERT_DST/privkey.pem
-              echo "✅ 软链 privkey.pem 完成"
+              echo "✅ [${{ inputs.project }}] 软链 privkey.pem 完成"
             else
-              echo "❌ 私钥文件不存在: $CERT_SRC/privkey.pem"
+              echo "❌ [${{ inputs.project }}] 私钥文件不存在: $CERT_SRC/privkey.pem"
               exit 1
             fi
             
             # 5. 写入/更新主配置（配置变更）
-            echo "📝 更新主配置文件..."
+            echo "📝 [${{ inputs.project }}] 更新主配置文件..."
             MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
             
             # 检查是否需要重新生成配置
             if [ ! -f "$MAIN_CONF" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ]; then
-              echo "🔄 重新生成主配置文件..."
+              echo "🔄 [${{ inputs.project }}] 重新生成主配置文件..."
               sudo tee $MAIN_CONF <<'EOF'
             server {
                 listen 443 ssl http2;
@@ -154,62 +165,62 @@ jobs:
                 return 301 https://$host$request_uri;
             }
             EOF
-              echo "✅ 主配置文件已更新"
+              echo "✅ [${{ inputs.project }}] 主配置文件已更新"
             else
-              echo "✅ 主配置文件无需更新"
+              echo "✅ [${{ inputs.project }}] 主配置文件无需更新"
             fi
             
             # 6. 检查并重载Nginx（健康巡检）
-            echo "🔄 检查Nginx配置..."
+            echo "🔄 [${{ inputs.project }}] 检查Nginx配置..."
             if sudo nginx -t; then
-              echo "✅ Nginx配置语法检查通过"
+              echo "✅ [${{ inputs.project }}] Nginx配置语法检查通过"
             else
-              echo "❌ Nginx配置语法错误"
+              echo "❌ [${{ inputs.project }}] Nginx配置语法错误"
               exit 1
             fi
             
             if sudo systemctl reload nginx; then
-              echo "✅ Nginx热加载完成"
+              echo "✅ [${{ inputs.project }}] Nginx热加载完成"
             else
-              echo "❌ Nginx重载失败"
+              echo "❌ [${{ inputs.project }}] Nginx重载失败"
               exit 1
             fi
             
             # 7. 防火墙检查（健康巡检）
-            echo "🔥 检查防火墙规则..."
+            echo "🔥 [${{ inputs.project }}] 检查防火墙规则..."
             if command -v firewall-cmd &> /dev/null; then
               if ! sudo firewall-cmd --list-services | grep -q http; then
-                echo "⚠️  HTTP端口未开放，尝试开放..."
+                echo "⚠️  [${{ inputs.project }}] HTTP端口未开放，尝试开放..."
                 sudo firewall-cmd --add-service=http --permanent
                 sudo firewall-cmd --add-service=https --permanent
                 sudo firewall-cmd --reload
-                echo "✅ HTTP/HTTPS端口已开放"
+                echo "✅ [${{ inputs.project }}] HTTP/HTTPS端口已开放"
               else
-                echo "✅ HTTP/HTTPS端口已开放"
+                echo "✅ [${{ inputs.project }}] HTTP/HTTPS端口已开放"
               fi
             else
               echo "未检测到 firewalld，跳过防火墙配置"
             fi
             
             # 8. 最终验证
-            echo "🔍 最终验证..."
-            echo "📁 配置文件:"
+            echo "🔍 [${{ inputs.project }}] 最终验证..."
+            echo "📁 [${{ inputs.project }}] 配置文件:"
             ls -la $NGINX_CONF_DIR/
-            echo "🔗 证书软链:"
+            echo "🔗 [${{ inputs.project }}] 证书软链:"
             ls -la $CERT_DST/
-            echo "📂 目录权限:"
+            echo "📂 [${{ inputs.project }}] 目录权限:"
             ls -la $APPS_ROOT/
             ls -la $STATIC_ROOT/
             
             # 测试HTTPS访问
-            echo "🌐 测试HTTPS访问:"
+            echo "🌐 [${{ inputs.project }}] 测试HTTPS访问:"
             if curl -f -s https://$DOMAIN > /dev/null 2>&1; then
-              echo "✅ HTTPS访问正常"
+              echo "✅ [${{ inputs.project }}] HTTPS访问正常"
             else
-              echo "⚠️  HTTPS访问测试失败（可能尚未部署项目）"
+              echo "⚠️  [${{ inputs.project }}] HTTPS访问测试失败（可能尚未部署项目）"
             fi
             
-            echo "✅ Nginx环境初始化完成！"
+            echo "✅ [${{ inputs.project }}] Nginx环境初始化完成！"
 
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
@@ -219,7 +230,7 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            echo "🚀 开始部署项目: ${{ inputs.project }}"
+            echo "🚀 [${{ inputs.project }}] 开始部署项目: ${{ inputs.project }}"
             
             # 标准化目录结构
             APPS_ROOT="/srv/apps"
@@ -230,11 +241,11 @@ jobs:
             if [[ "${{ inputs.project }}" == "axi-star-cloud" ]]; then
               # Go项目部署到应用目录
               DEPLOY_PATH="$APPS_ROOT/${{ inputs.project }}"
-              echo "📁 Go项目部署到: $DEPLOY_PATH"
+              echo "📁 [${{ inputs.project }}] Go项目部署到: $DEPLOY_PATH"
             else
               # 静态项目部署到静态文件目录
               DEPLOY_PATH="$STATIC_ROOT/${{ inputs.project }}"
-              echo "📁 静态项目部署到: $DEPLOY_PATH"
+              echo "📁 [${{ inputs.project }}] 静态项目部署到: $DEPLOY_PATH"
             fi
             
             # 创建部署目录
@@ -242,11 +253,11 @@ jobs:
             sudo chown deploy:deploy $DEPLOY_PATH
             
             # 解压并部署文件
-            echo "📦 解压部署文件..."
+            echo "📦 [${{ inputs.project }}] 解压部署文件..."
             cd /tmp
             if [ -f "deployment.tar.gz" ]; then
               # Go项目部署
-              echo "🔧 部署Go项目..."
+              echo "🔧 [${{ inputs.project }}] 部署Go项目..."
               sudo tar xzf deployment.tar.gz -C $DEPLOY_PATH
               sudo chown -R deploy:deploy $DEPLOY_PATH
               
@@ -261,32 +272,32 @@ jobs:
               sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
               
               # 重启服务
-              echo "🔄 重启宝塔面板网站..."
+              echo "🔄 [${{ inputs.project }}] 重启宝塔面板网站..."
               bt restart
               
               # 等待服务启动
-              echo "⏳ 等待服务启动..."
+              echo "⏳ [${{ inputs.project }}] 等待服务启动..."
               sleep 5
               
               # 健康检查
-              echo "🔍 检查服务健康状态..."
+              echo "🔍 [${{ inputs.project }}] 检查服务健康状态..."
               if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
-                echo "✅ 服务启动成功 - 健康检查通过"
+                echo "✅ [${{ inputs.project }}] 服务启动成功 - 健康检查通过"
               else
-                echo "❌ 服务启动失败 - 健康检查失败"
-                echo "📊 服务状态:"
+                echo "❌ [${{ inputs.project }}] 服务启动失败 - 健康检查失败"
+                echo "📊 [${{ inputs.project }}] 服务状态:"
                 bt status
                 exit 1
               fi
             else
               # 静态项目部署
-              echo "📁 部署静态项目..."
+              echo "📁 [${{ inputs.project }}] 部署静态项目..."
               sudo cp -r * $DEPLOY_PATH/
               sudo chown -R deploy:deploy $DEPLOY_PATH
-              echo "✅ 静态项目部署完成"
+              echo "✅ [${{ inputs.project }}] 静态项目部署完成"
             fi
             
-            echo "✅ 项目部署完成: ${{ inputs.project }}"
+            echo "✅ [${{ inputs.project }}] 项目部署完成: ${{ inputs.project }}"
 
       - name: 配置Nginx（如果提供配置）
         if: inputs.nginx_config != ''
@@ -297,7 +308,7 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            echo "🔧 配置Nginx..."
+            echo "🔧 [${{ inputs.project }}] 配置Nginx..."
             
             NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
             PROJECT="${{ inputs.project }}"
@@ -310,21 +321,21 @@ jobs:
             ${{ inputs.nginx_config }}
             EOF
             
-            echo "✅ Nginx配置已写入: $ROUTE_CONF"
+            echo "✅ [${{ inputs.project }}] Nginx配置已写入: $ROUTE_CONF"
             
             # 检查Nginx配置语法
             if sudo nginx -t; then
-              echo "✅ Nginx配置语法检查通过"
+              echo "✅ [${{ inputs.project }}] Nginx配置语法检查通过"
             else
-              echo "❌ Nginx配置语法错误"
+              echo "❌ [${{ inputs.project }}] Nginx配置语法错误"
               exit 1
             fi
             
             # 重载Nginx配置
             if sudo systemctl reload nginx; then
-              echo "✅ Nginx配置重载完成"
+              echo "✅ [${{ inputs.project }}] Nginx配置重载完成"
             else
-              echo "❌ Nginx重载失败"
+              echo "❌ [${{ inputs.project }}] Nginx重载失败"
               exit 1
             fi
 
@@ -337,7 +348,7 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            echo "🌐 测试网站可访问性..."
+            echo "🌐 [${{ inputs.project }}] 测试网站可访问性..."
             测试URL: ${{ inputs.test_url }}
             
             # 等待一段时间让服务完全启动
@@ -347,11 +358,11 @@ jobs:
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ inputs.test_url }})
             
             if [ "$HTTP_STATUS" = "200" ]; then
-              echo "✅ 网站可访问 (HTTP $HTTP_STATUS)"
+              echo "✅ [${{ inputs.project }}] 网站可访问 (HTTP $HTTP_STATUS)"
             elif [ "$HTTP_STATUS" = "404" ]; then
-              echo "⚠️  网站返回404 (可能尚未部署项目)"
+              echo "⚠️  [${{ inputs.project }}] 网站返回404 (可能尚未部署项目)"
             else
-              echo "❌ 网站无法访问 (HTTP $HTTP_STATUS)"
+              echo "❌ [${{ inputs.project }}] 网站无法访问 (HTTP $HTTP_STATUS)"
               echo "可能的原因:"
               echo "1. 域名解析问题"
               echo "2. 服务器防火墙设置"
@@ -365,9 +376,9 @@ jobs:
 
       - name: 部署完成通知
         run: |
-          echo "🎉 部署完成！"
+          echo "🎉 [${{ inputs.project }}] 部署完成！"
           echo ""
-          echo "📋 部署摘要:"
+          echo "📋 [${{ inputs.project }}] 部署摘要:"
           echo "- 项目: ${{ inputs.project }}"
           echo "- 部署路径: ${{ inputs.deploy_path }}"
           echo "- 源仓库: ${{ inputs.source_repo }}"
@@ -376,4 +387,4 @@ jobs:
             echo "- 测试URL: ${{ inputs.test_url }}"
           fi
           echo ""
-          echo "✅ 项目已成功部署到服务器"
+          echo "✅ [${{ inputs.project }}] 项目已成功部署到服务器"
