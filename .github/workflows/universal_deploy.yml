@@ -414,28 +414,47 @@ jobs:
                 sudo mkdir -p $DEPLOY_PATH/logs
                 sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
                 
-                # 启动服务
-                echo "🚀 启动后端服务..."
-                sudo systemctl daemon-reload
-                sudo systemctl enable star-cloud.service
-                sudo systemctl restart star-cloud.service
-                
-                # 等待服务启动
-                echo "⏳ 等待服务启动..."
-                sleep 10
-                
-                # 健康检查
-                echo "🔍 检查服务健康状态..."
-                if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
-                  echo "✅ 服务启动成功 - 健康检查通过"
-                else
-                  echo "❌ 服务启动失败 - 健康检查失败"
-                  echo "📊 服务状态:"
-                  sudo systemctl status star-cloud.service --no-pager -l
-                  echo "📋 服务日志:"
-                  sudo journalctl -u star-cloud.service --no-pager -n 20
-                  exit 1
-                fi
+                                 # 检查文件权限和目录结构
+                 echo "🔍 检查文件权限和目录结构..."
+                 echo "📁 部署目录内容:"
+                 ls -la $DEPLOY_PATH/
+                 echo "📁 二进制文件:"
+                 ls -la $DEPLOY_PATH/star-cloud-linux
+                 echo "📁 服务文件:"
+                 ls -la $DEPLOY_PATH/star-cloud.service
+                 echo "📁 配置文件:"
+                 ls -la $DEPLOY_PATH/backend/config/
+                 
+                 # 检查服务文件内容
+                 echo "📋 服务文件内容:"
+                 cat $DEPLOY_PATH/star-cloud.service
+                 
+                 # 启动服务
+                 echo "🚀 启动后端服务..."
+                 sudo systemctl daemon-reload
+                 sudo systemctl enable star-cloud.service
+                 sudo systemctl restart star-cloud.service
+                 
+                 # 等待服务启动
+                 echo "⏳ 等待服务启动..."
+                 sleep 10
+                 
+                 # 健康检查
+                 echo "🔍 检查服务健康状态..."
+                 if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+                   echo "✅ 服务启动成功 - 健康检查通过"
+                 else
+                   echo "❌ 服务启动失败 - 健康检查失败"
+                   echo "📊 服务状态:"
+                   sudo systemctl status star-cloud.service --no-pager -l
+                   echo "📋 服务日志:"
+                   sudo journalctl -u star-cloud.service --no-pager -n 20
+                   echo "🔍 检查端口占用:"
+                   sudo netstat -tlnp | grep :8080
+                   echo "🔍 检查进程:"
+                   ps aux | grep star-cloud
+                   exit 1
+                 fi
               else
                 # 静态项目部署
                 echo "📁 部署静态项目..."
@@ -485,13 +504,19 @@ jobs:
               exit 1
             fi
             
-            # 重载Nginx配置
-            if sudo systemctl reload nginx; then
-              echo "✅ Nginx配置重载完成"
-            else
-              echo "❌ Nginx重载失败"
-              exit 1
-            fi
+                         # 检查生成的配置文件
+             echo "📋 生成的 Nginx 配置文件内容:"
+             cat $ROUTE_CONF
+             
+             # 重载Nginx配置
+             if sudo systemctl reload nginx; then
+               echo "✅ Nginx配置重载完成"
+             else
+               echo "❌ Nginx重载失败"
+               echo "📋 Nginx 错误日志:"
+               sudo tail -n 20 /var/log/nginx/error.log
+               exit 1
+             fi
 
       - name: 执行启动命令（后端项目）
         if: inputs.start_cmd != '' && inputs.deploy_type == 'backend'
