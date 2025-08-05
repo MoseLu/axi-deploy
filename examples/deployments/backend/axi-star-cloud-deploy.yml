@@ -60,9 +60,28 @@ jobs:
         mkdir -p /www/wwwroot/${{ github.event.repository.name }}/uploads/{image,document,audio,video,other,avatars}
         mkdir -p /www/wwwroot/${{ github.event.repository.name }}/logs
         
+        # 修复systemd服务文件中的路径
+        sed -i 's|WorkingDirectory=/srv/apps/axi-star-cloud|WorkingDirectory=/www/wwwroot/axi-star-cloud|g' /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service
+        sed -i 's|ExecStart=/srv/apps/axi-star-cloud/star-cloud-linux|ExecStart=/www/wwwroot/axi-star-cloud/star-cloud-linux|g' /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service
+        
+        # 检查文件权限和路径
+        echo "🔍 检查部署文件..."
+        ls -la /www/wwwroot/${{ github.event.repository.name }}/
+        echo "🔍 检查可执行文件..."
+        file /www/wwwroot/${{ github.event.repository.name }}/star-cloud-linux
+        echo "🔍 检查配置文件..."
+        ls -la /www/wwwroot/${{ github.event.repository.name }}/backend/config/
+        
         # 复制systemd服务文件
         sudo cp /www/wwwroot/${{ github.event.repository.name }}/star-cloud.service /etc/systemd/system/
         sudo chmod 644 /etc/systemd/system/star-cloud.service
+        
+        # 显示服务文件内容
+        echo "🔍 检查systemd服务配置..."
+        cat /etc/systemd/system/star-cloud.service
+        
+        # 停止可能存在的旧服务
+        sudo systemctl stop star-cloud.service 2>/dev/null || true
         
         # 重启服务
         sudo systemctl daemon-reload
@@ -70,16 +89,41 @@ jobs:
         sudo systemctl restart star-cloud.service
         
         # 等待服务启动
-        sleep 5
+        echo "⏳ 等待服务启动..."
+        sleep 10
+        
+        # 检查服务状态
+        echo "🔍 检查服务状态..."
+        sudo systemctl status star-cloud.service --no-pager --lines 5
+        
+        # 检查端口监听
+        echo "🔍 检查端口监听..."
+        netstat -tlnp | grep :8080 || ss -tlnp | grep :8080 || echo "端口8080未监听"
         
         # 健康检查
+        echo "🔍 执行健康检查..."
         if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
             echo "✅ 服务启动成功"
         else
             echo "❌ 服务启动失败"
-            sudo systemctl status star-cloud.service --no-pager --lines 5
+            echo "🔍 详细错误信息:"
+            sudo systemctl status star-cloud.service --no-pager --lines 10
+            sudo journalctl -u star-cloud.service --no-pager --lines 20
+            echo "🔍 尝试直接运行应用..."
+            cd /www/wwwroot/${{ github.event.repository.name }}/
+            timeout 10s ./star-cloud-linux || echo "直接运行也失败"
             exit 1
         fi
+        
+        # 检查Nginx配置
+        echo "🔍 检查Nginx配置..."
+        nginx -t
+        nginx -s reload
+        
+        # 最终测试
+        echo "🔍 最终访问测试..."
+        curl -I http://127.0.0.1:8080/health
+        curl -I https://redamancy.com.cn/health
       run_id: ${{ github.run_id }}
       source_repo: ${{ github.repository }}
       test_url: https://redamancy.com.cn/
@@ -116,6 +160,11 @@ jobs:
                 
                 # 上传文件大小限制
                 client_max_body_size 100M;
+                
+                # 超时设置
+                proxy_connect_timeout 60s;
+                proxy_send_timeout 60s;
+                proxy_read_timeout 60s;
             }
             
             # 健康检查端点
