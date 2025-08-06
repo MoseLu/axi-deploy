@@ -47,6 +47,96 @@ else
 fi
 ```
 
+## 修复当前配置文件
+
+如果您的配置文件有冲突，请执行以下命令修复：
+
+```bash
+# 1. 备份当前配置
+sudo cp /www/server/nginx/conf/conf.d/redamancy/route-axi-docs.conf /www/server/nginx/conf/conf.d/redamancy/route-axi-docs.conf.backup
+sudo cp /www/server/nginx/conf/conf.d/redamancy/route-axi-star-cloud.conf /www/server/nginx/conf/conf.d/redamancy/route-axi-star-cloud.conf.backup
+
+# 2. 修复 route-axi-docs.conf（只包含docs配置）
+sudo tee /www/server/nginx/conf/conf.d/redamancy/route-axi-docs.conf <<'EOF'
+    location /docs/ {
+        alias /www/wwwroot/redamancy.com.cn/docs/;
+        index index.html;
+        try_files $uri $uri/ /docs/index.html;
+        
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+        
+        location ~* \.html$ {
+            expires -1;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+    }
+EOF
+
+# 3. 修复 route-axi-star-cloud.conf（移除docs配置，避免冲突）
+sudo tee /www/server/nginx/conf/conf.d/redamancy/route-axi-star-cloud.conf <<'EOF'
+# axi-star-cloud 项目路由配置
+
+# 主站点配置 - axi-star-cloud
+location / {
+    root /srv/apps/axi-star-cloud;
+    index index.html index.htm;
+    try_files $uri $uri/ /index.html;
+    
+    # 静态资源缓存
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+
+# API 代理到 Go 后端
+location /api/ {
+    proxy_pass http://127.0.0.1:8080/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    # 上传文件大小限制
+    client_max_body_size 100M;
+}
+
+# 健康检查端点
+location /health {
+    proxy_pass http://127.0.0.1:8080/health;
+    proxy_set_header Host $host;
+}
+
+# 上传文件服务
+location /uploads/ {
+    alias /srv/apps/axi-star-cloud/uploads/;
+    try_files $uri =404;
+}
+
+# 静态资源服务
+location /static/ {
+    alias /srv/apps/axi-star-cloud/front/;
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+}
+EOF
+
+# 4. 测试配置
+sudo nginx -t
+
+# 5. 如果测试通过，重载配置
+if [ $? -eq 0 ]; then
+    sudo systemctl reload nginx
+    echo "✅ Nginx配置已修复并重载"
+else
+    echo "❌ 配置仍有错误，请检查"
+    exit 1
+fi
+```
+
 ## 紧急修复步骤
 
 ### 1. 备份当前配置
