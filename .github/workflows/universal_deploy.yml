@@ -930,6 +930,23 @@ jobs:
             echo "📋 检查nginx错误日志..."
             tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
             
+            # 检查当前nginx配置
+            echo "📋 检查当前nginx配置..."
+            if [ -f "/www/server/nginx/conf/conf.d/redamancy/route-axi-star-cloud.conf" ]; then
+              echo "route-axi-star-cloud.conf 内容:"
+              cat /www/server/nginx/conf/conf.d/redamancy/route-axi-star-cloud.conf
+            else
+              echo "route-axi-star-cloud.conf 不存在"
+            fi
+            
+            # 测试本地访问
+            echo "📋 测试本地访问..."
+            curl -I -H "Host: redamancy.com.cn" http://127.0.0.1/ 2>/dev/null || echo "本地访问失败"
+            
+            # 检查nginx进程
+            echo "📋 检查nginx进程..."
+            ps aux | grep nginx | grep -v grep || echo "没有找到nginx进程"
+            
             if [ "$HTTPS_STATUS" = "200" ]; then
               echo "✅ HTTPS网站可访问 (HTTP $HTTPS_STATUS)"
             elif [ "$HTTPS_STATUS" = "404" ]; then
