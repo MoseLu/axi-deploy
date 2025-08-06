@@ -193,7 +193,7 @@ jobs:
             MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
             
             # 检查是否需要重新生成配置
-            if [ ! -f "$MAIN_CONF" ] || [ "$FORCE_REBUILD" = "true" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ]; then
+            if [ ! -f "$MAIN_CONF" ] || [ "$FORCE_REBUILD" = "true" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ] || [ "$(grep -c 'location / {' $MAIN_CONF 2>/dev/null || echo 0)" -gt 0 ]; then
               echo "🔄 重新生成主配置文件..."
               sudo tee $MAIN_CONF <<'EOF'
             server {
