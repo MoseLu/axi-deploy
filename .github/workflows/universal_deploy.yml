@@ -241,8 +241,8 @@ jobs:
                 listen 80;
                 server_name redamancy.com.cn;
                 
-                # 自动加载所有项目路由配置（HTTP版本）
-                include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
+                # HTTP到HTTPS重定向
+                return 301 https://$host$request_uri;
             }
             EOF
               echo "✅ 主配置文件已更新"
@@ -753,8 +753,28 @@ jobs:
                 echo "当前配置: $CLEANED_CONFIG"
               fi
               
-              # 直接写入配置
-              echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              # 检查是否包含location /配置，如果包含，需要特殊处理
+              if echo "$CLEANED_CONFIG" | grep -q "location /"; then
+                echo "⚠️ 检测到location /配置，检查是否与其他项目冲突..."
+                
+                # 检查是否已有其他项目配置了location /
+                EXISTING_LOCATION_COUNT=$(find "$NGINX_CONF_DIR" -name "route-*.conf" -exec grep -l "location /" {} \; | wc -l)
+                
+                if [ "$EXISTING_LOCATION_COUNT" -gt 0 ]; then
+                  echo "⚠️ 发现其他项目已配置location /，跳过当前配置以避免冲突"
+                  echo "📋 当前项目配置将被忽略，因为location /已存在"
+                  
+                  # 创建一个空的配置文件，避免错误
+                  echo "# 项目配置已跳过，避免重复的location /配置" | sudo tee $ROUTE_CONF
+                else
+                  echo "✅ 没有发现其他location /配置，写入当前配置"
+                  echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+                fi
+              else
+                echo "✅ 没有location /配置，直接写入"
+                echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              fi
+              
               echo "✅ Nginx配置已写入: $ROUTE_CONF (location块)"
             fi
             
