@@ -629,8 +629,10 @@ jobs:
               CLEANED_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g' | sed 's/^/    /')
               
               # 检查配置是否包含正确的路径
-              if echo "$CLEANED_CONFIG" | grep -q "/www/wwwroot/redamancy.com.cn/docs/"; then
-                echo "✅ 检测到正确的部署路径"
+              if echo "$CLEANED_CONFIG" | grep -q "/srv/static/axi-docs/"; then
+                echo "✅ 检测到正确的部署路径 (/srv/static/axi-docs/)"
+              elif echo "$CLEANED_CONFIG" | grep -q "/www/wwwroot/redamancy.com.cn/docs/"; then
+                echo "✅ 检测到正确的部署路径 (/www/wwwroot/redamancy.com.cn/docs/)"
               else
                 echo "⚠️ 警告: 配置中可能使用了错误的路径"
                 echo "当前配置: $CLEANED_CONFIG"
