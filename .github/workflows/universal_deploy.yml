@@ -834,8 +834,15 @@ jobs:
             echo "HTTP测试结果: $HTTP_STATUS"
             
             echo "📋 测试HTTPS访问..."
-            HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/)
+            HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 https://redamancy.com.cn/)
             echo "HTTPS测试结果: $HTTPS_STATUS"
+            
+            # 如果HTTPS返回301，检查重定向目标
+            if [ "$HTTPS_STATUS" = "301" ]; then
+              echo "📋 检查HTTPS重定向目标..."
+              REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 https://redamancy.com.cn/)
+              echo "重定向目标: $REDIRECT_URL"
+            fi
             
             # 检查配置文件
             echo "📋 检查nginx配置文件..."
