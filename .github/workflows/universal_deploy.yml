@@ -633,21 +633,28 @@ jobs:
               echo "⚠️ 主配置文件不存在: $MAIN_CONF"
             fi
             
+            # 创建备份目录
+            BACKUP_DIR="$NGINX_CONF_DIR/backups"
+            echo "📁 创建备份目录: $BACKUP_DIR"
+            sudo mkdir -p "$BACKUP_DIR"
+            sudo chmod 755 "$BACKUP_DIR"
+            
             # 清理旧的 Nginx 配置文件（仅路由配置）
             echo "🧹 清理旧的路由配置文件..."
             if [ -f "$ROUTE_CONF" ]; then
               echo "📋 备份旧路由配置文件: $ROUTE_CONF"
-              sudo cp $ROUTE_CONF ${ROUTE_CONF}.backup.$(date +%Y%m%d_%H%M%S)
-              sudo rm -f $ROUTE_CONF
-              echo "✅ 旧路由配置文件已清理"
+              BACKUP_FILE="$BACKUP_DIR/route-$PROJECT.conf.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp "$ROUTE_CONF" "$BACKUP_FILE"
+              sudo rm -f "$ROUTE_CONF"
+              echo "✅ 旧路由配置文件已备份到: $BACKUP_FILE"
               
-              # 清理旧的备份文件，只保留最近5个
+              # 清理旧的备份文件，只保留最近2个
               echo "🧹 清理旧的备份文件..."
-              BACKUP_FILES=$(ls -t ${ROUTE_CONF}.backup.* 2>/dev/null | tail -n +6)
+              BACKUP_FILES=$(ls -t "$BACKUP_DIR"/route-$PROJECT.conf.backup.* 2>/dev/null | tail -n +3)
               if [ -n "$BACKUP_FILES" ]; then
                 echo "🗑️ 删除旧的备份文件:"
                 echo "$BACKUP_FILES" | xargs -r sudo rm -f
-                echo "✅ 旧备份文件已清理"
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
               else
                 echo "📋 没有需要清理的旧备份文件"
               fi
