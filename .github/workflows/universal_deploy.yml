@@ -197,8 +197,9 @@ jobs:
               echo "🔄 重新生成主配置文件..."
               sudo tee $MAIN_CONF <<'EOF'
             server {
-                listen 443 ssl http2;
+                listen 443 ssl;
                 server_name redamancy.com.cn;
+                http2 on;
             
                 ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
                 ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
@@ -608,12 +609,32 @@ jobs:
             # 生成项目路由配置
             ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
             
-            # 写入项目配置
-            sudo tee $ROUTE_CONF <<'EOF'
-            ${{ inputs.nginx_config }}
-            EOF
-            
-            echo "✅ Nginx配置已写入: $ROUTE_CONF"
+            # 检查nginx_config是否包含server块
+            if echo '${{ inputs.nginx_config }}' | grep -q '^server {'; then
+              # 如果包含server块，直接写入
+              sudo tee $ROUTE_CONF <<'EOF'
+              ${{ inputs.nginx_config }}
+              EOF
+              echo "✅ Nginx配置已写入: $ROUTE_CONF (包含server块)"
+            else
+              # 如果不包含server块，包装在server块中
+              echo "📝 检测到location块配置，包装在server块中..."
+              sudo tee $ROUTE_CONF <<'EOF'
+              server {
+                  listen 443 ssl;
+                  server_name redamancy.com.cn;
+                  http2 on;
+              
+                  ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
+                  ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
+              
+                  client_max_body_size 100m;
+              
+                  ${{ inputs.nginx_config }}
+              }
+              EOF
+              echo "✅ Nginx配置已写入: $ROUTE_CONF (已包装在server块中)"
+            fi
             
             # 检查Nginx配置语法
             if sudo nginx -t; then
