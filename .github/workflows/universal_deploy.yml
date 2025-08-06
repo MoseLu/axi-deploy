@@ -858,6 +858,27 @@ jobs:
               echo "没有找到宝塔面板配置文件"
             fi
             
+            # 检查所有include的文件
+            echo "📋 检查所有include的文件..."
+            grep -r "include.*\.conf" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他include文件"
+            
+            # 检查是否有其他server块
+            echo "📋 检查所有server块..."
+            grep -r "server {" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他server块"
+            
+            # 检查网络层面
+            echo "📋 检查网络层面..."
+            echo "检查是否有CDN或代理:"
+            curl -I -H "Host: redamancy.com.cn" http://127.0.0.1/ 2>/dev/null || echo "本地访问失败"
+            
+            # 检查DNS解析
+            echo "📋 检查DNS解析..."
+            nslookup redamancy.com.cn || echo "DNS解析失败"
+            
+            # 检查防火墙规则
+            echo "📋 检查防火墙规则..."
+            iptables -L -n | grep -E "(80|443)" || echo "没有找到相关防火墙规则"
+            
             if [ "$HTTPS_STATUS" = "200" ]; then
               echo "✅ HTTPS网站可访问 (HTTP $HTTPS_STATUS)"
             elif [ "$HTTPS_STATUS" = "404" ]; then
