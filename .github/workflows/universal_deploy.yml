@@ -192,6 +192,33 @@ jobs:
             echo "📝 更新主配置文件..."
             MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
             
+            # 创建主配置文件备份目录
+            MAIN_BACKUP_DIR="$NGINX_CONF_DIR/backups/main"
+            echo "📁 创建主配置文件备份目录: $MAIN_BACKUP_DIR"
+            sudo mkdir -p "$MAIN_BACKUP_DIR"
+            sudo chmod 755 "$MAIN_BACKUP_DIR"
+            
+            # 备份现有主配置文件（如果存在）
+            if [ -f "$MAIN_CONF" ]; then
+              echo "📋 备份现有主配置文件: $MAIN_CONF"
+              MAIN_BACKUP_FILE="$MAIN_BACKUP_DIR/00-main.conf.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp "$MAIN_CONF" "$MAIN_BACKUP_FILE"
+              echo "✅ 主配置文件已备份到: $MAIN_BACKUP_FILE"
+              
+              # 清理旧的备份文件，只保留最近3个
+              echo "🧹 清理旧的主配置文件备份..."
+              BACKUP_FILES=$(ls -t "$MAIN_BACKUP_DIR"/00-main.conf.backup.* 2>/dev/null | tail -n +4)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的主配置文件备份:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -f
+                echo "✅ 旧主配置文件备份已清理，保留最近3个备份"
+              else
+                echo "📋 没有需要清理的旧主配置文件备份"
+              fi
+            else
+              echo "📋 主配置文件不存在，将创建新文件"
+            fi
+            
             # 检查是否需要重新生成配置
             if [ ! -f "$MAIN_CONF" ] || [ "$FORCE_REBUILD" = "true" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ] || [ "$(grep -c 'location / {' $MAIN_CONF 2>/dev/null || echo 0)" -gt 0 ]; then
               echo "🔄 重新生成主配置文件..."
@@ -654,6 +681,18 @@ jobs:
               echo "✅ 主配置文件存在，设置只读权限保护"
               sudo chmod 444 "$MAIN_CONF"
               echo "📋 主配置文件权限: $(ls -la $MAIN_CONF)"
+              
+              # 显示备份信息
+              MAIN_BACKUP_DIR="$NGINX_CONF_DIR/backups/main"
+              if [ -d "$MAIN_BACKUP_DIR" ]; then
+                echo "📋 主配置文件备份目录: $MAIN_BACKUP_DIR"
+                BACKUP_COUNT=$(ls -1 "$MAIN_BACKUP_DIR"/00-main.conf.backup.* 2>/dev/null | wc -l)
+                echo "📊 当前备份数量: $BACKUP_COUNT"
+                if [ "$BACKUP_COUNT" -gt 0 ]; then
+                  echo "📋 最新备份文件:"
+                  ls -la "$MAIN_BACKUP_DIR"/00-main.conf.backup.* | tail -1
+                fi
+              fi
             else
               echo "⚠️ 主配置文件不存在: $MAIN_CONF"
             fi
