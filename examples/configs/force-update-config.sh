@@ -42,12 +42,6 @@ server {
     
     # 自动加载所有项目路由配置（HTTP版本）
     include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
-    
-    # 对于未匹配的路由，重定向到HTTPS
-    # 注意：这里不处理已经在route-*.conf中定义的路由
-    location / {
-        return 301 https://$host$request_uri;
-    }
 }
 EOF
 
