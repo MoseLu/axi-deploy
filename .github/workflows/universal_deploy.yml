@@ -213,7 +213,14 @@ jobs:
             server {
                 listen 80;
                 server_name redamancy.com.cn;
-                return 301 https://$host$request_uri;
+                
+                # 自动加载所有项目路由配置（HTTP版本）
+                include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
+                
+                # 其他路径重定向到 HTTPS
+                location / {
+                    return 301 https://$host$request_uri;
+                }
             }
             EOF
               echo "✅ 主配置文件已更新"
