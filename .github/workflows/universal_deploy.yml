@@ -775,17 +775,29 @@ jobs:
             # 测试配置是否生效
             echo "🔍 测试配置是否生效..."
             sleep 5
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/docs/)
-            echo "测试结果: HTTP $HTTP_STATUS"
             
-            if [ "$HTTP_STATUS" = "200" ]; then
-              echo "✅ 配置生效，返回 200"
-            elif [ "$HTTP_STATUS" = "301" ]; then
-              echo "❌ 仍然返回 301，检查其他配置..."
-              echo "📋 检查是否有其他配置文件处理 /docs/ 路径:"
-              grep -r "location.*docs" /www/server/nginx/conf/ || echo "没有找到其他 docs location"
+            # 先测试HTTP
+            echo "📋 测试HTTP访问..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://redamancy.com.cn/)
+            echo "HTTP测试结果: $HTTP_STATUS"
+            
+            # 再测试HTTPS
+            echo "📋 测试HTTPS访问..."
+            HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/)
+            echo "HTTPS测试结果: $HTTPS_STATUS"
+            
+            # 检查是否有其他配置文件干扰
+            echo "📋 检查所有nginx配置文件..."
+            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "redamancy\|location" {} \;
+            
+            if [ "$HTTPS_STATUS" = "200" ]; then
+              echo "✅ HTTPS配置生效，返回 200"
+            elif [ "$HTTPS_STATUS" = "301" ]; then
+              echo "❌ HTTPS仍然返回 301，检查其他配置..."
+              echo "📋 检查是否有其他配置文件处理根路径:"
+              grep -r "location.*/" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他根路径location"
             else
-              echo "⚠️ 返回状态码: $HTTP_STATUS"
+              echo "⚠️ HTTPS返回状态码: $HTTPS_STATUS"
             fi
 
       - name: 执行启动命令（后端项目）
