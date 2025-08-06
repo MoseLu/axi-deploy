@@ -886,6 +886,25 @@ jobs:
             echo "📋 检查防火墙规则..."
             iptables -L -n | grep -E "(80|443)" || echo "没有找到相关防火墙规则"
             
+            # 检查部署文件是否存在
+            echo "📋 检查部署文件..."
+            if [ -f "/srv/apps/axi-star-cloud/front/index.html" ]; then
+              echo "✅ index.html 存在"
+              ls -la /srv/apps/axi-star-cloud/front/index.html
+            else
+              echo "❌ index.html 不存在"
+              echo "部署目录内容:"
+              ls -la /srv/apps/axi-star-cloud/front/ || echo "目录不存在"
+            fi
+            
+            # 检查nginx配置语法
+            echo "📋 检查nginx配置语法..."
+            nginx -t 2>&1 || echo "nginx配置语法错误"
+            
+            # 检查nginx错误日志
+            echo "📋 检查nginx错误日志..."
+            tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
+            
             if [ "$HTTPS_STATUS" = "200" ]; then
               echo "✅ HTTPS网站可访问 (HTTP $HTTPS_STATUS)"
             elif [ "$HTTPS_STATUS" = "404" ]; then
