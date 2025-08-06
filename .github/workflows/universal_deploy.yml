@@ -877,19 +877,44 @@ jobs:
             echo "🔍 测试配置是否生效..."
             sleep 5
             
-            # 先测试HTTP
-            echo "📋 测试HTTP访问..."
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://redamancy.com.cn/)
-            echo "HTTP测试结果: $HTTP_STATUS"
+            # 根据项目类型和配置确定测试URL
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            TEST_URL="${{ inputs.test_url }}"
             
-            # 再测试HTTPS
-            echo "📋 测试HTTPS访问..."
-            HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/)
-            echo "HTTPS测试结果: $HTTPS_STATUS"
+            # 如果提供了test_url，使用它进行测试
+            if [ -n "$TEST_URL" ]; then
+              echo "📋 使用提供的测试URL: $TEST_URL"
+              # 提取域名和路径
+              DOMAIN=$(echo "$TEST_URL" | sed -E 's|^https?://([^/]+).*|\1|')
+              PATH_PART=$(echo "$TEST_URL" | sed -E 's|^https?://[^/]+(/.*)?|\1|')
+              if [ "$PATH_PART" = "" ]; then
+                PATH_PART="/"
+              fi
+              
+              echo "📋 解析测试URL:"
+              echo "- 域名: $DOMAIN"
+              echo "- 路径: $PATH_PART"
+              
+              # 先测试HTTP
+              echo "📋 测试HTTP访问..."
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART")
+              echo "HTTP测试结果: $HTTP_STATUS"
+              
+              # 再测试HTTPS
+              echo "📋 测试HTTPS访问..."
+              HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$DOMAIN$PATH_PART")
+              echo "HTTPS测试结果: $HTTPS_STATUS"
+            else
+              # 如果没有提供test_url，跳过测试
+              echo "📋 未提供test_url，跳过测试"
+              echo "⚠️ 建议在业务仓库的部署配置中提供test_url参数"
+              exit 0
+            fi
             
             # 检查是否有其他配置文件干扰
             echo "📋 检查所有nginx配置文件..."
-            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "redamancy\|location" {} \;
+            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "location" {} \;
             
             if [ "$HTTPS_STATUS" = "200" ]; then
               echo "✅ HTTPS配置生效，返回 200"
@@ -929,39 +954,59 @@ jobs:
             # 等待一段时间让服务完全启动
             sleep 10
             
-            # 分别测试HTTP和HTTPS
-            echo "📋 测试HTTP访问..."
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://redamancy.com.cn/)
-            echo "HTTP测试结果: $HTTP_STATUS"
-            
-            echo "📋 测试HTTPS访问..."
-            HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 https://redamancy.com.cn/)
-            echo "HTTPS测试结果: $HTTPS_STATUS"
-            
-            # 如果HTTPS返回301，检查重定向目标
-            if [ "$HTTPS_STATUS" = "301" ]; then
-              echo "📋 检查HTTPS重定向目标..."
-              REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 https://redamancy.com.cn/)
-              echo "重定向目标: $REDIRECT_URL"
+            # 从test_url中提取域名和路径
+            TEST_URL="${{ inputs.test_url }}"
+            if [ -n "$TEST_URL" ]; then
+              # 提取域名部分
+              DOMAIN=$(echo "$TEST_URL" | sed -E 's|^https?://([^/]+).*|\1|')
+              # 提取路径部分
+              PATH_PART=$(echo "$TEST_URL" | sed -E 's|^https?://[^/]+(/.*)?|\1|')
+              if [ "$PATH_PART" = "" ]; then
+                PATH_PART="/"
+              fi
+              
+              echo "📋 解析测试URL:"
+              echo "- 完整URL: $TEST_URL"
+              echo "- 域名: $DOMAIN"
+              echo "- 路径: $PATH_PART"
+              
+              # 分别测试HTTP和HTTPS
+              echo "📋 测试HTTP访问..."
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART")
+              echo "HTTP测试结果: $HTTP_STATUS"
+              
+              echo "📋 测试HTTPS访问..."
+              HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
+              echo "HTTPS测试结果: $HTTPS_STATUS"
+              
+              # 如果HTTPS返回301，检查重定向目标
+              if [ "$HTTPS_STATUS" = "301" ]; then
+                echo "📋 检查HTTPS重定向目标..."
+                REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
+                echo "重定向目标: $REDIRECT_URL"
+              fi
+            else
+              echo "❌ 未提供测试URL，跳过测试"
+              exit 0
             fi
             
             # 检查配置文件
             echo "📋 检查nginx配置文件..."
-            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "redamancy\|location" {} \;
+            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "location" {} \;
             
             # 检查主配置文件中的重定向规则
             echo "📋 检查主nginx.conf中的重定向规则..."
             grep -n "301\|302\|redirect" /www/server/nginx/conf/nginx.conf || echo "主配置文件中没有重定向规则"
             
-            # 检查是否有其他server块处理redamancy.com.cn
-            echo "📋 检查是否有其他server块处理redamancy.com.cn..."
-            grep -r "server_name.*redamancy" /www/server/nginx/conf/ || echo "没有找到其他redamancy server块"
+            # 检查是否有其他server块处理当前域名
+            echo "📋 检查是否有其他server块处理当前域名..."
+            grep -r "server_name.*$DOMAIN" /www/server/nginx/conf/ || echo "没有找到其他$DOMAIN server块"
             
             # 检查宝塔面板的默认配置
             echo "📋 检查宝塔面板默认配置..."
-            if [ -f "/www/server/panel/vhost/nginx/redamancy.com.cn.conf" ]; then
+            if [ -f "/www/server/panel/vhost/nginx/$DOMAIN.conf" ]; then
               echo "发现宝塔面板配置文件:"
-              cat /www/server/panel/vhost/nginx/redamancy.com.cn.conf
+              cat "/www/server/panel/vhost/nginx/$DOMAIN.conf"
             else
               echo "没有找到宝塔面板配置文件"
             fi
@@ -977,11 +1022,11 @@ jobs:
             # 检查网络层面
             echo "📋 检查网络层面..."
             echo "检查是否有CDN或代理:"
-            curl -I -H "Host: redamancy.com.cn" http://127.0.0.1/ 2>/dev/null || echo "本地访问失败"
+            curl -I -H "Host: $DOMAIN" http://127.0.0.1$PATH_PART 2>/dev/null || echo "本地访问失败"
             
             # 检查DNS解析
             echo "📋 检查DNS解析..."
-            nslookup redamancy.com.cn || echo "DNS解析失败"
+            nslookup $DOMAIN || echo "DNS解析失败"
             
             # 检查防火墙规则
             echo "📋 检查防火墙规则..."
@@ -989,13 +1034,29 @@ jobs:
             
             # 检查部署文件是否存在
             echo "📋 检查部署文件..."
-            if [ -f "/srv/apps/axi-star-cloud/front/index.html" ]; then
-              echo "✅ index.html 存在"
-              ls -la /srv/apps/axi-star-cloud/front/index.html
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            
+            if [ "$DEPLOY_TYPE" = "backend" ]; then
+              # 后端项目检查
+              if [ -f "/srv/apps/$PROJECT/front/index.html" ]; then
+                echo "✅ index.html 存在"
+                ls -la /srv/apps/$PROJECT/front/index.html
+              else
+                echo "❌ index.html 不存在"
+                echo "部署目录内容:"
+                ls -la /srv/apps/$PROJECT/front/ || echo "目录不存在"
+              fi
             else
-              echo "❌ index.html 不存在"
-              echo "部署目录内容:"
-              ls -la /srv/apps/axi-star-cloud/front/ || echo "目录不存在"
+              # 静态项目检查
+              if [ -f "/srv/static/$PROJECT/index.html" ]; then
+                echo "✅ index.html 存在"
+                ls -la /srv/static/$PROJECT/index.html
+              else
+                echo "❌ index.html 不存在"
+                echo "部署目录内容:"
+                ls -la /srv/static/$PROJECT/ || echo "目录不存在"
+              fi
             fi
             
             # 检查nginx配置语法
@@ -1008,16 +1069,17 @@ jobs:
             
             # 检查当前nginx配置
             echo "📋 检查当前nginx配置..."
-            if [ -f "/www/server/nginx/conf/conf.d/redamancy/route-axi-star-cloud.conf" ]; then
-              echo "route-axi-star-cloud.conf 内容:"
-              cat /www/server/nginx/conf/conf.d/redamancy/route-axi-star-cloud.conf
+            ROUTE_CONF="/www/server/nginx/conf/conf.d/redamancy/route-$PROJECT.conf"
+            if [ -f "$ROUTE_CONF" ]; then
+              echo "route-$PROJECT.conf 内容:"
+              cat "$ROUTE_CONF"
             else
-              echo "route-axi-star-cloud.conf 不存在"
+              echo "route-$PROJECT.conf 不存在"
             fi
             
             # 测试本地访问
             echo "📋 测试本地访问..."
-            curl -I -H "Host: redamancy.com.cn" http://127.0.0.1/ 2>/dev/null || echo "本地访问失败"
+            curl -I -H "Host: $DOMAIN" http://127.0.0.1$PATH_PART 2>/dev/null || echo "本地访问失败"
             
             # 检查nginx进程
             echo "📋 检查nginx进程..."
@@ -1042,7 +1104,7 @@ jobs:
               echo "5. 后端服务未启动"
               
               # 显示网站标题
-              TITLE=$(curl -s https://redamancy.com.cn/ | grep -o '<title>[^<]*</title>' | sed 's/<title>\(.*\)<\/title>/\1/')
+              TITLE=$(curl -s "https://$DOMAIN$PATH_PART" | grep -o '<title>[^<]*</title>' | sed 's/<title>\(.*\)<\/title>/\1/')
               echo "网站标题: $TITLE"
               
               # 检查后端服务状态
