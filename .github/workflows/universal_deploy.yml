@@ -640,6 +640,17 @@ jobs:
               sudo cp $ROUTE_CONF ${ROUTE_CONF}.backup.$(date +%Y%m%d_%H%M%S)
               sudo rm -f $ROUTE_CONF
               echo "✅ 旧路由配置文件已清理"
+              
+              # 清理旧的备份文件，只保留最近5个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t ${ROUTE_CONF}.backup.* 2>/dev/null | tail -n +6)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -f
+                echo "✅ 旧备份文件已清理"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
             else
               echo "📋 没有找到旧的路由配置文件: $ROUTE_CONF"
             fi
