@@ -753,9 +753,49 @@ jobs:
                 echo "当前配置: $CLEANED_CONFIG"
               fi
               
-              # 直接写入配置，不再检查冲突（让nginx自己处理）
-              echo "✅ 写入项目配置"
-              echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              # 检查是否有重复的location定义
+              echo "🔍 检查location冲突..."
+              
+              # 检查当前配置中是否包含location /
+              CURRENT_HAS_LOCATION_ROOT=false
+              if echo "$CLEANED_CONFIG" | grep -q "location /"; then
+                CURRENT_HAS_LOCATION_ROOT=true
+                echo "📋 当前配置包含 location /"
+              fi
+              
+              # 检查现有配置中是否包含location /
+              EXISTING_HAS_LOCATION_ROOT=false
+              if [ -f "$ROUTE_CONF" ] && grep -q "location /" "$ROUTE_CONF"; then
+                EXISTING_HAS_LOCATION_ROOT=true
+                echo "📋 现有配置包含 location /"
+              fi
+              
+              # 检查其他route文件中是否包含location /
+              OTHER_HAS_LOCATION_ROOT=false
+              for other_conf in /www/server/nginx/conf/conf.d/redamancy/route-*.conf; do
+                if [ -f "$other_conf" ] && [ "$other_conf" != "$ROUTE_CONF" ] && grep -q "location /" "$other_conf"; then
+                  OTHER_HAS_LOCATION_ROOT=true
+                  echo "📋 其他配置文件 $other_conf 包含 location /"
+                  break
+                fi
+              done
+              
+              # 如果当前配置包含location /，且其他配置也包含location /，则强制覆盖
+              if [ "$CURRENT_HAS_LOCATION_ROOT" = true ] && [ "$OTHER_HAS_LOCATION_ROOT" = true ]; then
+                echo "⚠️ 检测到多个配置文件都有 location /，强制覆盖当前配置"
+                echo "📋 清理其他冲突的配置文件..."
+                for other_conf in /www/server/nginx/conf/conf.d/redamancy/route-*.conf; do
+                  if [ -f "$other_conf" ] && [ "$other_conf" != "$ROUTE_CONF" ] && grep -q "location /" "$other_conf"; then
+                    echo "🗑️ 删除冲突的配置文件: $other_conf"
+                    sudo rm -f "$other_conf"
+                  fi
+                done
+                echo "✅ 写入新配置"
+                echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              else
+                echo "✅ 没有location冲突，写入新配置"
+                echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              fi
               
               echo "✅ Nginx配置已写入: $ROUTE_CONF (location块)"
             fi
