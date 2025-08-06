@@ -218,7 +218,7 @@ jobs:
                 include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
                 
                 # 其他路径重定向到 HTTPS（排除已处理的路由）
-                location ~ ^/(?!docs|api|health|uploads|$) {
+                location ~ ^/(?!docs|api|health|uploads|static|$) {
                     return 301 https://$host$request_uri;
                 }
             }
