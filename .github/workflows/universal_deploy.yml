@@ -432,7 +432,13 @@ jobs:
             
             # 清理目标部署目录（避免残留文件）
             echo "🧹 清理目标部署目录..."
-            sudo rm -rf $DEPLOY_PATH/*
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "📋 备份旧部署目录: $DEPLOY_PATH"
+              sudo mv $DEPLOY_PATH ${DEPLOY_PATH}.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+            fi
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown deploy:deploy $DEPLOY_PATH
+            echo "✅ 部署目录已清理并重新创建"
             
             # 检查临时目录是否存在
             if [ ! -d "$TEMP_DIR" ]; then
@@ -608,6 +614,17 @@ jobs:
             
             # 生成项目路由配置
             ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
+            
+            # 清理旧的 Nginx 配置文件
+            echo "🧹 清理旧的 Nginx 配置文件..."
+            if [ -f "$ROUTE_CONF" ]; then
+              echo "📋 备份旧配置文件: $ROUTE_CONF"
+              sudo cp $ROUTE_CONF ${ROUTE_CONF}.backup.$(date +%Y%m%d_%H%M%S)
+              sudo rm -f $ROUTE_CONF
+              echo "✅ 旧配置文件已清理"
+            else
+              echo "📋 没有找到旧的配置文件: $ROUTE_CONF"
+            fi
             
             # 检查nginx_config是否包含server块
             if echo '${{ inputs.nginx_config }}' | grep -q '^server {'; then
