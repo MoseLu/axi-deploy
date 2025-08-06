@@ -620,8 +620,8 @@ jobs:
               # 如果不包含server块，包装在server块中
               echo "📝 检测到location块配置，包装在server块中..."
               
-              # 清理和格式化nginx_config
-              CLEANED_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g')
+              # 清理和格式化nginx_config，确保正确的缩进
+              CLEANED_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g' | sed 's/^/    /')
               
               # 检查配置是否包含正确的路径
               if echo "$CLEANED_CONFIG" | grep -q "/www/wwwroot/redamancy.com.cn/docs/"; then
@@ -642,7 +642,7 @@ jobs:
               
                   client_max_body_size 100m;
               
-                  $CLEANED_CONFIG
+              $CLEANED_CONFIG
               }
               EOF
               echo "✅ Nginx配置已写入: $ROUTE_CONF (已包装在server块中)"
