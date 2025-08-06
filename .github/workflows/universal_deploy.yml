@@ -618,9 +618,8 @@ jobs:
               # 清理和格式化location配置
               CLEANED_CONFIG=$(echo "$LOCATION_CONFIG" | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g')
               
-              sudo tee $ROUTE_CONF <<EOF
-              $CLEANED_CONFIG
-              EOF
+              # 直接写入配置
+              echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
               echo "✅ Nginx配置已写入: $ROUTE_CONF (提取的location块)"
             else
               # 如果不包含server块，直接使用location块
@@ -637,9 +636,8 @@ jobs:
                 echo "当前配置: $CLEANED_CONFIG"
               fi
               
-              sudo tee $ROUTE_CONF <<EOF
-              $CLEANED_CONFIG
-              EOF
+              # 直接写入配置
+              echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
               echo "✅ Nginx配置已写入: $ROUTE_CONF (location块)"
             fi
             
