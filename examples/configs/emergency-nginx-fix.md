@@ -17,16 +17,6 @@ sudo rm -f /www/server/nginx/conf/conf.d/redamancy/route-axi-docs.conf
 
 # 3. 创建正确的配置文件
 sudo tee /www/server/nginx/conf/conf.d/redamancy/route-axi-docs.conf <<'EOF'
-server {
-    listen 443 ssl;
-    server_name redamancy.com.cn;
-    http2 on;
-
-    ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
-    ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
-
-    client_max_body_size 100m;
-
     location /docs/ {
         alias /www/wwwroot/redamancy.com.cn/docs/;
         index index.html;
@@ -42,7 +32,6 @@ server {
             add_header Cache-Control "no-cache, no-store, must-revalidate";
         }
     }
-}
 EOF
 
 # 4. 测试配置

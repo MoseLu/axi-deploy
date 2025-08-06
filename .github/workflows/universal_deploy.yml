@@ -611,14 +611,20 @@ jobs:
             
             # 检查nginx_config是否包含server块
             if echo '${{ inputs.nginx_config }}' | grep -q '^server {'; then
-              # 如果包含server块，直接写入
-              sudo tee $ROUTE_CONF <<'EOF'
-              ${{ inputs.nginx_config }}
+              # 如果包含server块，提取location块
+              echo "📝 检测到server块配置，提取location块..."
+              LOCATION_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed -n '/location /,/}/p' | sed 's/^/    /')
+              
+              # 清理和格式化location配置
+              CLEANED_CONFIG=$(echo "$LOCATION_CONFIG" | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g')
+              
+              sudo tee $ROUTE_CONF <<EOF
+              $CLEANED_CONFIG
               EOF
-              echo "✅ Nginx配置已写入: $ROUTE_CONF (包含server块)"
+              echo "✅ Nginx配置已写入: $ROUTE_CONF (提取的location块)"
             else
-              # 如果不包含server块，包装在server块中
-              echo "📝 检测到location块配置，包装在server块中..."
+              # 如果不包含server块，直接使用location块
+              echo "📝 检测到location块配置，直接写入..."
               
               # 清理和格式化nginx_config，确保正确的缩进
               CLEANED_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g' | sed 's/^/    /')
@@ -632,20 +638,9 @@ jobs:
               fi
               
               sudo tee $ROUTE_CONF <<EOF
-              server {
-                  listen 443 ssl;
-                  server_name redamancy.com.cn;
-                  http2 on;
-              
-                  ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
-                  ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
-              
-                  client_max_body_size 100m;
-              
               $CLEANED_CONFIG
-              }
               EOF
-              echo "✅ Nginx配置已写入: $ROUTE_CONF (已包装在server块中)"
+              echo "✅ Nginx配置已写入: $ROUTE_CONF (location块)"
             fi
             
             # 检查Nginx配置语法
