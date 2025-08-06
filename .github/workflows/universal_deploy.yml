@@ -217,8 +217,8 @@ jobs:
                 # 自动加载所有项目路由配置（HTTP版本）
                 include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
                 
-                # 其他路径重定向到 HTTPS（更具体的匹配）
-                location ~ ^/(?!docs|api|health|uploads) {
+                # 其他路径重定向到 HTTPS（排除已处理的路由）
+                location ~ ^/(?!docs|api|health|uploads|$) {
                     return 301 https://$host$request_uri;
                 }
             }
