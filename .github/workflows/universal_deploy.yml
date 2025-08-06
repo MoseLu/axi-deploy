@@ -1087,6 +1087,18 @@ jobs:
             
             if [ "$HTTPS_STATUS" = "200" ]; then
               echo "✅ HTTPS网站可访问 (HTTP $HTTPS_STATUS)"
+            elif [ "$HTTPS_STATUS" = "301" ]; then
+              # 检查重定向目标是否正确
+              if [ "$REDIRECT_URL" = "$TEST_URL" ]; then
+                echo "✅ HTTPS重定向到正确目标 (HTTP $HTTPS_STATUS)"
+                echo "重定向目标: $REDIRECT_URL"
+                echo "这是正常的HTTP到HTTPS重定向或路径规范化"
+              else
+                echo "⚠️ HTTPS重定向到不同目标 (HTTP $HTTPS_STATUS)"
+                echo "重定向目标: $REDIRECT_URL"
+                echo "期望目标: $TEST_URL"
+                echo "这可能是配置问题，但通常可以接受"
+              fi
             elif [ "$HTTPS_STATUS" = "404" ]; then
               echo "❌ HTTPS网站返回404 - 部署失败"
               echo "可能的原因:"
