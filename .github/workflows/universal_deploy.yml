@@ -841,6 +841,23 @@ jobs:
             echo "📋 检查nginx配置文件..."
             find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "redamancy\|location" {} \;
             
+            # 检查主配置文件中的重定向规则
+            echo "📋 检查主nginx.conf中的重定向规则..."
+            grep -n "301\|302\|redirect" /www/server/nginx/conf/nginx.conf || echo "主配置文件中没有重定向规则"
+            
+            # 检查是否有其他server块处理redamancy.com.cn
+            echo "📋 检查是否有其他server块处理redamancy.com.cn..."
+            grep -r "server_name.*redamancy" /www/server/nginx/conf/ || echo "没有找到其他redamancy server块"
+            
+            # 检查宝塔面板的默认配置
+            echo "📋 检查宝塔面板默认配置..."
+            if [ -f "/www/server/panel/vhost/nginx/redamancy.com.cn.conf" ]; then
+              echo "发现宝塔面板配置文件:"
+              cat /www/server/panel/vhost/nginx/redamancy.com.cn.conf
+            else
+              echo "没有找到宝塔面板配置文件"
+            fi
+            
             if [ "$HTTPS_STATUS" = "200" ]; then
               echo "✅ HTTPS网站可访问 (HTTP $HTTPS_STATUS)"
             elif [ "$HTTPS_STATUS" = "404" ]; then
