@@ -619,7 +619,19 @@ jobs:
             else
               # 如果不包含server块，包装在server块中
               echo "📝 检测到location块配置，包装在server块中..."
-              sudo tee $ROUTE_CONF <<'EOF'
+              
+              # 清理和格式化nginx_config
+              CLEANED_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g')
+              
+              # 检查配置是否包含正确的路径
+              if echo "$CLEANED_CONFIG" | grep -q "/www/wwwroot/redamancy.com.cn/docs/"; then
+                echo "✅ 检测到正确的部署路径"
+              else
+                echo "⚠️ 警告: 配置中可能使用了错误的路径"
+                echo "当前配置: $CLEANED_CONFIG"
+              fi
+              
+              sudo tee $ROUTE_CONF <<EOF
               server {
                   listen 443 ssl;
                   server_name redamancy.com.cn;
@@ -630,7 +642,7 @@ jobs:
               
                   client_max_body_size 100m;
               
-                  ${{ inputs.nginx_config }}
+                  $CLEANED_CONFIG
               }
               EOF
               echo "✅ Nginx配置已写入: $ROUTE_CONF (已包装在server块中)"
@@ -641,6 +653,10 @@ jobs:
               echo "✅ Nginx配置语法检查通过"
             else
               echo "❌ Nginx配置语法错误"
+              echo "📋 生成的配置文件内容:"
+              cat $ROUTE_CONF
+              echo "📋 Nginx 错误日志:"
+              sudo tail -n 20 /var/log/nginx/error.log
               exit 1
             fi
             

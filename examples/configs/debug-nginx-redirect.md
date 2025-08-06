@@ -4,6 +4,63 @@
 
 访问 `https://redamancy.com.cn/docs/` 时仍然返回 HTTP 301 重定向，而不是直接返回 200 状态码。
 
+## 常见错误
+
+### 1. "location" directive is not allowed here
+
+**错误信息**: `nginx: [emerg] "location" directive is not allowed here`
+
+**原因**: location 指令出现在错误的位置，通常是因为：
+- 配置文件结构不正确
+- location 块没有正确包装在 server 块中
+- 嵌套的 location 块格式错误
+
+**解决方案**:
+
+```bash
+# 1. 检查生成的配置文件
+sudo cat /www/server/nginx/conf/conf.d/redamancy/route-axi-docs.conf
+
+# 2. 检查配置文件语法
+sudo nginx -t
+
+# 3. 查看错误日志
+sudo tail -f /var/log/nginx/error.log
+```
+
+**正确的配置格式**:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name redamancy.com.cn;
+    http2 on;
+
+    ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
+    ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
+
+    client_max_body_size 100m;
+
+    location /docs/ {
+        alias /www/wwwroot/redamancy.com.cn/docs/;
+        index index.html;
+        try_files $uri $uri/ /docs/index.html;
+        
+        # 静态资源缓存
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+        
+        # HTML 文件不缓存
+        location ~* \.html$ {
+            expires -1;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+    }
+}
+```
+
 ## 调试步骤
 
 ### 1. 检查所有Nginx配置文件
