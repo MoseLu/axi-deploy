@@ -437,11 +437,36 @@ jobs:
             sudo mkdir -p $DEPLOY_PATH
             sudo chown deploy:deploy $DEPLOY_PATH
             
+            # 创建项目专用备份目录
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              BACKUP_ROOT="/srv/backups/apps"
+            else
+              BACKUP_ROOT="/srv/backups/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
             # 清理目标部署目录（避免残留文件）
             echo "🧹 清理目标部署目录..."
             if [ -d "$DEPLOY_PATH" ]; then
               echo "📋 备份旧部署目录: $DEPLOY_PATH"
-              sudo mv $DEPLOY_PATH ${DEPLOY_PATH}.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
+              sudo rm -rf $DEPLOY_PATH
+              echo "✅ 旧部署目录已备份到: $BACKUP_NAME"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
             fi
             sudo mkdir -p $DEPLOY_PATH
             sudo chown deploy:deploy $DEPLOY_PATH
