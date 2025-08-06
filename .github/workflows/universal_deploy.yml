@@ -615,15 +615,26 @@ jobs:
             # 生成项目路由配置
             ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
             
-            # 清理旧的 Nginx 配置文件
-            echo "🧹 清理旧的 Nginx 配置文件..."
+            # 保护主配置文件 - 确保不会被修改
+            MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
+            echo "🛡️ 保护主配置文件: $MAIN_CONF"
+            if [ -f "$MAIN_CONF" ]; then
+              echo "✅ 主配置文件存在，设置只读权限保护"
+              sudo chmod 444 "$MAIN_CONF"
+              echo "📋 主配置文件权限: $(ls -la $MAIN_CONF)"
+            else
+              echo "⚠️ 主配置文件不存在: $MAIN_CONF"
+            fi
+            
+            # 清理旧的 Nginx 配置文件（仅路由配置）
+            echo "🧹 清理旧的路由配置文件..."
             if [ -f "$ROUTE_CONF" ]; then
-              echo "📋 备份旧配置文件: $ROUTE_CONF"
+              echo "📋 备份旧路由配置文件: $ROUTE_CONF"
               sudo cp $ROUTE_CONF ${ROUTE_CONF}.backup.$(date +%Y%m%d_%H%M%S)
               sudo rm -f $ROUTE_CONF
-              echo "✅ 旧配置文件已清理"
+              echo "✅ 旧路由配置文件已清理"
             else
-              echo "📋 没有找到旧的配置文件: $ROUTE_CONF"
+              echo "📋 没有找到旧的路由配置文件: $ROUTE_CONF"
             fi
             
             # 检查nginx_config是否包含server块
@@ -724,6 +735,13 @@ jobs:
               echo "📋 Nginx 错误日志:"
               sudo tail -n 20 /var/log/nginx/error.log
               exit 1
+            fi
+            
+            # 恢复主配置文件权限
+            echo "🛡️ 恢复主配置文件权限..."
+            if [ -f "$MAIN_CONF" ]; then
+              sudo chmod 644 "$MAIN_CONF"
+              echo "✅ 主配置文件权限已恢复: $(ls -la $MAIN_CONF)"
             fi
             
             # 测试配置是否生效
