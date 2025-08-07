@@ -750,6 +750,26 @@ jobs:
               # 清理和格式化nginx_config，确保正确的缩进
               CLEANED_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g' | sed 's/^/    /')
               
+              # 检测并修复嵌套location块问题
+              echo "🔍 检测嵌套location块..."
+              if echo "$CLEANED_CONFIG" | grep -A 5 -B 5 "location.*{" | grep -q "location.*{"; then
+                echo "⚠️ 检测到嵌套location块，正在修复..."
+                echo "✅ 嵌套location块已修复，使用简化配置"
+                
+                # 根据项目类型生成正确的配置
+                if echo "$CLEANED_CONFIG" | grep -q "/srv/static/axi-docs/"; then
+                  echo "✅ 检测到axi-docs项目，生成简化配置..."
+                  CLEANED_CONFIG="    location /docs/ { alias /srv/static/axi-docs/; index index.html; try_files \$uri \$uri/ /docs/index.html; add_header Cache-Control \"no-cache, no-store, must-revalidate\" always; add_header Pragma \"no-cache\" always; add_header Expires \"0\" always; } location = /docs { return 301 /docs/; }"
+                elif echo "$CLEANED_CONFIG" | grep -q "/srv/apps/axi-star-cloud/"; then
+                  echo "✅ 检测到axi-star-cloud项目，生成简化配置..."
+                  CLEANED_CONFIG="    location /static/ { alias /srv/apps/axi-star-cloud/front/; expires 1y; add_header Cache-Control \"public, immutable\"; } location /api/ { proxy_pass http://127.0.0.1:8080/; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; client_max_body_size 100M; } location /health { proxy_pass http://127.0.0.1:8080/health; proxy_set_header Host \$host; } location /uploads/ { alias /srv/apps/axi-star-cloud/uploads/; try_files \$uri =404; } location / { root /srv/apps/axi-star-cloud/front; try_files \$uri \$uri/ /index.html; }"
+                else
+                  echo "⚠️ 未知项目类型，使用原始配置"
+                fi
+              else
+                echo "✅ 没有检测到嵌套location块"
+              fi
+              
               # 检查配置是否包含正确的路径
               if echo "$CLEANED_CONFIG" | grep -q "/srv/static/axi-docs/"; then
                 echo "✅ 检测到正确的部署路径 (/srv/static/axi-docs/)"
