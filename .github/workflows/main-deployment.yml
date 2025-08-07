@@ -137,7 +137,7 @@ jobs:
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ needs.download-artifact.outputs.artifact_path }}/*"
+          source: "${{ needs.download-artifact.outputs.artifact_path }}/"
           target: "/tmp/deploy-${{ inputs.project }}/"
 
       - name: 设置输出

@@ -65,6 +65,12 @@ jobs:
           fi
           
           echo "✅ 输入参数验证通过"
+          
+          echo "📁 构建产物目录内容:"
+          ls -la "${{ inputs.artifact_path }}/"
+          
+          echo "📊 文件统计:"
+          find "${{ inputs.artifact_path }}" -type f | wc -l
 
       - name: 创建临时目录
         uses: appleboy/ssh-action@v1.0.3
@@ -91,7 +97,7 @@ jobs:
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ inputs.artifact_path }}/*"
+          source: "${{ inputs.artifact_path }}/"
           target: "/tmp/${{ inputs.project }}/"
 
       - name: 验证上传结果
