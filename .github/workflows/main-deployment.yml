@@ -160,15 +160,120 @@ jobs:
             fi
           done
 
-      - name: 直接部署到目标目录
+      - name: 清理目标目录
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🧹 清理目标目录..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            RUN_USER="deploy"
+            
+            # 确定部署路径
+            if [ "$DEPLOY_TYPE" = "backend" ]; then
+              DEPLOY_PATH="/srv/apps/$PROJECT"
+            else
+              DEPLOY_PATH="/srv/static/$PROJECT"
+            fi
+            
+            echo "📁 部署路径: $DEPLOY_PATH"
+            
+            # 备份现有部署
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "📋 备份现有部署..."
+              
+              # 创建项目专用备份目录
+              BACKUP_ROOT="/srv/backups"
+              PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+              echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+              sudo mkdir -p "$PROJECT_BACKUP_DIR"
+              sudo chmod 755 "$PROJECT_BACKUP_DIR"
+              
+              # 备份现有部署
+              BACKUP_FILE="$PROJECT_BACKUP_DIR/backup-$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r "$DEPLOY_PATH" "$BACKUP_FILE"
+              echo "✅ 现有部署已备份到: $BACKUP_FILE"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/backup-* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 没有找到现有部署: $DEPLOY_PATH"
+            fi
+            
+            # 清理目标目录
+            echo "🗑️ 清理目标目录..."
+            sudo rm -rf "$DEPLOY_PATH"
+            sudo mkdir -p "$DEPLOY_PATH"
+            sudo chown $RUN_USER:$RUN_USER "$DEPLOY_PATH"
+            
+            echo "✅ 目标目录已清理: $DEPLOY_PATH"
+
+      - name: 上传构建产物
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ inputs.server_host }}
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
+          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}/*"
           target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}/"
+
+      - name: 验证部署结果
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔍 验证部署结果..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            
+            # 确定部署路径
+            if [ "$DEPLOY_TYPE" = "backend" ]; then
+              DEPLOY_PATH="/srv/apps/$PROJECT"
+            else
+              DEPLOY_PATH="/srv/static/$PROJECT"
+            fi
+            
+            echo "📁 检查部署目录: $DEPLOY_PATH"
+            
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "✅ 部署目录存在"
+              echo "📁 部署目录内容:"
+              ls -la "$DEPLOY_PATH/"
+              
+              # 检查文件数量
+              FILE_COUNT=$(find "$DEPLOY_PATH" -type f | wc -l)
+              echo "📊 文件数量: $FILE_COUNT"
+              
+              if [ "$FILE_COUNT" -gt 0 ]; then
+                echo "✅ 部署验证通过"
+                echo "📁 前10个文件:"
+                find "$DEPLOY_PATH" -type f | head -10
+              else
+                echo "❌ 部署目录为空"
+                exit 1
+              fi
+            else
+              echo "❌ 部署目录不存在"
+              exit 1
+            fi
 
       - name: 设置输出
         id: set-outputs
