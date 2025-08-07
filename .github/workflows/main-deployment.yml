@@ -266,7 +266,7 @@ jobs:
 
   configure-nginx:
     needs: deploy-project
-    uses: ./.github/workflows/configure-nginx.yml
+    uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       project: ${{ inputs.project }}
       nginx_config: ${{ inputs.nginx_config }}
