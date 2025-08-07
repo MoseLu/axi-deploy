@@ -246,146 +246,15 @@ jobs:
 
   configure-nginx:
     needs: deploy-project
-    runs-on: ubuntu-latest
-    outputs:
-      config_success: ${{ steps.set-outputs.outputs.config_success }}
-    
-    steps:
-      - name: 配置Nginx
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          script: |
-            echo "🔧 配置Nginx..."
-            
-            PROJECT="${{ inputs.project }}"
-            DEPLOY_TYPE="${{ inputs.deploy_type }}"
-            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
-            
-            echo "📋 配置信息:"
-            echo "- 项目: $PROJECT"
-            echo "- 部署类型: $DEPLOY_TYPE"
-            echo "- 配置目录: $NGINX_CONF_DIR"
-            
-            # 检查配置目录是否存在
-            if [ ! -d "$NGINX_CONF_DIR" ]; then
-              echo "❌ Nginx配置目录不存在: $NGINX_CONF_DIR"
-              echo "📁 创建配置目录..."
-              sudo mkdir -p "$NGINX_CONF_DIR"
-            fi
-            
-            # 生成项目路由配置
-            ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
-            echo "📁 配置文件路径: $ROUTE_CONF"
-            
-            # 显示当前配置文件内容
-            if [ -f "$ROUTE_CONF" ]; then
-              echo "📄 当前配置文件内容:"
-              cat "$ROUTE_CONF"
-            else
-              echo "📄 配置文件不存在，将创建新文件"
-            fi
-            
-            # 备份旧配置 - 使用项目专用备份目录，最多保留2个备份
-            if [ -f "$ROUTE_CONF" ]; then
-              # 创建项目专用备份目录
-              PROJECT_BACKUP_DIR="$NGINX_CONF_DIR/backups/$PROJECT"
-              sudo mkdir -p "$PROJECT_BACKUP_DIR"
-              
-              # 备份旧配置
-              BACKUP_FILE="$PROJECT_BACKUP_DIR/route-$PROJECT.conf.backup.$(date +%Y%m%d_%H%M%S)"
-              sudo cp "$ROUTE_CONF" "$BACKUP_FILE"
-              sudo rm -f "$ROUTE_CONF"
-              echo "✅ 旧配置已备份到: $BACKUP_FILE"
-              
-              # 清理旧的备份文件，只保留最近2个
-              echo "🧹 清理旧的备份文件..."
-              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/route-$PROJECT.conf.backup.* 2>/dev/null | tail -n +3)
-              if [ -n "$BACKUP_FILES" ]; then
-                echo "🗑️ 删除旧的备份文件:"
-                echo "$BACKUP_FILES" | xargs -r sudo rm -f
-                echo "✅ 旧备份文件已清理，保留最近2个备份"
-              else
-                echo "📋 没有需要清理的旧备份文件"
-              fi
-            fi
-            
-            # 生成默认Nginx配置
-            if [ "$DEPLOY_TYPE" = "backend" ]; then
-              # 后端项目配置
-              NGINX_CONFIG="
-              location /docs/ {
-                  proxy_pass http://localhost:8080/;
-                  proxy_set_header Host \$host;
-                  proxy_set_header X-Real-IP \$remote_addr;
-                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto \$scheme;
-              }"
-            else
-              # 静态项目配置 - 使用alias而不是root，并添加缓存控制
-              NGINX_CONFIG="
-              location /docs/ {
-                  alias /srv/static/$PROJECT/;
-                  index index.html;
-                  try_files \$uri \$uri/ /docs/index.html;
-                  
-                  # 确保不缓存HTML文件
-                  add_header Cache-Control \"no-cache, no-store, must-revalidate\" always;
-                  add_header Pragma \"no-cache\" always;
-                  add_header Expires \"0\" always;
-              }
-              
-              # 处理 /docs 路径（不带斜杠）- 重定向到 /docs/
-              location = /docs {
-                  return 301 /docs/;
-              }"
-            fi
-            
-            # 如果提供了自定义配置，使用自定义配置
-            if [ -n "${{ inputs.nginx_config }}" ]; then
-              NGINX_CONFIG='${{ inputs.nginx_config }}'
-              echo "📝 使用自定义配置"
-            else
-              echo "📝 使用默认配置"
-              # 确保默认配置就是完整的配置，包含缓存控制和重定向
-            fi
-            
-            echo "📄 新配置内容:"
-            echo "$NGINX_CONFIG"
-            
-            # 写入新配置
-            echo "$NGINX_CONFIG" | sudo tee "$ROUTE_CONF"
-            
-            # 验证配置文件是否写入成功
-            echo "📄 写入后的配置文件内容:"
-            cat "$ROUTE_CONF"
-            
-            # 显示配置摘要
-            echo "📋 配置摘要:"
-            echo "- 项目: $PROJECT"
-            echo "- 配置文件: $ROUTE_CONF"
-            echo "- 配置类型: $(if [ -n "${{ inputs.nginx_config }}" ]; then echo '自定义配置'; else echo '默认配置'; fi)"
-            echo "- 部署类型: $DEPLOY_TYPE"
-            
-            # 检查配置语法
-            echo "🔍 检查Nginx配置语法..."
-            if sudo nginx -t; then
-              echo "✅ Nginx配置语法正确"
-              sudo systemctl reload nginx
-              echo "✅ Nginx配置完成并重新加载"
-            else
-              echo "❌ Nginx配置语法错误"
-              exit 1
-            fi
-
-      - name: 设置输出
-        id: set-outputs
-        run: |
-          echo "config_success=true" >> $GITHUB_OUTPUT
-          echo "✅ 配置完成"
+    uses: ./.github/workflows/configure-nginx.yml
+    with:
+      project: ${{ inputs.project }}
+      nginx_config: ${{ inputs.nginx_config }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
+      deploy_type: ${{ inputs.deploy_type }}
 
   start-service:
     needs: [deploy-project]
