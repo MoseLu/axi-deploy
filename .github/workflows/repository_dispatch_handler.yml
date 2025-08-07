@@ -58,7 +58,11 @@ jobs:
                   run_user: '${{ github.event.client_payload.run_user || 'deploy' }}',
                   nginx_conf_dir: '${{ github.event.client_payload.nginx_conf_dir || '/www/server/nginx/conf/conf.d/redamancy' }}',
                   backend_port: '${{ github.event.client_payload.backend_port || '8080' }}',
-                  service_name: '${{ github.event.client_payload.service_name || 'star-cloud' }}'
+                  service_name: '${{ github.event.client_payload.service_name || 'star-cloud' }}',
+                  server_host: '${{ github.event.client_payload.server_host }}',
+                  server_user: '${{ github.event.client_payload.server_user }}',
+                  server_key: '${{ github.event.client_payload.server_key }}',
+                  server_port: '${{ github.event.client_payload.server_port }}'
                 }
               });
               

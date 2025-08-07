@@ -47,6 +47,22 @@ on:
         required: false
         type: string
         default: 'star-cloud'
+      server_host:
+        description: '服务器地址'
+        required: true
+        type: string
+      server_user:
+        description: '服务器用户'
+        required: true
+        type: string
+      server_key:
+        description: '服务器密钥'
+        required: true
+        type: string
+      server_port:
+        description: '服务器端口'
+        required: true
+        type: string
 
 jobs:
   download-artifact:
@@ -110,10 +126,10 @@ jobs:
       - name: 创建临时目录并上传文件
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ vars.SERVER_HOST }}
-          username: ${{ vars.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ vars.SERVER_PORT }}
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
           script: |
             echo "📤 上传文件到服务器..."
             
@@ -132,10 +148,10 @@ jobs:
       - name: 上传构建产物
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ vars.SERVER_HOST }}
-          username: ${{ vars.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ vars.SERVER_PORT }}
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
           source: "${{ needs.download-artifact.outputs.artifact_path }}/*"
           target: "/tmp/deploy-${{ inputs.project }}/"
 
@@ -157,10 +173,10 @@ jobs:
       - name: 部署项目
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ vars.SERVER_HOST }}
-          username: ${{ vars.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ vars.SERVER_PORT }}
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
           script: |
             echo "🚀 部署项目..."
             
@@ -218,10 +234,10 @@ jobs:
       - name: 配置Nginx
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ vars.SERVER_HOST }}
-          username: ${{ vars.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ vars.SERVER_PORT }}
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
           script: |
             echo "🔧 配置Nginx..."
             
@@ -271,10 +287,10 @@ jobs:
       - name: 启动服务
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ vars.SERVER_HOST }}
-          username: ${{ vars.SERVER_USER }}
-          key: ${{ secrets.SERVER_KEY }}
-          port: ${{ vars.SERVER_PORT }}
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
           script: |
             echo "🚀 启动服务..."
             
