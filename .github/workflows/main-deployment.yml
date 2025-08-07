@@ -68,13 +68,29 @@ jobs:
           name: dist-${{ inputs.project }}
           path: ./
           repo: ${{ inputs.source_repo }}
-          workflow: ${{ inputs.project }}_deploy.yml
           run_id: ${{ inputs.run_id }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 调试下载结果
+        run: |
+          echo "🔍 调试下载结果..."
+          echo "项目名称: ${{ inputs.project }}"
+          echo "源仓库: ${{ inputs.source_repo }}"
+          echo "运行ID: ${{ inputs.run_id }}"
+          echo "当前目录: $(pwd)"
+          echo "当前目录内容:"
+          ls -la ./
+          echo "所有子目录:"
+          find . -type d -maxdepth 3
+          echo "所有文件:"
+          find . -type f -maxdepth 3 | head -20
 
       - name: 验证构建产物
         run: |
           echo "🔍 验证构建产物..."
+          
+          # 等待一下确保文件完全下载
+          sleep 2
           
           # 检查可能的构建产物目录
           if [ -d "./dist" ]; then
@@ -95,8 +111,17 @@ jobs:
           
           # 检查是否有文件
           FILE_COUNT=$(find "$ARTIFACT_DIR" -type f | wc -l)
+          echo "📊 文件数量: $FILE_COUNT"
+          
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "❌ 构建产物目录为空"
+            echo "🔍 调试信息:"
+            echo "当前目录内容:"
+            ls -la ./
+            echo "所有子目录:"
+            find . -type d -maxdepth 2
+            echo "所有文件:"
+            find . -type f -maxdepth 2
             exit 1
           fi
           
