@@ -82,10 +82,9 @@ jobs:
           elif [ -d "./dist-${{ inputs.project }}" ]; then
             ARTIFACT_DIR="./dist-${{ inputs.project }}"
           else
-            echo "❌ 构建产物目录不存在"
-            echo "📁 当前目录内容:"
-            ls -la ./
-            exit 1
+            # 构建产物直接在当前目录
+            ARTIFACT_DIR="."
+            echo "📁 构建产物直接在当前目录"
           fi
           
           echo "📁 构建产物目录: $ARTIFACT_DIR"
@@ -111,8 +110,8 @@ jobs:
           elif [ -d "./dist-${{ inputs.project }}" ]; then
             ARTIFACT_PATH="./dist-${{ inputs.project }}"
           else
-            echo "❌ 无法确定构建产物路径"
-            exit 1
+            # 构建产物直接在当前目录
+            ARTIFACT_PATH="."
           fi
           
           echo "artifact_path=$ARTIFACT_PATH" >> $GITHUB_OUTPUT
