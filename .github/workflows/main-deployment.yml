@@ -130,6 +130,19 @@ jobs:
             
             echo "✅ 临时目录已创建: $TEMP_DIR"
 
+      - name: 调试构建产物路径
+        run: |
+          echo "🔍 调试构建产物路径..."
+          echo "当前工作目录: $(pwd)"
+          echo "构建产物路径: ${{ needs.download-artifact.outputs.artifact_path }}"
+          echo "构建产物大小: ${{ needs.download-artifact.outputs.artifact_size }}"
+          
+          echo "📁 构建产物目录内容:"
+          ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
+          
+          echo "📊 文件统计:"
+          find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l
+
       - name: 上传构建产物
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -137,7 +150,7 @@ jobs:
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ needs.download-artifact.outputs.artifact_path }}/"
+          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
           target: "/tmp/deploy-${{ inputs.project }}/"
 
       - name: 设置输出

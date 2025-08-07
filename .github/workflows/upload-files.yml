@@ -97,7 +97,7 @@ jobs:
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ inputs.artifact_path }}/"
+          source: "${{ github.workspace }}/${{ inputs.artifact_path }}"
           target: "/tmp/${{ inputs.project }}/"
 
       - name: 验证上传结果
