@@ -1,0 +1,99 @@
+name: Download Artifact
+
+description: "下载构建产物并验证完整性"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      source_repo:
+        required: true
+        type: string
+        description: "源仓库 (owner/repo)"
+      run_id:
+        required: true
+        type: string
+        description: "构建运行ID"
+      github_token:
+        required: true
+        type: string
+        description: "GitHub Token"
+    outputs:
+      artifact_path:
+        description: "构建产物路径"
+        value: ${{ jobs.download.outputs.artifact_path }}
+      artifact_size:
+        description: "构建产物大小"
+        value: ${{ jobs.download.outputs.artifact_size }}
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_path: ${{ steps.set-outputs.outputs.artifact_path }}
+      artifact_size: ${{ steps.set-outputs.outputs.artifact_size }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载构建产物
+        id: download
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          name: dist-${{ inputs.project }}
+          path: ./dist
+          repo: ${{ inputs.source_repo }}
+          workflow: ${{ inputs.project }}_deploy.yml
+          run_id: ${{ inputs.run_id }}
+          github_token: ${{ inputs.github_token }}
+
+      - name: 验证构建产物
+        run: |
+          echo "🔍 验证构建产物..."
+          
+          if [ ! -d "./dist" ]; then
+            echo "❌ 构建产物目录不存在"
+            exit 1
+          fi
+          
+          echo "📁 构建产物目录内容:"
+          ls -la ./dist/
+          
+          # 检查是否有文件
+          FILE_COUNT=$(find ./dist -type f | wc -l)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "❌ 构建产物目录为空"
+            exit 1
+          fi
+          
+          echo "✅ 构建产物验证通过"
+          echo "📊 文件数量: $FILE_COUNT"
+
+      - name: 显示构建产物信息
+        run: |
+          echo "📦 构建产物详细信息:"
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 构建ID: ${{ inputs.run_id }}"
+          echo "- 产物路径: ./dist"
+          
+          echo "📁 目录结构:"
+          find ./dist -type f | head -20
+          
+          echo "📊 文件统计:"
+          echo "- 总文件数: $(find ./dist -type f | wc -l)"
+          echo "- 总目录数: $(find ./dist -type d | wc -l)"
+          echo "- 总大小: $(du -sh ./dist | cut -f1)"
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "artifact_path=./dist" >> $GITHUB_OUTPUT
+          echo "artifact_size=$(du -sb ./dist | cut -f1)" >> $GITHUB_OUTPUT
+          echo "✅ 输出已设置"
+          echo "- artifact_path: ./dist"
+          echo "- artifact_size: $(du -sb ./dist | cut -f1) bytes"

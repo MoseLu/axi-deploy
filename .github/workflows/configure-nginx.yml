@@ -1,0 +1,298 @@
+name: Configure Nginx
+
+description: "配置Nginx，包含配置生成和验证"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      nginx_config:
+        required: false
+        type: string
+        description: "Nginx配置"
+        default: ""
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+      domain:
+        required: false
+        type: string
+        description: "域名"
+        default: "redamancy.com.cn"
+      nginx_conf_dir:
+        required: false
+        type: string
+        description: "Nginx配置目录"
+        default: "/www/server/nginx/conf/conf.d/redamancy"
+      apps_root:
+        required: false
+        type: string
+        description: "应用目录路径"
+        default: "/srv/apps"
+      static_root:
+        required: false
+        type: string
+        description: "静态文件目录路径"
+        default: "/srv/static"
+      backend_port:
+        required: false
+        type: string
+        description: "后端服务端口"
+        default: "8080"
+      service_name:
+        required: false
+        type: string
+        description: "服务名称"
+        default: "star-cloud"
+    outputs:
+      config_success:
+        description: "配置是否成功"
+        value: ${{ jobs.configure.outputs.config_success }}
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    outputs:
+      config_success: ${{ steps.set-outputs.outputs.config_success }}
+    
+    steps:
+      - name: 验证输入参数
+        run: |
+          echo "🔍 验证输入参数..."
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
+          echo "- 用户: ${{ inputs.server_user }}"
+          
+          if [ -z "${{ inputs.nginx_config }}" ]; then
+            echo "⚠️ 没有提供Nginx配置，跳过配置步骤"
+            echo "config_success=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "✅ 输入参数验证通过"
+
+      - name: 配置Nginx
+        if: inputs.nginx_config != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔧 配置Nginx..."
+            
+            NGINX_CONF_DIR="${{ inputs.nginx_conf_dir || '/www/server/nginx/conf/conf.d/redamancy' }}"
+            PROJECT="${{ inputs.project }}"
+            
+            # 生成项目路由配置
+            ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
+            
+            # 保护主配置文件 - 确保不会被修改
+            MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
+            echo "🛡️ 保护主配置文件: $MAIN_CONF"
+            if [ -f "$MAIN_CONF" ]; then
+              echo "✅ 主配置文件存在，设置只读权限保护"
+              sudo chmod 444 "$MAIN_CONF"
+              echo "📋 主配置文件权限: $(ls -la $MAIN_CONF)"
+            else
+              echo "⚠️ 主配置文件不存在: $MAIN_CONF"
+            fi
+            
+            # 创建项目专用备份目录
+            BACKUP_DIR="$NGINX_CONF_DIR/backups"
+            PROJECT_BACKUP_DIR="$BACKUP_DIR/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 备份旧的路由配置文件
+            if [ -f "$ROUTE_CONF" ]; then
+              echo "📋 备份旧路由配置文件: $ROUTE_CONF"
+              BACKUP_FILE="$PROJECT_BACKUP_DIR/route-$PROJECT.conf.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp "$ROUTE_CONF" "$BACKUP_FILE"
+              sudo rm -f "$ROUTE_CONF"
+              echo "✅ 旧路由配置文件已备份到: $BACKUP_FILE"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/route-$PROJECT.conf.backup.* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -f
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 没有找到旧的路由配置文件: $ROUTE_CONF"
+            fi
+            
+            # 不再删除其他项目的配置文件，每个项目都应该有自己的配置文件
+            echo "📋 保持其他项目的配置文件不变..."
+            echo "📁 当前存在的route配置文件:"
+            ls -la $NGINX_CONF_DIR/route-*.conf 2>/dev/null || echo "没有找到route配置文件"
+            
+            # 检查nginx_config是否包含server块
+            if echo '${{ inputs.nginx_config }}' | grep -q '^server {'; then
+              # 如果包含server块，提取location块
+              echo "📝 检测到server块配置，提取location块..."
+              LOCATION_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed -n '/location /,/}/p' | sed 's/^/    /')
+              
+              # 清理和格式化location配置
+              CLEANED_CONFIG=$(echo "$LOCATION_CONFIG" | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g')
+              
+              # 直接写入配置
+              echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              echo "✅ Nginx配置已写入: $ROUTE_CONF (提取的location块)"
+            else
+              # 如果不包含server块，直接使用location块
+              echo "📝 检测到location块配置，直接写入..."
+              
+              # 清理和格式化nginx_config，确保正确的缩进
+              CLEANED_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g' | sed 's/^/    /')
+              
+              # 检测并修复嵌套location块问题
+              echo "🔍 检测嵌套location块..."
+              if echo "$CLEANED_CONFIG" | grep -A 5 -B 5 "location.*{" | grep -q "location.*{"; then
+                echo "⚠️ 检测到嵌套location块，正在修复..."
+                echo "✅ 嵌套location块已修复，使用简化配置"
+                
+                # 根据项目类型生成正确的配置
+                if echo "$CLEANED_CONFIG" | grep -q "${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/"; then
+                  echo "✅ 检测到静态项目，生成简化配置..."
+                  CLEANED_CONFIG=$(echo -e "    location /docs/ {\n        alias ${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/;\n        index index.html;\n        try_files \$uri \$uri/ /docs/index.html;\n        \n        # 确保不缓存HTML文件\n        add_header Cache-Control \"no-cache, no-store, must-revalidate\" always;\n        add_header Pragma \"no-cache\" always;\n        add_header Expires \"0\" always;\n    }\n    \n    # 处理 /docs 路径（不带斜杠）- 重定向到 /docs/\n    location = /docs {\n        return 301 /docs/;\n    }")
+                elif echo "$CLEANED_CONFIG" | grep -q "${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/"; then
+                  echo "✅ 检测到后端项目，生成简化配置..."
+                  CLEANED_CONFIG=$(echo -e "    # 静态文件服务\n    location /static/ {\n        alias ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/front/;\n        expires 1y;\n        add_header Cache-Control \"public, immutable\";\n    }\n    \n    # API代理\n    location /api/ {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/;\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n        client_max_body_size 100M;\n    }\n    \n    # 健康检查\n    location /health {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/health;\n        proxy_set_header Host \$host;\n    }\n    \n    # 上传文件\n    location /uploads/ {\n        alias ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/uploads/;\n        try_files \$uri =404;\n    }\n    \n    # 默认路由\n    location / {\n        root ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/front;\n        try_files \$uri \$uri/ /index.html;\n        \n        # 静态资源缓存\n        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {\n            expires 1y;\n            add_header Cache-Control \"public, immutable\";\n        }\n    }")
+                else
+                  echo "⚠️ 未知项目类型，使用原始配置"
+                fi
+              else
+                echo "✅ 没有检测到嵌套location块"
+              fi
+              
+              # 检查配置是否包含正确的路径
+              if echo "$CLEANED_CONFIG" | grep -q "${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/"; then
+                echo "✅ 检测到正确的部署路径 (${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/)"
+              elif echo "$CLEANED_CONFIG" | grep -q "/www/wwwroot/${{ inputs.domain || 'redamancy.com.cn' }}/docs/"; then
+                echo "✅ 检测到正确的部署路径 (/www/wwwroot/${{ inputs.domain || 'redamancy.com.cn' }}/docs/)"
+              elif echo "$CLEANED_CONFIG" | grep -q "${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/"; then
+                echo "✅ 检测到正确的部署路径 (${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/)"
+              else
+                echo "⚠️ 警告: 配置中可能使用了错误的路径"
+                echo "当前配置: $CLEANED_CONFIG"
+              fi
+              
+              # 检查是否有重复的location定义
+              echo "🔍 检查location冲突..."
+              
+              # 检查当前配置中是否包含location /
+              CURRENT_HAS_LOCATION_ROOT=false
+              if echo "$CLEANED_CONFIG" | grep -q "location /[^a-zA-Z]"; then
+                CURRENT_HAS_LOCATION_ROOT=true
+                echo "📋 当前配置包含 location / (根路径)"
+              fi
+              
+              # 检查现有配置中是否包含location /
+              EXISTING_HAS_LOCATION_ROOT=false
+              if [ -f "$ROUTE_CONF" ] && grep -q "location /[^a-zA-Z]" "$ROUTE_CONF"; then
+                EXISTING_HAS_LOCATION_ROOT=true
+                echo "📋 现有配置包含 location / (根路径)"
+              fi
+              
+              # 检查其他route文件中是否包含location /
+              OTHER_HAS_LOCATION_ROOT=false
+              for other_conf in $NGINX_CONF_DIR/route-*.conf; do
+                if [ -f "$other_conf" ] && [ "$other_conf" != "$ROUTE_CONF" ] && grep -q "location /[^a-zA-Z]" "$other_conf"; then
+                  OTHER_HAS_LOCATION_ROOT=true
+                  echo "📋 其他配置文件 $other_conf 包含 location / (根路径)"
+                  break
+                fi
+              done
+              
+              # 只有当真正存在根路径冲突时才处理
+              if [ "$CURRENT_HAS_LOCATION_ROOT" = true ] && [ "$OTHER_HAS_LOCATION_ROOT" = true ]; then
+                echo "⚠️ 检测到多个配置文件都有 location / (根路径)，需要协调配置"
+                echo "📋 当前项目: $PROJECT"
+                echo "📋 当前配置: $CLEANED_CONFIG"
+                
+                # 对于静态项目，不应该有location /配置
+                if echo "$CLEANED_CONFIG" | grep -q "${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/"; then
+                  echo "⚠️ 静态项目不应该配置location /，跳过根路径配置"
+                  # 移除location /配置，只保留项目相关配置
+                  CLEANED_CONFIG=$(echo "$CLEANED_CONFIG" | grep -v "location /[^a-zA-Z]")
+                  echo "✅ 已移除冲突的location /配置"
+                elif echo "$CLEANED_CONFIG" | grep -q "${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/"; then
+                  echo "✅ 后端项目可以配置location /，这是主项目"
+                else
+                  echo "⚠️ 未知项目类型，跳过location /配置以避免冲突"
+                  CLEANED_CONFIG=$(echo "$CLEANED_CONFIG" | grep -v "location /[^a-zA-Z]")
+                fi
+              else
+                echo "✅ 没有location /冲突，写入完整配置"
+              fi
+              
+              echo "✅ 写入新配置"
+              echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              
+              echo "✅ Nginx配置已写入: $ROUTE_CONF (location块)"
+            fi
+            
+            # 检查Nginx配置语法
+            if sudo nginx -t; then
+              echo "✅ Nginx配置语法检查通过"
+            else
+              echo "❌ Nginx配置语法错误"
+              echo "📋 生成的配置文件内容:"
+              cat $ROUTE_CONF
+              echo "📋 Nginx 错误日志:"
+              sudo tail -n 20 /var/log/nginx/error.log
+              exit 1
+            fi
+            
+            # 检查生成的配置文件
+            echo "📋 生成的 Nginx 配置文件内容:"
+            cat $ROUTE_CONF
+            
+            # 重载Nginx配置
+            if sudo systemctl reload nginx; then
+              echo "✅ Nginx配置重载完成"
+            else
+              echo "❌ Nginx重载失败"
+              echo "📋 Nginx 错误日志:"
+              sudo tail -n 20 /var/log/nginx/error.log
+              exit 1
+            fi
+            
+            # 恢复主配置文件权限
+            echo "🛡️ 恢复主配置文件权限..."
+            if [ -f "$MAIN_CONF" ]; then
+              sudo chmod 644 "$MAIN_CONF"
+              echo "✅ 主配置文件权限已恢复"
+            fi
+            
+            echo "✅ Nginx配置完成"
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "config_success=true" >> $GITHUB_OUTPUT
+          echo "✅ 输出已设置"
+          echo "- config_success: true"

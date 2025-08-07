@@ -40,6 +40,61 @@ on:
         required: false
         default: false
         type: boolean
+      domain:
+        description: '域名'
+        required: false
+        default: 'redamancy.com.cn'
+        type: string
+      run_user:
+        description: '运行用户'
+        required: false
+        default: 'deploy'
+        type: string
+      apps_root:
+        description: '应用目录路径'
+        required: false
+        default: '/srv/apps'
+        type: string
+      static_root:
+        description: '静态文件目录路径'
+        required: false
+        default: '/srv/static'
+        type: string
+      nginx_conf_dir:
+        description: 'Nginx配置目录'
+        required: false
+        default: '/www/server/nginx/conf/conf.d/redamancy'
+        type: string
+      cert_src:
+        description: '证书源目录'
+        required: false
+        default: '/www/server/panel/vhost/cert/redamancy.com.cn'
+        type: string
+      cert_dst:
+        description: '证书目标目录'
+        required: false
+        default: '/www/server/nginx/ssl/redamancy'
+        type: string
+      force_rebuild:
+        description: '强制重建配置'
+        required: false
+        default: false
+        type: boolean
+      backend_port:
+        description: '后端服务端口'
+        required: false
+        default: '8080'
+        type: string
+      service_name:
+        description: '服务名称'
+        required: false
+        default: 'star-cloud'
+        type: string
+      backup_root:
+        description: '备份根目录'
+        required: false
+        default: '/srv/backups'
+        type: string
 
 jobs:
   # 步骤1: 服务器初始化
@@ -58,14 +113,14 @@ jobs:
             echo "🚀 开始服务器初始化..."
             
             # 获取输入参数
-            DOMAIN="redamancy.com.cn"
-            RUN_USER="deploy"
-            APPS_ROOT="/srv/apps"
-            STATIC_ROOT="/srv/static"
-            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
-            CERT_SRC="/www/server/panel/vhost/cert/redamancy.com.cn"
-            CERT_DST="/www/server/nginx/ssl/redamancy"
-            FORCE_REBUILD="false"
+            DOMAIN="${{ inputs.domain || 'redamancy.com.cn' }}"
+            RUN_USER="${{ inputs.run_user || 'deploy' }}"
+            APPS_ROOT="${{ inputs.apps_root || '/srv/apps' }}"
+            STATIC_ROOT="${{ inputs.static_root || '/srv/static' }}"
+            NGINX_CONF_DIR="${{ inputs.nginx_conf_dir || '/www/server/nginx/conf/conf.d/redamancy' }}"
+            CERT_SRC="${{ inputs.cert_src || '/www/server/panel/vhost/cert/redamancy.com.cn' }}"
+            CERT_DST="${{ inputs.cert_dst || '/www/server/nginx/ssl/redamancy' }}"
+            FORCE_REBUILD="${{ inputs.force_rebuild || 'false' }}"
             
             echo "📋 初始化配置:"
             echo "- 域名: $DOMAIN"
@@ -222,27 +277,27 @@ jobs:
             # 检查是否需要重新生成配置
             if [ ! -f "$MAIN_CONF" ] || [ "$FORCE_REBUILD" = "true" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ] || [ "$(grep -c 'location ~ \^/\(?!docs|api|health|uploads|static|\$\)' $MAIN_CONF 2>/dev/null || echo 0)" -gt 0 ]; then
               echo "🔄 重新生成主配置文件..."
-              sudo tee $MAIN_CONF <<'EOF'
+              sudo tee $MAIN_CONF <<EOF
             server {
                 listen 443 ssl;
-                server_name redamancy.com.cn;
+                server_name $DOMAIN;
                 http2 on;
             
-                ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
-                ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
+                ssl_certificate     $CERT_DST/fullchain.pem;
+                ssl_certificate_key $CERT_DST/privkey.pem;
             
                 client_max_body_size 100m;
             
                 # 这里自动加载 route-*.conf（项目路由）——主配置永远不用再改
-                include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
+                include $NGINX_CONF_DIR/route-*.conf;
             }
             
             server {
                 listen 80;
-                server_name redamancy.com.cn;
+                server_name $DOMAIN;
                 
                 # HTTP到HTTPS重定向
-                return 301 https://$host$request_uri;
+                return 301 https://\$host\$request_uri;
             }
             EOF
               echo "✅ 主配置文件已更新"
@@ -382,17 +437,53 @@ jobs:
           echo "- 源仓库: ${{ inputs.source_repo }}"
           echo "- 构建ID: ${{ inputs.run_id }}"
 
-      - name: 上传到服务器
-        uses: appleboy/scp-action@v0.1.7
+      - name: 上传到服务器（带重试）
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
-          source: "./dist/*"
-          target: "/tmp/${{ inputs.project }}/"
-          command_timeout: "10m"
-          
+          script: |
+            echo "🚀 开始上传文件到服务器..."
+            
+            # 创建临时目录
+            TEMP_DIR="/tmp/${{ inputs.project }}"
+            sudo mkdir -p $TEMP_DIR
+            sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $TEMP_DIR
+            
+            # 重试机制
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            SUCCESS=false
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "📤 尝试上传 (第 $RETRY_COUNT 次)..."
+              
+              # 使用scp上传文件
+              if scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -r ./dist/* ${{ inputs.run_user || 'deploy' }}@${{ secrets.SERVER_HOST }}:$TEMP_DIR/; then
+                echo "✅ 上传成功！"
+                SUCCESS=true
+                break
+              else
+                echo "❌ 上传失败 (第 $RETRY_COUNT 次)"
+                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                  echo "⏳ 等待 30 秒后重试..."
+                  sleep 30
+                fi
+              fi
+            done
+            
+            if [ "$SUCCESS" = false ]; then
+              echo "❌ 上传失败，已达到最大重试次数 ($MAX_RETRIES)"
+              exit 1
+            fi
+            
+            echo "📁 验证上传结果..."
+            ls -la $TEMP_DIR/
+            echo "✅ 文件上传完成"
+
       - name: 验证上传
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -436,9 +527,9 @@ jobs:
             echo "🚀 开始部署项目: ${{ inputs.project }}"
             
             # 标准化目录结构
-            APPS_ROOT="/srv/apps"
-            STATIC_ROOT="/srv/static"
-            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
+            APPS_ROOT="${{ inputs.apps_root || '/srv/apps' }}"
+            STATIC_ROOT="${{ inputs.static_root || '/srv/static' }}"
+            NGINX_CONF_DIR="${{ inputs.nginx_conf_dir || '/www/server/nginx/conf/conf.d/redamancy' }}"
             PROJECT="${{ inputs.project }}"
             TEMP_DIR="/tmp/$PROJECT"
             
@@ -457,13 +548,13 @@ jobs:
             
             # 创建部署目录
             sudo mkdir -p $DEPLOY_PATH
-            sudo chown deploy:deploy $DEPLOY_PATH
+            sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH
             
             # 创建项目专用备份目录
             if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
-              BACKUP_ROOT="/srv/backups/apps"
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/apps"
             else
-              BACKUP_ROOT="/srv/backups/static"
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/static"
             fi
             PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
             echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
@@ -491,7 +582,7 @@ jobs:
               fi
             fi
             sudo mkdir -p $DEPLOY_PATH
-            sudo chown deploy:deploy $DEPLOY_PATH
+            sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH
             echo "✅ 部署目录已清理并重新创建"
             
             # 检查临时目录是否存在
@@ -534,14 +625,14 @@ jobs:
                 # 后端项目部署
                 echo "🔧 部署后端项目..."
                 sudo tar xzf $DEPLOYMENT_FILE -C $DEPLOY_PATH
-                sudo chown -R deploy:deploy $DEPLOY_PATH
+                sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH
                 
                 # 设置可执行权限
-                if [ -f "$DEPLOY_PATH/star-cloud-linux" ]; then
-                  sudo chmod +x $DEPLOY_PATH/star-cloud-linux
+                if [ -f "$DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}-linux" ]; then
+                  sudo chmod +x $DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}-linux
                   echo "✅ 二进制文件权限设置完成"
                 else
-                  echo "❌ 二进制文件不存在: $DEPLOY_PATH/star-cloud-linux"
+                  echo "❌ 二进制文件不存在: $DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}-linux"
                   echo "📁 部署目录内容:"
                   ls -la $DEPLOY_PATH/
                   exit 1
@@ -550,29 +641,29 @@ jobs:
                 # 创建必要目录
                 sudo mkdir -p $DEPLOY_PATH/uploads/{image,document,audio,video,other,avatars}
                 sudo mkdir -p $DEPLOY_PATH/logs
-                sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
+                sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
                 
                 # 检查文件权限和目录结构
                 echo "🔍 检查文件权限和目录结构..."
                 echo "📁 部署目录内容:"
                 ls -la $DEPLOY_PATH/
                 
-                if [ -f "$DEPLOY_PATH/star-cloud-linux" ]; then
+                if [ -f "$DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}-linux" ]; then
                   echo "✅ 二进制文件:"
-                  ls -la $DEPLOY_PATH/star-cloud-linux
+                  ls -la $DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}-linux
                 else
                   echo "❌ 二进制文件不存在"
                   echo "📁 查找二进制文件:"
-                  find $DEPLOY_PATH -name "star-cloud-linux" -type f
+                  find $DEPLOY_PATH -name "${{ inputs.service_name || 'star-cloud' }}-linux" -type f
                 fi
                 
-                if [ -f "$DEPLOY_PATH/star-cloud.service" ]; then
+                if [ -f "$DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}.service" ]; then
                   echo "✅ 服务文件:"
-                  ls -la $DEPLOY_PATH/star-cloud.service
+                  ls -la $DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}.service
                 else
                   echo "❌ 服务文件不存在"
                   echo "📁 查找服务文件:"
-                  find $DEPLOY_PATH -name "star-cloud.service" -type f
+                  find $DEPLOY_PATH -name "${{ inputs.service_name || 'star-cloud' }}.service" -type f
                 fi
                 
                 if [ -d "$DEPLOY_PATH/backend/config" ]; then
@@ -585,9 +676,9 @@ jobs:
                 fi
                  
                  # 检查服务文件内容
-                 if [ -f "$DEPLOY_PATH/star-cloud.service" ]; then
+                 if [ -f "$DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}.service" ]; then
                    echo "📋 服务文件内容:"
-                   cat $DEPLOY_PATH/star-cloud.service
+                   cat $DEPLOY_PATH/${{ inputs.service_name || 'star-cloud' }}.service
                  else
                    echo "❌ 服务文件不存在，无法显示内容"
                  fi
@@ -595,8 +686,8 @@ jobs:
                  # 启动服务
                  echo "🚀 启动后端服务..."
                  sudo systemctl daemon-reload
-                 sudo systemctl enable star-cloud.service
-                 sudo systemctl restart star-cloud.service
+                 sudo systemctl enable ${{ inputs.service_name || 'star-cloud' }}.service
+                 sudo systemctl restart ${{ inputs.service_name || 'star-cloud' }}.service
                  
                  # 等待服务启动
                  echo "⏳ 等待服务启动..."
@@ -604,18 +695,18 @@ jobs:
                  
                  # 健康检查
                  echo "🔍 检查服务健康状态..."
-                 if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+                 if curl -f -s http://127.0.0.1:${{ inputs.backend_port || '8080' }}/health > /dev/null 2>&1; then
                    echo "✅ 服务启动成功 - 健康检查通过"
                  else
                    echo "❌ 服务启动失败 - 健康检查失败"
                    echo "📊 服务状态:"
-                   sudo systemctl status star-cloud.service --no-pager -l
+                   sudo systemctl status ${{ inputs.service_name || 'star-cloud' }}.service --no-pager -l
                    echo "📋 服务日志:"
-                   sudo journalctl -u star-cloud.service --no-pager -n 20
+                   sudo journalctl -u ${{ inputs.service_name || 'star-cloud' }}.service --no-pager -n 20
                    echo "🔍 检查端口占用:"
-                   sudo netstat -tlnp | grep :8080
+                   sudo netstat -tlnp | grep :${{ inputs.backend_port || '8080' }}
                    echo "🔍 检查进程:"
-                   ps aux | grep star-cloud
+                   ps aux | grep ${{ inputs.service_name || 'star-cloud' }}
                    exit 1
                  fi
               else
@@ -637,7 +728,7 @@ jobs:
                 sudo cp -r * $DEPLOY_PATH/
               fi
               
-              sudo chown -R deploy:deploy $DEPLOY_PATH
+              sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH
               echo "✅ 静态项目部署完成"
               
               # 显示部署结果
@@ -663,7 +754,7 @@ jobs:
           script: |
             echo "🔧 配置Nginx..."
             
-            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
+            NGINX_CONF_DIR="${{ inputs.nginx_conf_dir || '/www/server/nginx/conf/conf.d/redamancy' }}"
             PROJECT="${{ inputs.project }}"
             
             # 生成项目路由配置
@@ -725,7 +816,7 @@ jobs:
             # 不再删除其他项目的配置文件，每个项目都应该有自己的配置文件
             echo "📋 保持其他项目的配置文件不变..."
             echo "📁 当前存在的route配置文件:"
-            ls -la /www/server/nginx/conf/conf.d/redamancy/route-*.conf 2>/dev/null || echo "没有找到route配置文件"
+            ls -la $NGINX_CONF_DIR/route-*.conf 2>/dev/null || echo "没有找到route配置文件"
             
             # 检查nginx_config是否包含server块
             if echo '${{ inputs.nginx_config }}' | grep -q '^server {'; then
@@ -753,12 +844,12 @@ jobs:
                 echo "✅ 嵌套location块已修复，使用简化配置"
                 
                 # 根据项目类型生成正确的配置
-                if echo "$CLEANED_CONFIG" | grep -q "/srv/static/axi-docs/"; then
-                  echo "✅ 检测到axi-docs项目，生成简化配置..."
-                  CLEANED_CONFIG=$(echo -e "    location /docs/ {\n        alias /srv/static/axi-docs/;\n        index index.html;\n        try_files \$uri \$uri/ /docs/index.html;\n        \n        # 确保不缓存HTML文件\n        add_header Cache-Control \"no-cache, no-store, must-revalidate\" always;\n        add_header Pragma \"no-cache\" always;\n        add_header Expires \"0\" always;\n    }\n    \n    # 处理 /docs 路径（不带斜杠）- 重定向到 /docs/\n    location = /docs {\n        return 301 /docs/;\n    }")
-                elif echo "$CLEANED_CONFIG" | grep -q "/srv/apps/axi-star-cloud/"; then
-                  echo "✅ 检测到axi-star-cloud项目，生成简化配置..."
-                  CLEANED_CONFIG=$(echo -e "    # 静态文件服务\n    location /static/ {\n        alias /srv/apps/axi-star-cloud/front/;\n        expires 1y;\n        add_header Cache-Control \"public, immutable\";\n    }\n    \n    # API代理\n    location /api/ {\n        proxy_pass http://127.0.0.1:8080/;\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n        client_max_body_size 100M;\n    }\n    \n    # 健康检查\n    location /health {\n        proxy_pass http://127.0.0.1:8080/health;\n        proxy_set_header Host \$host;\n    }\n    \n    # 上传文件\n    location /uploads/ {\n        alias /srv/apps/axi-star-cloud/uploads/;\n        try_files \$uri =404;\n    }\n    \n    # 默认路由\n    location / {\n        root /srv/apps/axi-star-cloud/front;\n        try_files \$uri \$uri/ /index.html;\n        \n        # 静态资源缓存\n        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {\n            expires 1y;\n            add_header Cache-Control \"public, immutable\";\n        }\n    }")
+                if echo "$CLEANED_CONFIG" | grep -q "$STATIC_ROOT/$PROJECT/"; then
+                  echo "✅ 检测到静态项目，生成简化配置..."
+                  CLEANED_CONFIG=$(echo -e "    location /docs/ {\n        alias $STATIC_ROOT/$PROJECT/;\n        index index.html;\n        try_files \$uri \$uri/ /docs/index.html;\n        \n        # 确保不缓存HTML文件\n        add_header Cache-Control \"no-cache, no-store, must-revalidate\" always;\n        add_header Pragma \"no-cache\" always;\n        add_header Expires \"0\" always;\n    }\n    \n    # 处理 /docs 路径（不带斜杠）- 重定向到 /docs/\n    location = /docs {\n        return 301 /docs/;\n    }")
+                elif echo "$CLEANED_CONFIG" | grep -q "$APPS_ROOT/$PROJECT/"; then
+                  echo "✅ 检测到后端项目，生成简化配置..."
+                  CLEANED_CONFIG=$(echo -e "    # 静态文件服务\n    location /static/ {\n        alias $APPS_ROOT/$PROJECT/front/;\n        expires 1y;\n        add_header Cache-Control \"public, immutable\";\n    }\n    \n    # API代理\n    location /api/ {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/;\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n        client_max_body_size 100M;\n    }\n    \n    # 健康检查\n    location /health {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/health;\n        proxy_set_header Host \$host;\n    }\n    \n    # 上传文件\n    location /uploads/ {\n        alias $APPS_ROOT/$PROJECT/uploads/;\n        try_files \$uri =404;\n    }\n    \n    # 默认路由\n    location / {\n        root $APPS_ROOT/$PROJECT/front;\n        try_files \$uri \$uri/ /index.html;\n        \n        # 静态资源缓存\n        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {\n            expires 1y;\n            add_header Cache-Control \"public, immutable\";\n        }\n    }")
                 else
                   echo "⚠️ 未知项目类型，使用原始配置"
                 fi
@@ -767,12 +858,12 @@ jobs:
               fi
               
               # 检查配置是否包含正确的路径
-              if echo "$CLEANED_CONFIG" | grep -q "/srv/static/axi-docs/"; then
-                echo "✅ 检测到正确的部署路径 (/srv/static/axi-docs/)"
-              elif echo "$CLEANED_CONFIG" | grep -q "/www/wwwroot/redamancy.com.cn/docs/"; then
-                echo "✅ 检测到正确的部署路径 (/www/wwwroot/redamancy.com.cn/docs/)"
-              elif echo "$CLEANED_CONFIG" | grep -q "/srv/apps/axi-star-cloud/"; then
-                echo "✅ 检测到正确的部署路径 (/srv/apps/axi-star-cloud/)"
+              if echo "$CLEANED_CONFIG" | grep -q "$STATIC_ROOT/$PROJECT/"; then
+                echo "✅ 检测到正确的部署路径 ($STATIC_ROOT/$PROJECT/)"
+              elif echo "$CLEANED_CONFIG" | grep -q "/www/wwwroot/$DOMAIN/docs/"; then
+                echo "✅ 检测到正确的部署路径 (/www/wwwroot/$DOMAIN/docs/)"
+              elif echo "$CLEANED_CONFIG" | grep -q "$APPS_ROOT/$PROJECT/"; then
+                echo "✅ 检测到正确的部署路径 ($APPS_ROOT/$PROJECT/)"
               else
                 echo "⚠️ 警告: 配置中可能使用了错误的路径"
                 echo "当前配置: $CLEANED_CONFIG"
@@ -797,7 +888,7 @@ jobs:
               
               # 检查其他route文件中是否包含location /
               OTHER_HAS_LOCATION_ROOT=false
-              for other_conf in /www/server/nginx/conf/conf.d/redamancy/route-*.conf; do
+              for other_conf in $NGINX_CONF_DIR/route-*.conf; do
                 if [ -f "$other_conf" ] && [ "$other_conf" != "$ROUTE_CONF" ] && grep -q "location /[^a-zA-Z]" "$other_conf"; then
                   OTHER_HAS_LOCATION_ROOT=true
                   echo "📋 其他配置文件 $other_conf 包含 location / (根路径)"
@@ -805,27 +896,27 @@ jobs:
                 fi
               done
               
-              # 只有当真正存在根路径冲突时才处理
-              if [ "$CURRENT_HAS_LOCATION_ROOT" = true ] && [ "$OTHER_HAS_LOCATION_ROOT" = true ]; then
-                echo "⚠️ 检测到多个配置文件都有 location / (根路径)，需要协调配置"
-                echo "📋 当前项目: $PROJECT"
-                echo "📋 当前配置: $CLEANED_CONFIG"
-                
-                # 对于axi-docs项目，不应该有location /配置
-                if [ "$PROJECT" = "axi-docs" ]; then
-                  echo "⚠️ axi-docs项目不应该配置location /，跳过根路径配置"
-                  # 移除location /配置，只保留docs相关配置
-                  CLEANED_CONFIG=$(echo "$CLEANED_CONFIG" | grep -v "location /[^a-zA-Z]")
-                  echo "✅ 已移除冲突的location /配置"
-                elif [ "$PROJECT" = "axi-star-cloud" ]; then
-                  echo "✅ axi-star-cloud项目可以配置location /，这是主项目"
+                              # 只有当真正存在根路径冲突时才处理
+                if [ "$CURRENT_HAS_LOCATION_ROOT" = true ] && [ "$OTHER_HAS_LOCATION_ROOT" = true ]; then
+                  echo "⚠️ 检测到多个配置文件都有 location / (根路径)，需要协调配置"
+                  echo "📋 当前项目: $PROJECT"
+                  echo "📋 当前配置: $CLEANED_CONFIG"
+                  
+                  # 对于静态项目，不应该有location /配置
+                  if [ "${{ inputs.deploy_type }}" = "static" ]; then
+                    echo "⚠️ 静态项目不应该配置location /，跳过根路径配置"
+                    # 移除location /配置，只保留项目相关配置
+                    CLEANED_CONFIG=$(echo "$CLEANED_CONFIG" | grep -v "location /[^a-zA-Z]")
+                    echo "✅ 已移除冲突的location /配置"
+                  elif [ "${{ inputs.deploy_type }}" = "backend" ]; then
+                    echo "✅ 后端项目可以配置location /，这是主项目"
+                  else
+                    echo "⚠️ 未知项目类型，跳过location /配置以避免冲突"
+                    CLEANED_CONFIG=$(echo "$CLEANED_CONFIG" | grep -v "location /[^a-zA-Z]")
+                  fi
                 else
-                  echo "⚠️ 未知项目类型，跳过location /配置以避免冲突"
-                  CLEANED_CONFIG=$(echo "$CLEANED_CONFIG" | grep -v "location /[^a-zA-Z]")
+                  echo "✅ 没有location /冲突，写入完整配置"
                 fi
-              else
-                echo "✅ 没有location /冲突，写入完整配置"
-              fi
               
               echo "✅ 写入新配置"
               echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
@@ -837,9 +928,9 @@ jobs:
             find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "docs\|301\|302" {} \;
             
             echo "📋 检查主配置文件:"
-            if [ -f "/www/server/nginx/conf/vhost/redamancy.com.cn.conf" ]; then
+            if [ -f "/www/server/nginx/conf/vhost/$DOMAIN.conf" ]; then
               echo "主配置文件内容:"
-              cat /www/server/nginx/conf/vhost/redamancy.com.cn.conf
+              cat /www/server/nginx/conf/vhost/$DOMAIN.conf
             else
               echo "主配置文件不存在"
             fi
@@ -859,16 +950,16 @@ jobs:
             grep -r "301\|302\|redirect" /www/server/nginx/conf/ || echo "没有找到重定向规则"
             
             echo "📁 检查部署目录:"
-            ls -la /srv/static/axi-docs/ || echo "部署目录不存在"
+            ls -la $STATIC_ROOT/$PROJECT/ || echo "部署目录不存在"
             
             echo "📋 检查 index.html 是否存在:"
-            if [ -f "/srv/static/axi-docs/index.html" ]; then
+            if [ -f "$STATIC_ROOT/$PROJECT/index.html" ]; then
               echo "✅ index.html 存在"
-              ls -la /srv/static/axi-docs/index.html
+              ls -la $STATIC_ROOT/$PROJECT/index.html
             else
               echo "❌ index.html 不存在"
               echo "部署目录内容:"
-              ls -la /srv/static/axi-docs/
+              ls -la $STATIC_ROOT/$PROJECT/
             fi
             
             # 检查Nginx配置语法
@@ -980,7 +1071,7 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           script: |
             echo "🚀 执行启动命令..."
-            cd /srv/apps/${{ inputs.project }}
+            cd ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}
             ${{ inputs.start_cmd }}
 
       - name: 测试网站可访问性
@@ -1063,7 +1154,7 @@ jobs:
             
             # 检查当前nginx配置
             echo "📋 检查当前nginx配置..."
-            ROUTE_CONF="/www/server/nginx/conf/conf.d/redamancy/route-$PROJECT.conf"
+            ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
             if [ -f "$ROUTE_CONF" ]; then
               echo "route-$PROJECT.conf 内容:"
               cat "$ROUTE_CONF"
@@ -1078,23 +1169,23 @@ jobs:
             
             if [ "$DEPLOY_TYPE" = "backend" ]; then
               # 后端项目检查
-              if [ -f "/srv/apps/$PROJECT/front/index.html" ]; then
+              if [ -f "$APPS_ROOT/$PROJECT/front/index.html" ]; then
                 echo "✅ index.html 存在"
-                ls -la /srv/apps/$PROJECT/front/index.html
+                ls -la $APPS_ROOT/$PROJECT/front/index.html
               else
                 echo "❌ index.html 不存在"
                 echo "部署目录内容:"
-                ls -la /srv/apps/$PROJECT/front/ || echo "目录不存在"
+                ls -la $APPS_ROOT/$PROJECT/front/ || echo "目录不存在"
               fi
             else
               # 静态项目检查
-              if [ -f "/srv/static/$PROJECT/index.html" ]; then
+              if [ -f "$STATIC_ROOT/$PROJECT/index.html" ]; then
                 echo "✅ index.html 存在"
-                ls -la /srv/static/$PROJECT/index.html
+                ls -la $STATIC_ROOT/$PROJECT/index.html
               else
                 echo "❌ index.html 不存在"
                 echo "部署目录内容:"
-                ls -la /srv/static/$PROJECT/ || echo "目录不存在"
+                ls -la $STATIC_ROOT/$PROJECT/ || echo "目录不存在"
               fi
             fi
 

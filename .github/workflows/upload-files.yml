@@ -1,0 +1,163 @@
+name: Upload Files
+
+description: "上传文件到服务器，包含重试机制"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+      artifact_path:
+        required: true
+        type: string
+        description: "构建产物路径"
+        default: "./dist"
+      run_user:
+        required: false
+        type: string
+        description: "运行用户"
+        default: "deploy"
+    outputs:
+      upload_success:
+        description: "上传是否成功"
+        value: ${{ jobs.upload.outputs.upload_success }}
+      temp_dir:
+        description: "服务器临时目录"
+        value: ${{ jobs.upload.outputs.temp_dir }}
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_success: ${{ steps.set-outputs.outputs.upload_success }}
+      temp_dir: ${{ steps.set-outputs.outputs.temp_dir }}
+    
+    steps:
+      - name: 验证输入参数
+        run: |
+          echo "🔍 验证输入参数..."
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
+          echo "- 用户: ${{ inputs.server_user }}"
+          echo "- 产物路径: ${{ inputs.artifact_path }}"
+          
+          if [ ! -d "${{ inputs.artifact_path }}" ]; then
+            echo "❌ 构建产物路径不存在: ${{ inputs.artifact_path }}"
+            exit 1
+          fi
+          
+          echo "✅ 输入参数验证通过"
+
+      - name: 上传到服务器（带重试）
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🚀 开始上传文件到服务器..."
+            
+            # 创建临时目录
+            TEMP_DIR="/tmp/${{ inputs.project }}"
+            sudo mkdir -p $TEMP_DIR
+            sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $TEMP_DIR
+            
+            echo "📁 临时目录: $TEMP_DIR"
+            echo "📁 临时目录权限:"
+            ls -la /tmp/ | grep "${{ inputs.project }}" || echo "临时目录尚未创建"
+            
+            # 重试机制
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            SUCCESS=false
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "📤 尝试上传 (第 $RETRY_COUNT 次)..."
+              
+              # 清理临时目录（确保干净）
+              sudo rm -rf $TEMP_DIR/*
+              
+              # 使用scp上传文件
+              if scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -r ${{ inputs.artifact_path }}/* ${{ inputs.run_user || 'deploy' }}@${{ inputs.server_host }}:$TEMP_DIR/; then
+                echo "✅ 上传成功！"
+                SUCCESS=true
+                break
+              else
+                echo "❌ 上传失败 (第 $RETRY_COUNT 次)"
+                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                  echo "⏳ 等待 30 秒后重试..."
+                  sleep 30
+                fi
+              fi
+            done
+            
+            if [ "$SUCCESS" = false ]; then
+              echo "❌ 上传失败，已达到最大重试次数 ($MAX_RETRIES)"
+              exit 1
+            fi
+            
+            echo "📁 验证上传结果..."
+            ls -la $TEMP_DIR/
+            echo "✅ 文件上传完成"
+
+      - name: 验证上传结果
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔍 验证上传文件..."
+            TEMP_DIR="/tmp/${{ inputs.project }}"
+            
+            if [ -d "$TEMP_DIR" ]; then
+              echo "✅ 临时目录存在: $TEMP_DIR"
+              echo "📁 临时目录内容:"
+              ls -la $TEMP_DIR/
+              
+              # 检查文件数量
+              FILE_COUNT=$(find $TEMP_DIR -type f | wc -l)
+              echo "📊 文件数量: $FILE_COUNT"
+              
+              if [ "$FILE_COUNT" -gt 0 ]; then
+                echo "✅ 文件上传验证通过"
+              else
+                echo "❌ 临时目录为空"
+                exit 1
+              fi
+            else
+              echo "❌ 临时目录不存在: $TEMP_DIR"
+              echo "📁 /tmp 目录内容:"
+              ls -la /tmp/
+              exit 1
+            fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "upload_success=true" >> $GITHUB_OUTPUT
+          echo "temp_dir=/tmp/${{ inputs.project }}" >> $GITHUB_OUTPUT
+          echo "✅ 输出已设置"
+          echo "- upload_success: true"
+          echo "- temp_dir: /tmp/${{ inputs.project }}"

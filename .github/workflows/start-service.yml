@@ -1,0 +1,120 @@
+name: Start Service
+
+description: "执行启动命令（后端项目）"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      start_cmd:
+        required: false
+        type: string
+        description: "启动命令"
+        default: ""
+      deploy_type:
+        required: true
+        type: string
+        description: "部署类型 (backend/static)"
+        default: "static"
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+      apps_root:
+        required: false
+        type: string
+        description: "应用目录路径"
+        default: "/srv/apps"
+    outputs:
+      start_success:
+        description: "启动是否成功"
+        value: ${{ jobs.start.outputs.start_success }}
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    outputs:
+      start_success: ${{ steps.set-outputs.outputs.start_success }}
+    
+    steps:
+      - name: 验证输入参数
+        run: |
+          echo "🔍 验证输入参数..."
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          echo "- 启动命令: ${{ inputs.start_cmd }}"
+          
+          if [ "${{ inputs.deploy_type }}" != "backend" ]; then
+            echo "⚠️ 非后端项目，跳过启动命令"
+            echo "start_success=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          if [ -z "${{ inputs.start_cmd }}" ]; then
+            echo "⚠️ 未提供启动命令，跳过启动步骤"
+            echo "start_success=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "✅ 输入参数验证通过"
+
+      - name: 执行启动命令
+        if: inputs.start_cmd != '' && inputs.deploy_type == 'backend'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🚀 执行启动命令..."
+            echo "- 项目: ${{ inputs.project }}"
+            echo "- 启动命令: ${{ inputs.start_cmd }}"
+            
+            # 切换到项目目录
+            cd ${{ inputs.apps_root }}/${{ inputs.project }}
+            echo "📁 当前目录: $(pwd)"
+            
+            # 执行启动命令
+            echo "📋 执行启动命令..."
+            ${{ inputs.start_cmd }}
+            
+            # 等待服务启动
+            echo "⏳ 等待服务启动..."
+            sleep 5
+            
+            # 检查服务状态（如果可能）
+            echo "📋 检查服务状态..."
+            if command -v systemctl &> /dev/null; then
+              SERVICE_NAME="${{ inputs.project }}"
+              if systemctl is-active --quiet $SERVICE_NAME; then
+                echo "✅ 服务 $SERVICE_NAME 正在运行"
+              else
+                echo "⚠️ 服务 $SERVICE_NAME 未运行或无法检查"
+              fi
+            else
+              echo "⚠️ 无法检查服务状态（systemctl不可用）"
+            fi
+            
+            echo "✅ 启动命令执行完成"
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "start_success=true" >> $GITHUB_OUTPUT
+          echo "✅ 启动命令执行完成"

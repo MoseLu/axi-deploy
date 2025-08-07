@@ -1,0 +1,219 @@
+name: Test Website
+
+description: "测试网站可访问性和配置验证"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      test_url:
+        required: false
+        type: string
+        description: "测试URL"
+        default: ""
+      deploy_type:
+        required: true
+        type: string
+        description: "部署类型 (backend/static)"
+        default: "static"
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+      apps_root:
+        required: false
+        type: string
+        description: "应用目录路径"
+        default: "/srv/apps"
+      static_root:
+        required: false
+        type: string
+        description: "静态文件目录路径"
+        default: "/srv/static"
+      nginx_conf_dir:
+        required: false
+        type: string
+        description: "Nginx配置目录"
+        default: "/www/server/nginx/conf/conf.d/redamancy"
+    outputs:
+      test_success:
+        description: "测试是否成功"
+        value: ${{ jobs.test.outputs.test_success }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      test_success: ${{ steps.set-outputs.outputs.test_success }}
+    
+    steps:
+      - name: 验证输入参数
+        run: |
+          echo "🔍 验证输入参数..."
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          echo "- 测试URL: ${{ inputs.test_url }}"
+          
+          if [ -z "${{ inputs.test_url }}" ]; then
+            echo "⚠️ 未提供test_url，跳过测试"
+            echo "test_success=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "✅ 输入参数验证通过"
+
+      - name: 测试网站可访问性
+        if: inputs.test_url != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🌐 测试网站可访问性..."
+            echo "测试URL: ${{ inputs.test_url }}"
+            
+            # 等待一段时间让服务完全启动
+            sleep 10
+            
+            # 从test_url中提取域名和路径
+            TEST_URL="${{ inputs.test_url }}"
+            if [ -n "$TEST_URL" ]; then
+              # 提取域名部分
+              DOMAIN=$(echo "$TEST_URL" | sed -E 's|^https?://([^/]+).*|\1|')
+              # 提取路径部分
+              PATH_PART=$(echo "$TEST_URL" | sed -E 's|^https?://[^/]+(/.*)?|\1|')
+              if [ "$PATH_PART" = "" ]; then
+                PATH_PART="/"
+              fi
+              
+              echo "📋 解析测试URL:"
+              echo "- 完整URL: $TEST_URL"
+              echo "- 域名: $DOMAIN"
+              echo "- 路径: $PATH_PART"
+              
+              # 分别测试HTTP和HTTPS
+              echo "📋 测试HTTP访问..."
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART")
+              echo "HTTP测试结果: $HTTP_STATUS"
+              
+              echo "📋 测试HTTPS访问..."
+              HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
+              echo "HTTPS测试结果: $HTTPS_STATUS"
+              
+              # 如果HTTPS返回301，检查重定向目标
+              if [ "$HTTPS_STATUS" = "301" ]; then
+                echo "📋 检查HTTPS重定向目标..."
+                REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
+                echo "重定向目标: $REDIRECT_URL"
+              fi
+              
+              # 立即检查状态码，如果不是200则直接退出工作流
+              if [ "$HTTPS_STATUS" != "200" ]; then
+                echo "❌ 网站测试失败 - HTTPS返回状态码: $HTTPS_STATUS"
+                echo "🚨 工作流错误：网站未返回200状态码，直接退出工作流"
+                echo "可能的原因:"
+                echo "1. 域名解析问题"
+                echo "2. 服务器防火墙设置"
+                echo "3. Nginx配置问题"
+                echo "4. SSL证书问题"
+                echo "5. 后端服务未启动"
+                echo "6. 项目部署失败"
+                exit 1
+              fi
+              
+              echo "✅ 网站测试成功 - HTTPS返回200状态码"
+            else
+              echo "❌ 未提供测试URL，跳过测试"
+              exit 0
+            fi
+
+      - name: 验证Nginx配置
+        if: inputs.test_url != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔧 验证Nginx配置..."
+            
+            # 检查nginx配置语法
+            echo "📋 检查nginx配置语法..."
+            nginx -t 2>&1 || echo "nginx配置语法错误"
+            
+            # 检查nginx错误日志
+            echo "📋 检查nginx错误日志..."
+            tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
+            
+            # 检查当前nginx配置
+            echo "📋 检查当前nginx配置..."
+            PROJECT="${{ inputs.project }}"
+            NGINX_CONF_DIR="${{ inputs.nginx_conf_dir }}"
+            ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
+            if [ -f "$ROUTE_CONF" ]; then
+              echo "route-$PROJECT.conf 内容:"
+              cat "$ROUTE_CONF"
+            else
+              echo "route-$PROJECT.conf 不存在"
+            fi
+
+      - name: 检查部署文件
+        if: inputs.test_url != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "📁 检查部署文件..."
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            APPS_ROOT="${{ inputs.apps_root }}"
+            STATIC_ROOT="${{ inputs.static_root }}"
+            
+            if [ "$DEPLOY_TYPE" = "backend" ]; then
+              # 后端项目检查
+              if [ -f "$APPS_ROOT/$PROJECT/front/index.html" ]; then
+                echo "✅ index.html 存在"
+                ls -la $APPS_ROOT/$PROJECT/front/index.html
+              else
+                echo "❌ index.html 不存在"
+                echo "部署目录内容:"
+                ls -la $APPS_ROOT/$PROJECT/front/ || echo "目录不存在"
+              fi
+            else
+              # 静态项目检查
+              if [ -f "$STATIC_ROOT/$PROJECT/index.html" ]; then
+                echo "✅ index.html 存在"
+                ls -la $STATIC_ROOT/$PROJECT/index.html
+              else
+                echo "❌ index.html 不存在"
+                echo "部署目录内容:"
+                ls -la $STATIC_ROOT/$PROJECT/ || echo "目录不存在"
+              fi
+            fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "test_success=true" >> $GITHUB_OUTPUT
+          echo "✅ 网站测试完成"

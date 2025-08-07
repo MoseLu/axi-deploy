@@ -26,19 +26,22 @@ jobs:
           
           echo "✅ 部署请求已处理"
 
-      - name: 自动触发部署工作流
+  trigger-deployment:
+    needs: handle-deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发主部署工作流
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             try {
-              console.log('🚀 自动触发部署工作流...');
-              console.log('目标工作流: universal_deploy.yml');
+              console.log('🚀 触发主部署工作流...');
               
               const { data: response } = await github.rest.actions.createWorkflowDispatch({
                 owner: 'MoseLu',
                 repo: 'axi-deploy',
-                workflow_id: 'universal_deploy.yml',
+                workflow_id: 'main-deployment.yml',
                 ref: 'master',
                 inputs: {
                   project: '${{ github.event.client_payload.project }}',
@@ -48,19 +51,20 @@ jobs:
                   nginx_config: '${{ github.event.client_payload.nginx_config || '' }}',
                   test_url: '${{ github.event.client_payload.test_url || '' }}',
                   start_cmd: '${{ github.event.client_payload.start_cmd || '' }}',
-                  skip_init: 'false'
+                  domain: '${{ github.event.client_payload.domain || 'redamancy.com.cn' }}',
+                  apps_root: '${{ github.event.client_payload.apps_root || '/srv/apps' }}',
+                  static_root: '${{ github.event.client_payload.static_root || '/srv/static' }}',
+                  backup_root: '${{ github.event.client_payload.backup_root || '/srv/backups' }}',
+                  run_user: '${{ github.event.client_payload.run_user || 'deploy' }}',
+                  nginx_conf_dir: '${{ github.event.client_payload.nginx_conf_dir || '/www/server/nginx/conf/conf.d/redamancy' }}',
+                  backend_port: '${{ github.event.client_payload.backend_port || '8080' }}',
+                  service_name: '${{ github.event.client_payload.service_name || 'star-cloud' }}'
                 }
               });
               
-              console.log('✅ 部署工作流已成功触发!');
-              console.log('响应状态:', response ? '成功' : '无数据返回(正常)');
-              
-              if (response) {
-                console.log('响应详情:', JSON.stringify(response, null, 2));
-              }
+              console.log('✅ 主部署工作流已成功触发!');
               
             } catch (error) {
-              console.error('❌ 触发部署工作流失败:', error.message);
-              console.error('错误详情:', error);
+              console.error('❌ 触发主部署工作流失败:', error.message);
               throw error;
             } 

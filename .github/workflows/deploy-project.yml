@@ -1,0 +1,213 @@
+name: Deploy Project
+
+description: "部署项目到服务器，包含备份和回滚机制"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      deploy_type:
+        required: true
+        type: string
+        description: "部署类型 (backend/static)"
+        default: "static"
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+      apps_root:
+        required: false
+        type: string
+        description: "应用目录路径"
+        default: "/srv/apps"
+      static_root:
+        required: false
+        type: string
+        description: "静态文件目录路径"
+        default: "/srv/static"
+      backup_root:
+        required: false
+        type: string
+        description: "备份根目录"
+        default: "/srv/backups"
+      run_user:
+        required: false
+        type: string
+        description: "运行用户"
+        default: "deploy"
+    outputs:
+      deploy_success:
+        description: "部署是否成功"
+        value: ${{ jobs.deploy.outputs.deploy_success }}
+      deploy_path:
+        description: "部署路径"
+        value: ${{ jobs.deploy.outputs.deploy_path }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_success: ${{ steps.set-outputs.outputs.deploy_success }}
+      deploy_path: ${{ steps.set-outputs.outputs.deploy_path }}
+    
+    steps:
+      - name: 验证输入参数
+        run: |
+          echo "🔍 验证输入参数..."
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
+          
+          if [ "${{ inputs.deploy_type }}" != "backend" ] && [ "${{ inputs.deploy_type }}" != "static" ]; then
+            echo "❌ 无效的部署类型: ${{ inputs.deploy_type }}"
+            exit 1
+          fi
+          
+          echo "✅ 输入参数验证通过"
+
+      - name: 部署到服务器
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🚀 开始部署项目: ${{ inputs.project }}"
+            
+            # 标准化目录结构
+            APPS_ROOT="${{ inputs.apps_root || '/srv/apps' }}"
+            STATIC_ROOT="${{ inputs.static_root || '/srv/static' }}"
+            PROJECT="${{ inputs.project }}"
+            TEMP_DIR="/tmp/$PROJECT"
+            
+            echo "📁 项目临时目录: $TEMP_DIR"
+            
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              # 后端项目部署到应用目录
+              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
+              echo "📁 后端项目部署到: $DEPLOY_PATH"
+            else
+              # 静态项目部署到静态文件目录
+              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
+              echo "📁 静态项目部署到: $DEPLOY_PATH"
+            fi
+            
+            # 创建部署目录
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH
+            
+            # 创建项目专用备份目录
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/apps"
+            else
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 备份旧部署（如果存在）
+            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
+              echo "📋 备份旧部署目录: $DEPLOY_PATH"
+              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
+              echo "✅ 旧部署目录已备份到: $BACKUP_NAME"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 没有旧部署需要备份"
+            fi
+            
+            # 清理目标部署目录（避免残留文件）
+            echo "🧹 清理目标部署目录..."
+            sudo rm -rf $DEPLOY_PATH/*
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown deploy:deploy $DEPLOY_PATH
+            echo "✅ 部署目录已清理并重新创建"
+            
+            # 检查临时目录是否存在
+            if [ ! -d "$TEMP_DIR" ]; then
+              echo "❌ 临时目录不存在: $TEMP_DIR"
+              echo "📁 /tmp 目录内容:"
+              ls -la /tmp/
+              exit 1
+            fi
+            
+            # 检查临时目录是否有文件
+            if [ ! "$(ls -A $TEMP_DIR)" ]; then
+              echo "❌ 临时目录为空: $TEMP_DIR"
+              exit 1
+            fi
+            
+            echo "📁 临时目录内容:"
+            ls -la $TEMP_DIR/
+            
+            # 部署文件
+            echo "📤 开始部署文件..."
+            sudo cp -r $TEMP_DIR/* $DEPLOY_PATH/
+            
+            # 设置正确的文件权限
+            sudo chown -R deploy:deploy $DEPLOY_PATH
+            sudo chmod -R 755 $DEPLOY_PATH
+            
+            echo "✅ 文件部署完成"
+            
+            # 验证部署结果
+            echo "🔍 验证部署结果..."
+            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
+              echo "✅ 部署验证通过"
+              echo "📁 部署目录内容:"
+              ls -la $DEPLOY_PATH/
+            else
+              echo "❌ 部署验证失败"
+              exit 1
+            fi
+            
+            # 清理临时目录
+            echo "🧹 清理临时目录..."
+            sudo rm -rf $TEMP_DIR
+            echo "✅ 临时目录已清理: $TEMP_DIR"
+            
+            echo "✅ 项目部署完成: ${{ inputs.project }}"
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+            DEPLOY_PATH="/srv/apps/${{ inputs.project }}"
+          else
+            DEPLOY_PATH="/srv/static/${{ inputs.project }}"
+          fi
+          
+          echo "deploy_success=true" >> $GITHUB_OUTPUT
+          echo "deploy_path=$DEPLOY_PATH" >> $GITHUB_OUTPUT
+          echo "✅ 输出已设置"
+          echo "- deploy_success: true"
+          echo "- deploy_path: $DEPLOY_PATH"
