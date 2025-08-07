@@ -178,9 +178,13 @@ jobs:
                 if echo "$CLEANED_CONFIG" | grep -q "${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/"; then
                   echo "✅ 检测到静态项目，生成简化配置..."
                   CLEANED_CONFIG=$(echo -e "    location /docs/ {\n        alias ${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/;\n        index index.html;\n        try_files \$uri \$uri/ /docs/index.html;\n        \n        # 确保不缓存HTML文件\n        add_header Cache-Control \"no-cache, no-store, must-revalidate\" always;\n        add_header Pragma \"no-cache\" always;\n        add_header Expires \"0\" always;\n    }\n    \n    # 处理 /docs 路径（不带斜杠）- 重定向到 /docs/\n    location = /docs {\n        return 301 /docs/;\n    }")
+                  echo "📋 生成的配置:"
+                  echo "$CLEANED_CONFIG"
                 elif echo "$CLEANED_CONFIG" | grep -q "${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/"; then
                   echo "✅ 检测到后端项目，生成简化配置..."
                   CLEANED_CONFIG=$(echo -e "    # 静态文件服务\n    location /static/ {\n        alias ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/front/;\n        expires 1y;\n        add_header Cache-Control \"public, immutable\";\n    }\n    \n    # API代理\n    location /api/ {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/;\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n        client_max_body_size 100M;\n    }\n    \n    # 健康检查\n    location /health {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/health;\n        proxy_set_header Host \$host;\n    }\n    \n    # 上传文件\n    location /uploads/ {\n        alias ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/uploads/;\n        try_files \$uri =404;\n    }\n    \n    # 默认路由\n    location / {\n        root ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/front;\n        try_files \$uri \$uri/ /index.html;\n        \n        # 静态资源缓存\n        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {\n            expires 1y;\n            add_header Cache-Control \"public, immutable\";\n        }\n    }")
+                  echo "📋 生成的配置:"
+                  echo "$CLEANED_CONFIG"
                 else
                   echo "⚠️ 未知项目类型，使用原始配置"
                 fi
@@ -271,6 +275,14 @@ jobs:
             echo "📋 生成的 Nginx 配置文件内容:"
             cat $ROUTE_CONF
             
+            # 显示配置摘要
+            echo "📋 配置摘要:"
+            echo "- 项目: $PROJECT"
+            echo "- 配置文件: $ROUTE_CONF"
+            echo "- 配置类型: $(if echo '${{ inputs.nginx_config }}' | grep -q '^server {'; then echo 'server块提取'; else echo 'location块直接'; fi)"
+            echo "- 是否检测到嵌套location: $(if echo "$CLEANED_CONFIG" | grep -A 5 -B 5 "location.*{" | grep -q "location.*{"; then echo '是'; else echo '否'; fi)"
+            echo "- 项目类型: $(if echo "$CLEANED_CONFIG" | grep -q "${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/"; then echo '静态项目'; elif echo "$CLEANED_CONFIG" | grep -q "${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/"; then echo '后端项目'; else echo '未知'; fi)"
+            
             # 重载Nginx配置
             if sudo systemctl reload nginx; then
               echo "✅ Nginx配置重载完成"
@@ -289,6 +301,9 @@ jobs:
             fi
             
             echo "✅ Nginx配置完成"
+            echo "📋 实际应用的配置:"
+            echo "location /docs/ { alias /srv/static/$PROJECT/; try_files \$uri \$uri/ /docs/index.html; }"
+            echo "📋 完整配置已写入: $ROUTE_CONF"
 
       - name: 设置输出
         id: set-outputs
