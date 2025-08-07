@@ -167,9 +167,19 @@ jobs:
             ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
             echo "📊 文件统计:"
             find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l
+            echo "📁 前10个文件:"
+            find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | head -10
           else
             echo "❌ 构建产物目录不存在: ${{ needs.download-artifact.outputs.artifact_path }}"
           fi
+          
+          echo "🔍 检查所有可能的构建产物目录:"
+          for dir in ./dist* ./docs* ./*; do
+            if [ -d "$dir" ]; then
+              echo "📁 发现目录: $dir"
+              ls -la "$dir/" | head -5
+            fi
+          done
 
       - name: 上传构建产物
         uses: appleboy/scp-action@v0.1.7
@@ -178,7 +188,7 @@ jobs:
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}/*"
+          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
           target: "/tmp/deploy-${{ inputs.project }}/"
 
       - name: 验证上传结果
