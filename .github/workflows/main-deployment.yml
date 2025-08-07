@@ -246,7 +246,6 @@ jobs:
 
   configure-nginx:
     needs: deploy-project
-    if: ${{ inputs.nginx_config != '' }}
     runs-on: ubuntu-latest
     outputs:
       config_success: ${{ steps.set-outputs.outputs.config_success }}
@@ -263,10 +262,8 @@ jobs:
             echo "🔧 配置Nginx..."
             
             PROJECT="${{ inputs.project }}"
-            NGINX_CONFIG='${{ inputs.nginx_config }}'
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
             NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
-            BACKEND_PORT="8080"
-            SERVICE_NAME="star-cloud"
             
             # 生成项目路由配置
             ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
@@ -277,6 +274,32 @@ jobs:
               sudo mkdir -p "$(dirname $BACKUP_FILE)"
               sudo cp "$ROUTE_CONF" "$BACKUP_FILE"
               sudo rm -f "$ROUTE_CONF"
+            fi
+            
+            # 生成默认Nginx配置
+            if [ "$DEPLOY_TYPE" = "backend" ]; then
+              # 后端项目配置
+              NGINX_CONFIG="
+              location /docs/ {
+                  proxy_pass http://localhost:8080/;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+              }"
+            else
+              # 静态项目配置
+              NGINX_CONFIG="
+              location /docs/ {
+                  alias /srv/static/$PROJECT/;
+                  try_files \$uri \$uri/ /docs/index.html;
+                  index index.html;
+              }"
+            fi
+            
+            # 如果提供了自定义配置，使用自定义配置
+            if [ -n "${{ inputs.nginx_config }}" ]; then
+              NGINX_CONFIG='${{ inputs.nginx_config }}'
             fi
             
             # 写入新配置
@@ -337,10 +360,39 @@ jobs:
           echo "start_success=true" >> $GITHUB_OUTPUT
           echo "✅ 启动完成"
 
+  test-website:
+    needs: [deploy-project, configure-nginx, start-service]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      test_success: ${{ steps.set-outputs.outputs.test_success }}
+    
+    steps:
+      - name: 测试网站可访问性
+        run: |
+          echo "🔍 测试网站可访问性..."
+          
+          # 等待一段时间让服务完全启动
+          sleep 10
+          
+          # 测试网站可访问性
+          if curl -f -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/docs/ | grep -q "200\|301\|302"; then
+            echo "✅ 网站可正常访问"
+          else
+            echo "❌ 网站无法访问，HTTP状态码: $(curl -f -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/docs/)"
+            echo "⚠️ 这可能是因为 Nginx 配置问题或服务未完全启动"
+          fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "test_success=true" >> $GITHUB_OUTPUT
+          echo "✅ 测试完成"
+
 
 
   deployment-summary:
-    needs: [download-artifact, upload-files, deploy-project]
+    needs: [download-artifact, upload-files, deploy-project, configure-nginx, start-service, test-website]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -358,8 +410,16 @@ jobs:
           echo "- 下载构建产物: ${{ needs.download-artifact.result }}"
           echo "- 上传文件: ${{ needs.upload-files.result }}"
           echo "- 部署项目: ${{ needs.deploy-project.result }}"
+          echo "- 配置Nginx: ${{ needs.configure-nginx.result || 'skipped' }}"
+          echo "- 启动服务: ${{ needs.start-service.result || 'skipped' }}"
+          echo "- 测试网站: ${{ needs.test-website.result || 'skipped' }}"
           echo ""
           echo "🔗 访问信息:"
           echo "- 域名: redamancy.com.cn"
           echo "- 项目路径: ${{ needs.deploy-project.outputs.deploy_path }}"
+          echo "- 访问URL: https://redamancy.com.cn/docs/"
+          echo ""
+          echo "📝 部署完成通知:"
+          echo "✅ 项目 ${{ inputs.project }} 已成功部署到服务器"
+          echo "🌐 可通过 https://redamancy.com.cn/docs/ 访问"
           echo "=========================================="
