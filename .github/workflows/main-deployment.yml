@@ -222,10 +222,30 @@ jobs:
             # 备份现有部署
             if [ -d "$DEPLOY_PATH" ]; then
               echo "📋 备份现有部署..."
-              BACKUP_PATH="$BACKUP_ROOT/$PROJECT/backup-$(date +%Y%m%d_%H%M%S)"
-              sudo mkdir -p "$BACKUP_PATH"
-              sudo cp -r "$DEPLOY_PATH" "$BACKUP_PATH/"
-              echo "✅ 备份完成: $BACKUP_PATH"
+              
+              # 创建项目专用备份目录
+              PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+              echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+              sudo mkdir -p "$PROJECT_BACKUP_DIR"
+              sudo chmod 755 "$PROJECT_BACKUP_DIR"
+              
+              # 备份现有部署
+              BACKUP_FILE="$PROJECT_BACKUP_DIR/backup-$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r "$DEPLOY_PATH" "$BACKUP_FILE"
+              echo "✅ 现有部署已备份到: $BACKUP_FILE"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/backup-* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 没有找到现有部署: $DEPLOY_PATH"
             fi
             
             # 部署新文件
