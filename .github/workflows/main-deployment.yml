@@ -131,17 +131,32 @@ jobs:
       - name: 设置输出
         id: set-outputs
         run: |
+          echo "🔍 确定构建产物路径..."
+          echo "当前目录内容:"
+          ls -la ./
+          
           # 确定构建产物路径
           if [ -d "./dist" ]; then
             ARTIFACT_PATH="./dist"
+            echo "📁 找到 dist 目录"
           elif [ -d "./dist-${{ inputs.project }}" ]; then
             ARTIFACT_PATH="./dist-${{ inputs.project }}"
+            echo "📁 找到 dist-${{ inputs.project }} 目录"
           elif [ -d "./docs/.vitepress/dist" ]; then
             ARTIFACT_PATH="./docs/.vitepress/dist"
+            echo "📁 找到 docs/.vitepress/dist 目录"
+          elif [ -d "./.vitepress/dist" ]; then
+            ARTIFACT_PATH="./.vitepress/dist"
+            echo "📁 找到 .vitepress/dist 目录"
           else
             # 构建产物直接在当前目录
             ARTIFACT_PATH="."
+            echo "📁 构建产物直接在当前目录"
           fi
+          
+          echo "📁 最终构建产物路径: $ARTIFACT_PATH"
+          echo "📁 构建产物内容:"
+          ls -la "$ARTIFACT_PATH/"
           
           echo "artifact_path=$ARTIFACT_PATH" >> $GITHUB_OUTPUT
           echo "artifact_size=$(du -sb $ARTIFACT_PATH | cut -f1)" >> $GITHUB_OUTPUT
@@ -185,15 +200,14 @@ jobs:
             fi
           done
           
-          echo "🔍 检查github.workspace路径:"
-          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-          echo "完整路径: $GITHUB_WORKSPACE/${{ needs.download-artifact.outputs.artifact_path }}"
+          echo "🔍 检查构建产物路径:"
+          echo "构建产物路径: ${{ needs.download-artifact.outputs.artifact_path }}"
           
-          if [ -d "$GITHUB_WORKSPACE/${{ needs.download-artifact.outputs.artifact_path }}" ]; then
-            echo "✅ 完整路径存在"
-            ls -la "$GITHUB_WORKSPACE/${{ needs.download-artifact.outputs.artifact_path }}/"
+          if [ -d "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
+            echo "✅ 构建产物路径存在"
+            ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
           else
-            echo "❌ 完整路径不存在"
+            echo "❌ 构建产物路径不存在"
           fi
 
       - name: 直接部署到目标目录
@@ -203,7 +217,7 @@ jobs:
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
+          source: "${{ needs.download-artifact.outputs.artifact_path }}"
           target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
           strip_components: 0
 
