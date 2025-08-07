@@ -276,26 +276,26 @@ jobs:
               sudo rm -f "$ROUTE_CONF"
             fi
             
-            # 生成默认Nginx配置
-            if [ "$DEPLOY_TYPE" = "backend" ]; then
-              # 后端项目配置
-              NGINX_CONFIG="
-              location /docs/ {
-                  proxy_pass http://localhost:8080/;
-                  proxy_set_header Host \$host;
-                  proxy_set_header X-Real-IP \$remote_addr;
-                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto \$scheme;
-              }"
-            else
-              # 静态项目配置
-              NGINX_CONFIG="
-              location /docs/ {
-                  alias /srv/static/$PROJECT/;
-                  try_files \$uri \$uri/ /docs/index.html;
-                  index index.html;
-              }"
-            fi
+                         # 生成默认Nginx配置
+             if [ "$DEPLOY_TYPE" = "backend" ]; then
+               # 后端项目配置
+               NGINX_CONFIG="
+               location /docs/ {
+                   proxy_pass http://localhost:8080/;
+                   proxy_set_header Host \$host;
+                   proxy_set_header X-Real-IP \$remote_addr;
+                   proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                   proxy_set_header X-Forwarded-Proto \$scheme;
+               }"
+             else
+               # 静态项目配置
+               NGINX_CONFIG="
+               location /docs/ {
+                   root /srv/static;
+                   try_files /$PROJECT\$uri /$PROJECT\$uri/ /$PROJECT/index.html;
+                   index index.html;
+               }"
+             fi
             
             # 如果提供了自定义配置，使用自定义配置
             if [ -n "${{ inputs.nginx_config }}" ]; then
