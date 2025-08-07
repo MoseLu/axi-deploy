@@ -312,11 +312,20 @@ jobs:
           sleep 10
           
           # 测试网站可访问性
-          if curl -f -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/docs/ | grep -q "200\|301\|302"; then
+          HTTP_STATUS=$(curl -f -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/docs/ 2>/dev/null || echo "000")
+          echo "📋 HTTP状态码: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "301" ] || [ "$HTTP_STATUS" = "302" ]; then
             echo "✅ 网站可正常访问"
           else
-            echo "❌ 网站无法访问，HTTP状态码: $(curl -f -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/docs/)"
-            echo "⚠️ 这可能是因为 Nginx 配置问题或服务未完全启动"
+            echo "❌ 网站无法访问，HTTP状态码: $HTTP_STATUS"
+            echo "🚨 工作流错误：网站返回 $HTTP_STATUS 状态码，这表示配置有问题"
+            echo "可能的原因:"
+            echo "1. Nginx配置错误"
+            echo "2. 文件权限问题"
+            echo "3. 路径不存在"
+            echo "4. SSL证书问题"
+            exit 1
           fi
 
       - name: 设置输出
