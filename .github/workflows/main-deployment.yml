@@ -66,7 +66,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v2
         with:
           name: dist-${{ inputs.project }}
-          path: ./dist
+          path: ./
           repo: ${{ inputs.source_repo }}
           workflow: ${{ inputs.project }}_deploy.yml
           run_id: ${{ inputs.run_id }}
@@ -76,16 +76,24 @@ jobs:
         run: |
           echo "🔍 验证构建产物..."
           
-          if [ ! -d "./dist" ]; then
+          # 检查可能的构建产物目录
+          if [ -d "./dist" ]; then
+            ARTIFACT_DIR="./dist"
+          elif [ -d "./dist-${{ inputs.project }}" ]; then
+            ARTIFACT_DIR="./dist-${{ inputs.project }}"
+          else
             echo "❌ 构建产物目录不存在"
+            echo "📁 当前目录内容:"
+            ls -la ./
             exit 1
           fi
           
+          echo "📁 构建产物目录: $ARTIFACT_DIR"
           echo "📁 构建产物目录内容:"
-          ls -la ./dist/
+          ls -la "$ARTIFACT_DIR/"
           
           # 检查是否有文件
-          FILE_COUNT=$(find ./dist -type f | wc -l)
+          FILE_COUNT=$(find "$ARTIFACT_DIR" -type f | wc -l)
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "❌ 构建产物目录为空"
             exit 1
@@ -97,9 +105,20 @@ jobs:
       - name: 设置输出
         id: set-outputs
         run: |
-          echo "artifact_path=./dist" >> $GITHUB_OUTPUT
-          echo "artifact_size=$(du -sb ./dist | cut -f1)" >> $GITHUB_OUTPUT
+          # 确定构建产物路径
+          if [ -d "./dist" ]; then
+            ARTIFACT_PATH="./dist"
+          elif [ -d "./dist-${{ inputs.project }}" ]; then
+            ARTIFACT_PATH="./dist-${{ inputs.project }}"
+          else
+            echo "❌ 无法确定构建产物路径"
+            exit 1
+          fi
+          
+          echo "artifact_path=$ARTIFACT_PATH" >> $GITHUB_OUTPUT
+          echo "artifact_size=$(du -sb $ARTIFACT_PATH | cut -f1)" >> $GITHUB_OUTPUT
           echo "✅ 输出已设置"
+          echo "构建产物路径: $ARTIFACT_PATH"
 
   upload-files:
     needs: download-artifact
@@ -137,11 +156,17 @@ jobs:
           echo "构建产物路径: ${{ needs.download-artifact.outputs.artifact_path }}"
           echo "构建产物大小: ${{ needs.download-artifact.outputs.artifact_size }}"
           
-          echo "📁 构建产物目录内容:"
-          ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
+          echo "📁 当前目录内容:"
+          ls -la ./
           
-          echo "📊 文件统计:"
-          find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l
+          echo "📁 构建产物目录内容:"
+          if [ -d "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
+            ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
+            echo "📊 文件统计:"
+            find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l
+          else
+            echo "❌ 构建产物目录不存在: ${{ needs.download-artifact.outputs.artifact_path }}"
+          fi
 
       - name: 上传构建产物
         uses: appleboy/scp-action@v0.1.7
