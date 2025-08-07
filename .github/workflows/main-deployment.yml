@@ -52,31 +52,6 @@ on:
         required: false
         default: '/srv/static'
         type: string
-      backup_root:
-        description: '备份根目录'
-        required: false
-        default: '/srv/backups'
-        type: string
-      run_user:
-        description: '运行用户'
-        required: false
-        default: 'deploy'
-        type: string
-      nginx_conf_dir:
-        description: 'Nginx配置目录'
-        required: false
-        default: '/www/server/nginx/conf/conf.d/redamancy'
-        type: string
-      backend_port:
-        description: '后端服务端口'
-        required: false
-        default: '8080'
-        type: string
-      service_name:
-        description: '服务名称'
-        required: false
-        default: 'star-cloud'
-        type: string
 
 jobs:
   deployment-orchestrator:
@@ -92,8 +67,9 @@ jobs:
       domain: ${{ inputs.domain }}
       apps_root: ${{ inputs.apps_root }}
       static_root: ${{ inputs.static_root }}
-      backup_root: ${{ inputs.backup_root }}
-      run_user: ${{ inputs.run_user }}
-      nginx_conf_dir: ${{ inputs.nginx_conf_dir }}
-      backend_port: ${{ inputs.backend_port }}
-      service_name: ${{ inputs.service_name }}
+      # 固定参数使用默认值
+      backup_root: '/srv/backups'
+      run_user: 'deploy'
+      nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
+      backend_port: '8080'
+      service_name: 'star-cloud'
