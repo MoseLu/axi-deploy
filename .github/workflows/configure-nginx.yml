@@ -170,23 +170,32 @@ jobs:
               
               # 检测并修复嵌套location块问题
               echo "🔍 检测嵌套location块..."
-              if echo "$CLEANED_CONFIG" | grep -A 5 -B 5 "location.*{" | grep -q "location.*{"; then
-                echo "⚠️ 检测到嵌套location块，正在修复..."
-                echo "✅ 嵌套location块已修复，使用简化配置"
-                
-                # 根据项目类型生成正确的配置
-                if echo "$CLEANED_CONFIG" | grep -q "${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/"; then
-                  echo "✅ 检测到静态项目，生成简化配置..."
-                  CLEANED_CONFIG=$(echo -e "    location /docs/ {\n        alias ${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/;\n        index index.html;\n        try_files \$uri \$uri/ /docs/index.html;\n        \n        # 确保不缓存HTML文件\n        add_header Cache-Control \"no-cache, no-store, must-revalidate\" always;\n        add_header Pragma \"no-cache\" always;\n        add_header Expires \"0\" always;\n    }\n    \n    # 处理 /docs 路径（不带斜杠）- 重定向到 /docs/\n    location = /docs {\n        return 301 /docs/;\n    }")
-                  echo "📋 生成的配置:"
-                  echo "$CLEANED_CONFIG"
-                elif echo "$CLEANED_CONFIG" | grep -q "${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/"; then
-                  echo "✅ 检测到后端项目，生成简化配置..."
-                  CLEANED_CONFIG=$(echo -e "    # 静态文件服务\n    location /static/ {\n        alias ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/front/;\n        expires 1y;\n        add_header Cache-Control \"public, immutable\";\n    }\n    \n    # API代理\n    location /api/ {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/;\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n        client_max_body_size 100M;\n    }\n    \n    # 健康检查\n    location /health {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/health;\n        proxy_set_header Host \$host;\n    }\n    \n    # 上传文件\n    location /uploads/ {\n        alias ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/uploads/;\n        try_files \$uri =404;\n    }\n    \n    # 默认路由\n    location / {\n        root ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/front;\n        try_files \$uri \$uri/ /index.html;\n        \n        # 静态资源缓存\n        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {\n            expires 1y;\n            add_header Cache-Control \"public, immutable\";\n        }\n    }")
-                  echo "📋 生成的配置:"
-                  echo "$CLEANED_CONFIG"
+              # 修复检测逻辑：只有当真正有嵌套location时才处理
+              LOCATION_COUNT=$(echo "$CLEANED_CONFIG" | grep -c "location.*{")
+              if [ "$LOCATION_COUNT" -gt 1 ]; then
+                echo "⚠️ 检测到多个location块，检查是否有嵌套..."
+                # 检查是否有真正的嵌套（一个location块内包含另一个location块）
+                NESTED_COUNT=$(echo "$CLEANED_CONFIG" | awk '/location /{count++} /}/{if(count>0) count--} END{print count}')
+                if [ "$NESTED_COUNT" -gt 0 ]; then
+                  echo "⚠️ 检测到真正的嵌套location块，正在修复..."
+                  echo "✅ 嵌套location块已修复，使用简化配置"
+                  
+                  # 根据项目类型生成正确的配置
+                  if echo "$CLEANED_CONFIG" | grep -q "${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/"; then
+                    echo "✅ 检测到静态项目，生成简化配置..."
+                    CLEANED_CONFIG=$(echo -e "    location /docs/ {\n        alias ${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}/;\n        index index.html;\n        try_files \$uri \$uri/ /docs/index.html;\n        \n        # 确保不缓存HTML文件\n        add_header Cache-Control \"no-cache, no-store, must-revalidate\" always;\n        add_header Pragma \"no-cache\" always;\n        add_header Expires \"0\" always;\n    }\n    \n    # 处理 /docs 路径（不带斜杠）- 重定向到 /docs/\n    location = /docs {\n        return 301 /docs/;\n    }")
+                    echo "📋 生成的配置:"
+                    echo "$CLEANED_CONFIG"
+                  elif echo "$CLEANED_CONFIG" | grep -q "${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/"; then
+                    echo "✅ 检测到后端项目，生成简化配置..."
+                    CLEANED_CONFIG=$(echo -e "    # 静态文件服务\n    location /static/ {\n        alias ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/front/;\n        expires 1y;\n        add_header Cache-Control \"public, immutable\";\n    }\n    \n    # API代理\n    location /api/ {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/;\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n        client_max_body_size 100M;\n    }\n    \n    # 健康检查\n    location /health {\n        proxy_pass http://127.0.0.1:${{ inputs.backend_port || '8080' }}/health;\n        proxy_set_header Host \$host;\n    }\n    \n    # 上传文件\n    location /uploads/ {\n        alias ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/uploads/;\n        try_files \$uri =404;\n    }\n    \n    # 默认路由\n    location / {\n        root ${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}/front;\n        try_files \$uri \$uri/ /index.html;\n        \n        # 静态资源缓存\n        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {\n            expires 1y;\n            add_header Cache-Control \"public, immutable\";\n        }\n    }")
+                    echo "📋 生成的配置:"
+                    echo "$CLEANED_CONFIG"
+                  else
+                    echo "⚠️ 未知项目类型，使用原始配置"
+                  fi
                 else
-                  echo "⚠️ 未知项目类型，使用原始配置"
+                  echo "✅ 没有检测到真正的嵌套location块，保持原始配置"
                 fi
               else
                 echo "✅ 没有检测到嵌套location块"
