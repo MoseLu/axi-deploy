@@ -66,7 +66,7 @@ jobs:
           
           echo "✅ 输入参数验证通过"
 
-      - name: 上传到服务器（带重试）
+      - name: 创建临时目录
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ inputs.server_host }}
@@ -74,51 +74,25 @@ jobs:
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
           script: |
-            echo "🚀 开始上传文件到服务器..."
+            echo "📁 创建临时目录..."
             
-            # 创建临时目录
             TEMP_DIR="/tmp/${{ inputs.project }}"
             sudo mkdir -p $TEMP_DIR
             sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $TEMP_DIR
             
-            echo "📁 临时目录: $TEMP_DIR"
+            echo "✅ 临时目录已创建: $TEMP_DIR"
             echo "📁 临时目录权限:"
             ls -la /tmp/ | grep "${{ inputs.project }}" || echo "临时目录尚未创建"
-            
-            # 重试机制
-            MAX_RETRIES=3
-            RETRY_COUNT=0
-            SUCCESS=false
-            
-            while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              echo "📤 尝试上传 (第 $RETRY_COUNT 次)..."
-              
-              # 清理临时目录（确保干净）
-              sudo rm -rf $TEMP_DIR/*
-              
-              # 使用scp上传文件
-              if scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -r ${{ inputs.artifact_path }}/* ${{ inputs.run_user || 'deploy' }}@${{ inputs.server_host }}:$TEMP_DIR/; then
-                echo "✅ 上传成功！"
-                SUCCESS=true
-                break
-              else
-                echo "❌ 上传失败 (第 $RETRY_COUNT 次)"
-                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                  echo "⏳ 等待 30 秒后重试..."
-                  sleep 30
-                fi
-              fi
-            done
-            
-            if [ "$SUCCESS" = false ]; then
-              echo "❌ 上传失败，已达到最大重试次数 ($MAX_RETRIES)"
-              exit 1
-            fi
-            
-            echo "📁 验证上传结果..."
-            ls -la $TEMP_DIR/
-            echo "✅ 文件上传完成"
+
+      - name: 上传构建产物
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          source: "${{ inputs.artifact_path }}/*"
+          target: "/tmp/${{ inputs.project }}/"
 
       - name: 验证上传结果
         uses: appleboy/ssh-action@v1.0.3
