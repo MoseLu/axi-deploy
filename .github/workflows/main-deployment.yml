@@ -63,13 +63,13 @@ jobs:
 
       - name: 下载构建产物
         id: download
-        uses: dawidd6/action-download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: dist-${{ inputs.project }}
-          path: ./artifacts
-          repo: ${{ inputs.source_repo }}
-          run_id: ${{ inputs.run_id }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          path: dist-${{ inputs.project }}
+          run-id: ${{ inputs.run_id }}
+          repository: ${{ inputs.source_repo }}
+          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
 
       - name: 检查下载结果
         run: |
@@ -79,21 +79,16 @@ jobs:
           echo "当前目录内容:"
           ls -la ./
           
-          if [ -d "./artifacts" ]; then
-            echo "✅ artifacts 目录存在"
-            echo "artifacts 目录内容:"
-            ls -la ./artifacts/
-            if [ -d "./artifacts/dist-${{ inputs.project }}" ]; then
-              echo "✅ 找到 dist-${{ inputs.project }} 目录"
-              echo "dist-${{ inputs.project }} 内容:"
-              ls -la "./artifacts/dist-${{ inputs.project }}/"
-            else
-              echo "❌ 未找到 dist-${{ inputs.project }} 目录"
-              echo "artifacts 子目录:"
-              find ./artifacts -type d -maxdepth 2
-            fi
+          if [ -d "./dist-${{ inputs.project }}" ]; then
+            echo "✅ dist-${{ inputs.project }} 目录存在"
+            echo "dist-${{ inputs.project }} 目录内容:"
+            ls -la "./dist-${{ inputs.project }}/"
+            echo "📊 文件数量:"
+            find "./dist-${{ inputs.project }}" -type f | wc -l
+            echo "📁 前10个文件:"
+            find "./dist-${{ inputs.project }}" -type f | head -10
           else
-            echo "❌ artifacts 目录不存在"
+            echo "❌ dist-${{ inputs.project }} 目录不存在"
             echo "🔍 所有目录:"
             find . -type d -maxdepth 2
           fi
@@ -145,24 +140,12 @@ jobs:
           sleep 2
           
           # 检查可能的构建产物目录
-          if [ -d "./artifacts/dist-${{ inputs.project }}" ]; then
-            ARTIFACT_DIR="./artifacts/dist-${{ inputs.project }}"
-            echo "📁 找到 artifacts/dist-${{ inputs.project }} 目录"
-          elif [ -d "./artifacts/dist" ]; then
-            ARTIFACT_DIR="./artifacts/dist"
-            echo "📁 找到 artifacts/dist 目录"
-          elif [ -d "./artifacts/docs/.vitepress/dist" ]; then
-            ARTIFACT_DIR="./artifacts/docs/.vitepress/dist"
-            echo "📁 找到 artifacts/docs/.vitepress/dist 目录"
-          elif [ -d "./artifacts/.vitepress/dist" ]; then
-            ARTIFACT_DIR="./artifacts/.vitepress/dist"
-            echo "📁 找到 artifacts/.vitepress/dist 目录"
+          if [ -d "./dist-${{ inputs.project }}" ]; then
+            ARTIFACT_DIR="./dist-${{ inputs.project }}"
+            echo "📁 找到 dist-${{ inputs.project }} 目录"
           elif [ -d "./dist" ]; then
             ARTIFACT_DIR="./dist"
             echo "📁 找到 dist 目录"
-          elif [ -d "./dist-${{ inputs.project }}" ]; then
-            ARTIFACT_DIR="./dist-${{ inputs.project }}"
-            echo "📁 找到 dist-${{ inputs.project }} 目录"
           elif [ -d "./docs/.vitepress/dist" ]; then
             ARTIFACT_DIR="./docs/.vitepress/dist"
             echo "📁 找到 docs/.vitepress/dist 目录"
@@ -201,30 +184,14 @@ jobs:
           echo "🔍 确定构建产物路径..."
           echo "当前目录内容:"
           ls -la ./
-          echo "artifacts 目录内容:"
-          if [ -d "./artifacts" ]; then
-            ls -la ./artifacts/
-          fi
           
           # 确定构建产物路径
-          if [ -d "./artifacts/dist-${{ inputs.project }}" ]; then
-            ARTIFACT_PATH="./artifacts/dist-${{ inputs.project }}"
-            echo "📁 找到 artifacts/dist-${{ inputs.project }} 目录"
-          elif [ -d "./artifacts/dist" ]; then
-            ARTIFACT_PATH="./artifacts/dist"
-            echo "📁 找到 artifacts/dist 目录"
-          elif [ -d "./artifacts/docs/.vitepress/dist" ]; then
-            ARTIFACT_PATH="./artifacts/docs/.vitepress/dist"
-            echo "📁 找到 artifacts/docs/.vitepress/dist 目录"
-          elif [ -d "./artifacts/.vitepress/dist" ]; then
-            ARTIFACT_PATH="./artifacts/.vitepress/dist"
-            echo "📁 找到 artifacts/.vitepress/dist 目录"
+          if [ -d "./dist-${{ inputs.project }}" ]; then
+            ARTIFACT_PATH="./dist-${{ inputs.project }}"
+            echo "📁 找到 dist-${{ inputs.project }} 目录"
           elif [ -d "./dist" ]; then
             ARTIFACT_PATH="./dist"
             echo "📁 找到 dist 目录"
-          elif [ -d "./dist-${{ inputs.project }}" ]; then
-            ARTIFACT_PATH="./dist-${{ inputs.project }}"
-            echo "📁 找到 dist-${{ inputs.project }} 目录"
           elif [ -d "./docs/.vitepress/dist" ]; then
             ARTIFACT_PATH="./docs/.vitepress/dist"
             echo "📁 找到 docs/.vitepress/dist 目录"
