@@ -159,6 +159,17 @@ jobs:
               ls -la "$dir/" | head -5
             fi
           done
+          
+          echo "🔍 检查github.workspace路径:"
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          echo "完整路径: $GITHUB_WORKSPACE/${{ needs.download-artifact.outputs.artifact_path }}"
+          
+          if [ -d "$GITHUB_WORKSPACE/${{ needs.download-artifact.outputs.artifact_path }}" ]; then
+            echo "✅ 完整路径存在"
+            ls -la "$GITHUB_WORKSPACE/${{ needs.download-artifact.outputs.artifact_path }}/"
+          else
+            echo "❌ 完整路径不存在"
+          fi
 
       - name: 直接部署到目标目录
         uses: appleboy/scp-action@v0.1.7
@@ -169,6 +180,7 @@ jobs:
           port: ${{ inputs.server_port }}
           source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
           target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
+          strip_components: 0
 
       - name: 整理部署目录结构
         uses: appleboy/ssh-action@v1.0.3
