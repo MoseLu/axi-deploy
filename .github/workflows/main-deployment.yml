@@ -250,6 +250,29 @@ jobs:
             echo "❌ 构建产物路径不存在"
           fi
 
+      - name: 验证部署源文件
+        run: |
+          echo "🔍 验证部署源文件..."
+          echo "构建产物路径: ${{ needs.download-artifact.outputs.artifact_path }}"
+          echo "构建产物大小: ${{ needs.download-artifact.outputs.artifact_size }}"
+          
+          if [ -d "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
+            echo "✅ 构建产物目录存在"
+            echo "📁 构建产物内容:"
+            ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
+            echo "📊 文件数量:"
+            find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l
+            echo "📁 前10个文件:"
+            find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | head -10
+          else
+            echo "❌ 构建产物目录不存在: ${{ needs.download-artifact.outputs.artifact_path }}"
+            echo "🔍 当前目录内容:"
+            ls -la ./
+            echo "🔍 所有子目录:"
+            find . -type d -maxdepth 3
+            exit 1
+          fi
+
       - name: 直接部署到目标目录
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -277,6 +300,17 @@ jobs:
             
             echo "📁 检查部署目录: $DEPLOY_PATH"
             ls -la "$DEPLOY_PATH/"
+            
+            # 检查是否有 index.html 文件
+            if [ -f "$DEPLOY_PATH/index.html" ]; then
+              echo "✅ 找到 index.html 文件"
+              echo "📄 index.html 内容预览:"
+              head -10 "$DEPLOY_PATH/index.html"
+            else
+              echo "❌ 未找到 index.html 文件"
+              echo "🔍 检查所有文件:"
+              find "$DEPLOY_PATH" -type f | head -10
+            fi
             
             # 如果存在嵌套的github/workspace目录，需要移动文件
             if [ -d "$DEPLOY_PATH/github/workspace" ]; then
