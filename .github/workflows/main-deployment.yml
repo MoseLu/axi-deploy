@@ -69,7 +69,47 @@ jobs:
           path: ./artifacts
           repo: ${{ inputs.source_repo }}
           run_id: ${{ inputs.run_id }}
-          github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 检查下载结果
+        run: |
+          echo "🔍 检查下载结果..."
+          echo "下载退出码: $?"
+          echo "当前目录: $(pwd)"
+          echo "当前目录内容:"
+          ls -la ./
+          
+          if [ -d "./artifacts" ]; then
+            echo "✅ artifacts 目录存在"
+            echo "artifacts 目录内容:"
+            ls -la ./artifacts/
+            if [ -d "./artifacts/dist-${{ inputs.project }}" ]; then
+              echo "✅ 找到 dist-${{ inputs.project }} 目录"
+              echo "dist-${{ inputs.project }} 内容:"
+              ls -la "./artifacts/dist-${{ inputs.project }}/"
+            else
+              echo "❌ 未找到 dist-${{ inputs.project }} 目录"
+              echo "artifacts 子目录:"
+              find ./artifacts -type d -maxdepth 2
+            fi
+          else
+            echo "❌ artifacts 目录不存在"
+            echo "🔍 所有目录:"
+            find . -type d -maxdepth 2
+          fi
+
+      - name: 手动检查构建产物
+        run: |
+          echo "🔍 手动检查构建产物..."
+          echo "项目名称: ${{ inputs.project }}"
+          echo "源仓库: ${{ inputs.source_repo }}"
+          echo "运行ID: ${{ inputs.run_id }}"
+          
+          # 尝试使用 curl 检查构建产物是否存在
+          echo "🔍 检查 GitHub API..."
+          curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}/artifacts" \
+               | jq '.artifacts[] | select(.name == "dist-${{ inputs.project }}")'
 
       - name: 调试下载结果
         run: |
