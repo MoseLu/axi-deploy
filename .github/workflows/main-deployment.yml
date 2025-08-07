@@ -167,8 +167,83 @@ jobs:
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}/*"
-          target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}/"
+          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
+          target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
+
+      - name: 整理部署目录结构
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "📁 整理部署目录结构..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            DEPLOY_PATH="/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/$PROJECT"
+            
+            echo "📁 检查部署目录: $DEPLOY_PATH"
+            ls -la "$DEPLOY_PATH/"
+            
+            # 如果存在嵌套的github/workspace目录，需要移动文件
+            if [ -d "$DEPLOY_PATH/github/workspace" ]; then
+              echo "📁 发现嵌套目录结构，正在整理..."
+              
+              # 创建临时目录
+              TEMP_DIR="/tmp/deploy-$PROJECT-temp"
+              sudo mkdir -p "$TEMP_DIR"
+              
+              # 移动所有文件到临时目录
+              sudo mv "$DEPLOY_PATH/github/workspace"/* "$TEMP_DIR/" 2>/dev/null || true
+              
+              # 删除原始目录
+              sudo rm -rf "$DEPLOY_PATH"
+              
+              # 重新创建部署目录
+              sudo mkdir -p "$DEPLOY_PATH"
+              
+              # 移动文件到正确位置
+              sudo mv "$TEMP_DIR"/* "$DEPLOY_PATH/" 2>/dev/null || true
+              
+              # 清理临时目录
+              sudo rm -rf "$TEMP_DIR"
+              
+              echo "✅ 目录结构整理完成"
+            elif [ -d "$DEPLOY_PATH/github" ]; then
+              echo "📁 发现github目录，正在整理..."
+              
+              # 创建临时目录
+              TEMP_DIR="/tmp/deploy-$PROJECT-temp"
+              sudo mkdir -p "$TEMP_DIR"
+              
+              # 移动所有文件到临时目录
+              sudo mv "$DEPLOY_PATH/github"/* "$TEMP_DIR/" 2>/dev/null || true
+              
+              # 删除原始目录
+              sudo rm -rf "$DEPLOY_PATH"
+              
+              # 重新创建部署目录
+              sudo mkdir -p "$DEPLOY_PATH"
+              
+              # 移动文件到正确位置
+              sudo mv "$TEMP_DIR"/* "$DEPLOY_PATH/" 2>/dev/null || true
+              
+              # 清理临时目录
+              sudo rm -rf "$TEMP_DIR"
+              
+              echo "✅ 目录结构整理完成"
+            else
+              echo "✅ 目录结构正常，无需整理"
+            fi
+            
+            echo "📁 最终部署目录内容:"
+            ls -la "$DEPLOY_PATH/"
+            
+            # 设置正确的权限
+            sudo chown -R deploy:deploy "$DEPLOY_PATH"
+            sudo chmod -R 755 "$DEPLOY_PATH"
 
       - name: 设置输出
         id: set-outputs
