@@ -289,13 +289,28 @@ jobs:
               echo "📄 配置文件不存在，将创建新文件"
             fi
             
-            # 备份旧配置
+            # 备份旧配置 - 使用项目专用备份目录，最多保留2个备份
             if [ -f "$ROUTE_CONF" ]; then
-              BACKUP_FILE="$NGINX_CONF_DIR/backups/route-$PROJECT.conf.backup.$(date +%Y%m%d_%H%M%S)"
-              sudo mkdir -p "$(dirname $BACKUP_FILE)"
+              # 创建项目专用备份目录
+              PROJECT_BACKUP_DIR="$NGINX_CONF_DIR/backups/$PROJECT"
+              sudo mkdir -p "$PROJECT_BACKUP_DIR"
+              
+              # 备份旧配置
+              BACKUP_FILE="$PROJECT_BACKUP_DIR/route-$PROJECT.conf.backup.$(date +%Y%m%d_%H%M%S)"
               sudo cp "$ROUTE_CONF" "$BACKUP_FILE"
               sudo rm -f "$ROUTE_CONF"
               echo "✅ 旧配置已备份到: $BACKUP_FILE"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/route-$PROJECT.conf.backup.* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -f
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
             fi
             
             # 生成默认Nginx配置
@@ -310,12 +325,22 @@ jobs:
                   proxy_set_header X-Forwarded-Proto \$scheme;
               }"
             else
-              # 静态项目配置
+              # 静态项目配置 - 使用alias而不是root，并添加缓存控制
               NGINX_CONFIG="
               location /docs/ {
-                  root /srv/static;
-                  try_files /$PROJECT\$uri /$PROJECT\$uri/ /$PROJECT/index.html;
+                  alias /srv/static/$PROJECT/;
                   index index.html;
+                  try_files \$uri \$uri/ /docs/index.html;
+                  
+                  # 确保不缓存HTML文件
+                  add_header Cache-Control \"no-cache, no-store, must-revalidate\" always;
+                  add_header Pragma \"no-cache\" always;
+                  add_header Expires \"0\" always;
+              }
+              
+              # 处理 /docs 路径（不带斜杠）- 重定向到 /docs/
+              location = /docs {
+                  return 301 /docs/;
               }"
             fi
             
