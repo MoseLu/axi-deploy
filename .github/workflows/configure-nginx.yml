@@ -242,7 +242,8 @@ jobs:
                     echo "⚠️ 未知项目类型，使用原始配置"
                   fi
                 else
-                  echo "✅ 没有检测到真正的嵌套location块，保持原始配置"
+                  echo "✅ 检测到多个独立的location块，这是正常的，保持原始配置"
+                  echo "📋 配置包含 $LOCATION_COUNT 个location块，都是独立的"
                 fi
               else
                 echo "✅ 没有检测到嵌套location块"
