@@ -123,35 +123,14 @@ jobs:
           echo "✅ 输出已设置"
           echo "构建产物路径: $ARTIFACT_PATH"
 
-  upload-files:
+  deploy-project:
     needs: download-artifact
     runs-on: ubuntu-latest
     outputs:
-      upload_success: ${{ steps.set-outputs.outputs.upload_success }}
-      temp_dir: ${{ steps.set-outputs.outputs.temp_dir }}
+      deploy_success: ${{ steps.set-outputs.outputs.deploy_success }}
+      deploy_path: ${{ steps.set-outputs.outputs.deploy_path }}
     
     steps:
-      - name: 创建临时目录
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          script: |
-            echo "📁 创建临时目录..."
-            
-            PROJECT="${{ inputs.project }}"
-            RUN_USER="deploy"
-            
-            # 创建临时目录
-            TEMP_DIR="/tmp/deploy-$PROJECT"
-            echo "📁 创建临时目录: $TEMP_DIR"
-            sudo mkdir -p "$TEMP_DIR"
-            sudo chown $RUN_USER:$RUN_USER "$TEMP_DIR"
-            
-            echo "✅ 临时目录已创建: $TEMP_DIR"
-
       - name: 调试构建产物路径
         run: |
           echo "🔍 调试构建产物路径..."
@@ -181,7 +160,7 @@ jobs:
             fi
           done
 
-      - name: 上传构建产物
+      - name: 直接部署到目标目录
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ inputs.server_host }}
@@ -189,263 +168,7 @@ jobs:
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
           source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
-          target: "/tmp/deploy-${{ inputs.project }}/"
-
-      - name: 验证上传结果
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          script: |
-            echo "🔍 验证上传结果..."
-            
-            PROJECT="${{ inputs.project }}"
-            TEMP_DIR="/tmp/deploy-$PROJECT"
-            
-                         if [ -d "$TEMP_DIR" ]; then
-               echo "✅ 临时目录存在: $TEMP_DIR"
-               echo "📁 临时目录内容:"
-               ls -la "$TEMP_DIR/"
-               
-               # 检查文件数量（包括子目录）
-               FILE_COUNT=$(find "$TEMP_DIR" -type f | wc -l)
-               echo "📊 文件数量: $FILE_COUNT"
-               
-               if [ "$FILE_COUNT" -gt 0 ]; then
-                 echo "✅ 文件上传验证通过"
-               else
-                 echo "❌ 临时目录为空，检查子目录..."
-                 
-                 # 检查子目录
-                 for subdir in "$TEMP_DIR"/*; do
-                   if [ -d "$subdir" ]; then
-                     echo "📁 检查子目录: $subdir"
-                     ls -la "$subdir/"
-                     SUBDIR_FILE_COUNT=$(find "$subdir" -type f | wc -l)
-                     echo "📊 子目录文件数量: $SUBDIR_FILE_COUNT"
-                     
-                     if [ "$SUBDIR_FILE_COUNT" -gt 0 ]; then
-                       echo "✅ 在子目录中找到文件"
-                       break
-                     fi
-                   fi
-                 done
-                 
-                 # 如果还是没有文件，检查压缩文件
-                 if [ "$FILE_COUNT" -eq 0 ]; then
-                   echo "❌ 临时目录为空，检查是否有压缩文件..."
-                   
-                   # 查找压缩文件
-                   ZIP_FILES=$(find "$TEMP_DIR" -name "*.zip" -type f)
-                   TAR_FILES=$(find "$TEMP_DIR" -name "*.tar.gz" -o -name "*.tgz" -type f)
-                   TAR_FILES_2=$(find "$TEMP_DIR" -name "*.tar" -type f)
-                   
-                   if [ -n "$ZIP_FILES" ] || [ -n "$TAR_FILES" ] || [ -n "$TAR_FILES_2" ]; then
-                     echo "📦 发现压缩文件，需要解压"
-                     echo "ZIP文件: $ZIP_FILES"
-                     echo "TAR文件: $TAR_FILES $TAR_FILES_2"
-                   else
-                     echo "❌ 没有找到任何文件或压缩文件"
-                     exit 1
-                   fi
-                 fi
-               fi
-            else
-              echo "❌ 临时目录不存在: $TEMP_DIR"
-              echo "📁 /tmp 目录内容:"
-              ls -la /tmp/ | grep "$PROJECT" || echo "没有找到项目相关目录"
-              exit 1
-            fi
-
-      - name: 解压构建产物
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          script: |
-            echo "📦 解压构建产物..."
-            
-            PROJECT="${{ inputs.project }}"
-            TEMP_DIR="/tmp/deploy-$PROJECT"
-            
-            echo "📁 检查临时目录内容..."
-            ls -la "$TEMP_DIR/"
-            
-            # 查找压缩文件并解压
-            cd "$TEMP_DIR"
-            
-            # 查找zip文件
-            ZIP_FILES=$(find . -name "*.zip" -type f)
-            if [ -n "$ZIP_FILES" ]; then
-              echo "📦 发现zip文件，正在解压..."
-              for zip_file in $ZIP_FILES; do
-                echo "📦 解压: $zip_file"
-                unzip -o "$zip_file" -d .
-                rm -f "$zip_file"
-              done
-            fi
-            
-            # 查找tar.gz文件
-            TAR_FILES=$(find . -name "*.tar.gz" -o -name "*.tgz" -type f)
-            if [ -n "$TAR_FILES" ]; then
-              echo "📦 发现tar.gz文件，正在解压..."
-              for tar_file in $TAR_FILES; do
-                echo "📦 解压: $tar_file"
-                tar -xzf "$tar_file"
-                rm -f "$tar_file"
-              done
-            fi
-            
-            # 查找tar文件
-            TAR_FILES=$(find . -name "*.tar" -type f)
-            if [ -n "$TAR_FILES" ]; then
-              echo "📦 发现tar文件，正在解压..."
-              for tar_file in $TAR_FILES; do
-                echo "📦 解压: $tar_file"
-                tar -xf "$tar_file"
-                rm -f "$tar_file"
-              done
-            fi
-            
-            echo "📁 解压后的目录内容:"
-            ls -la "$TEMP_DIR/"
-            
-            echo "✅ 解压完成"
-
-      - name: 设置输出
-        id: set-outputs
-        run: |
-          echo "upload_success=true" >> $GITHUB_OUTPUT
-          echo "temp_dir=/tmp/deploy-${{ inputs.project }}" >> $GITHUB_OUTPUT
-          echo "✅ 上传完成"
-
-  deploy-project:
-    needs: upload-files
-    runs-on: ubuntu-latest
-    outputs:
-      deploy_success: ${{ steps.set-outputs.outputs.deploy_success }}
-      deploy_path: ${{ steps.set-outputs.outputs.deploy_path }}
-    
-    steps:
-      - name: 部署项目
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          script: |
-            echo "🚀 部署项目..."
-            
-            PROJECT="${{ inputs.project }}"
-            DEPLOY_TYPE="${{ inputs.deploy_type }}"
-            RUN_USER="deploy"
-            APPS_ROOT="/srv/apps"
-            STATIC_ROOT="/srv/static"
-            BACKUP_ROOT="/srv/backups"
-            TEMP_DIR="/tmp/deploy-$PROJECT"
-            
-            # 确定部署路径
-            if [ "$DEPLOY_TYPE" = "backend" ]; then
-              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
-            else
-              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
-            fi
-            
-            echo "📁 部署路径: $DEPLOY_PATH"
-            
-            # 备份现有部署
-            if [ -d "$DEPLOY_PATH" ]; then
-              echo "📋 备份现有部署..."
-              
-              # 创建项目专用备份目录
-              PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
-              echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
-              sudo mkdir -p "$PROJECT_BACKUP_DIR"
-              sudo chmod 755 "$PROJECT_BACKUP_DIR"
-              
-              # 备份现有部署
-              BACKUP_FILE="$PROJECT_BACKUP_DIR/backup-$(date +%Y%m%d_%H%M%S)"
-              sudo cp -r "$DEPLOY_PATH" "$BACKUP_FILE"
-              echo "✅ 现有部署已备份到: $BACKUP_FILE"
-              
-              # 清理旧的备份文件，只保留最近2个
-              echo "🧹 清理旧的备份文件..."
-              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/backup-* 2>/dev/null | tail -n +3)
-              if [ -n "$BACKUP_FILES" ]; then
-                echo "🗑️ 删除旧的备份文件:"
-                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
-                echo "✅ 旧备份文件已清理，保留最近2个备份"
-              else
-                echo "📋 没有需要清理的旧备份文件"
-              fi
-            else
-              echo "📋 没有找到现有部署: $DEPLOY_PATH"
-            fi
-            
-            # 部署新文件
-            echo "📦 部署新文件..."
-            sudo mkdir -p "$(dirname $DEPLOY_PATH)"
-            sudo rm -rf "$DEPLOY_PATH"
-            
-            # 检查临时目录的内容结构
-            echo "📁 检查临时目录内容结构..."
-            ls -la "$TEMP_DIR/"
-            
-            # 查找实际的构建产物文件
-            if [ -d "$TEMP_DIR/github" ]; then
-              echo "📁 发现github子目录，检查其内容..."
-              ls -la "$TEMP_DIR/github/"
-              
-              if [ -d "$TEMP_DIR/github/workspace" ]; then
-                echo "📁 发现workspace子目录，检查其内容..."
-                ls -la "$TEMP_DIR/github/workspace/"
-                
-                # 在workspace中查找构建产物
-                if [ -d "$TEMP_DIR/github/workspace/dist" ]; then
-                  echo "📁 发现dist目录，这是构建产物"
-                  sudo mv "$TEMP_DIR/github/workspace/dist" "$DEPLOY_PATH"
-                elif [ -d "$TEMP_DIR/github/workspace/docs/.vitepress/dist" ]; then
-                  echo "📁 发现docs/.vitepress/dist目录，这是构建产物"
-                  sudo mv "$TEMP_DIR/github/workspace/docs/.vitepress/dist" "$DEPLOY_PATH"
-                else
-                  echo "📁 没有找到构建产物目录，使用整个workspace"
-                  sudo mv "$TEMP_DIR/github/workspace" "$DEPLOY_PATH"
-                fi
-              else
-                echo "📁 没有workspace子目录，检查github目录内容..."
-                if [ -d "$TEMP_DIR/github/dist" ]; then
-                  echo "📁 发现dist目录，这是构建产物"
-                  sudo mv "$TEMP_DIR/github/dist" "$DEPLOY_PATH"
-                elif [ -d "$TEMP_DIR/github/docs/.vitepress/dist" ]; then
-                  echo "📁 发现docs/.vitepress/dist目录，这是构建产物"
-                  sudo mv "$TEMP_DIR/github/docs/.vitepress/dist" "$DEPLOY_PATH"
-                else
-                  echo "📁 没有找到构建产物目录，使用整个github目录"
-                  sudo mv "$TEMP_DIR/github" "$DEPLOY_PATH"
-                fi
-              fi
-            else
-              echo "📁 没有github子目录，检查临时目录内容..."
-              if [ -d "$TEMP_DIR/dist" ]; then
-                echo "📁 发现dist目录，这是构建产物"
-                sudo mv "$TEMP_DIR/dist" "$DEPLOY_PATH"
-              elif [ -d "$TEMP_DIR/docs/.vitepress/dist" ]; then
-                echo "📁 发现docs/.vitepress/dist目录，这是构建产物"
-                sudo mv "$TEMP_DIR/docs/.vitepress/dist" "$DEPLOY_PATH"
-              else
-                echo "📁 没有找到构建产物目录，使用整个临时目录"
-                sudo mv "$TEMP_DIR" "$DEPLOY_PATH"
-              fi
-            fi
-            
-            sudo chown -R $RUN_USER:$RUN_USER "$DEPLOY_PATH"
-            
-            echo "✅ 部署完成"
+          target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}/"
 
       - name: 设置输出
         id: set-outputs
@@ -544,10 +267,8 @@ jobs:
           echo "test_success=true" >> $GITHUB_OUTPUT
           echo "✅ 测试完成"
 
-
-
   deployment-summary:
-    needs: [download-artifact, upload-files, deploy-project, configure-nginx, start-service, test-website]
+    needs: [download-artifact, deploy-project, configure-nginx, start-service, test-website]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -563,7 +284,6 @@ jobs:
           echo ""
           echo "📊 执行状态:"
           echo "- 下载构建产物: ${{ needs.download-artifact.result }}"
-          echo "- 上传文件: ${{ needs.upload-files.result }}"
           echo "- 部署项目: ${{ needs.deploy-project.result }}"
           echo "- 配置Nginx: ${{ needs.configure-nginx.result || 'skipped' }}"
           echo "- 启动服务: ${{ needs.start-service.result || 'skipped' }}"
