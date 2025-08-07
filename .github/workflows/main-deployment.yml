@@ -37,10 +37,20 @@ on:
         description: '启动命令（后端项目）'
         required: false
         type: string
+      backend_port:
+        description: '后端服务端口'
+        required: false
+        type: string
+        default: '8080'
+      service_name:
+        description: '服务名称'
+        required: false
+        type: string
+        default: 'star-cloud'
 
 jobs:
   deployment-orchestrator:
-    uses: ./.github/workflows/deployment-orchestrator.yml
+    uses: MoseLu/axi-deploy/.github/workflows/deployment-orchestrator.yml@master
     with:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
@@ -49,6 +59,8 @@ jobs:
       nginx_config: ${{ inputs.nginx_config }}
       test_url: ${{ inputs.test_url }}
       start_cmd: ${{ inputs.start_cmd }}
+      backend_port: ${{ inputs.backend_port }}
+      service_name: ${{ inputs.service_name }}
       # 固定服务器环境参数
       domain: 'redamancy.com.cn'
       apps_root: '/srv/apps'
@@ -56,5 +68,3 @@ jobs:
       backup_root: '/srv/backups'
       run_user: 'deploy'
       nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
-      backend_port: '8080'
-      service_name: 'star-cloud'
