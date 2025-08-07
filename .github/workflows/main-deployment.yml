@@ -66,7 +66,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: dist-${{ inputs.project }}
-          path: dist-${{ inputs.project }}
+          path: ./
           run-id: ${{ inputs.run_id }}
           repository: ${{ inputs.source_repo }}
           github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
@@ -79,6 +79,7 @@ jobs:
           echo "当前目录内容:"
           ls -la ./
           
+          # 检查是否有构建产物文件
           if [ -d "./dist-${{ inputs.project }}" ]; then
             echo "✅ dist-${{ inputs.project }} 目录存在"
             echo "dist-${{ inputs.project }} 目录内容:"
@@ -87,8 +88,18 @@ jobs:
             find "./dist-${{ inputs.project }}" -type f | wc -l
             echo "📁 前10个文件:"
             find "./dist-${{ inputs.project }}" -type f | head -10
+          elif [ -f "./dist-${{ inputs.project }}.zip" ]; then
+            echo "✅ 找到构建产物压缩包"
+            echo "📦 压缩包大小:"
+            ls -lh "./dist-${{ inputs.project }}.zip"
+            echo "🔧 解压构建产物..."
+            unzip -q "./dist-${{ inputs.project }}.zip"
+            echo "📁 解压后内容:"
+            ls -la ./
           else
-            echo "❌ dist-${{ inputs.project }} 目录不存在"
+            echo "❌ 未找到构建产物"
+            echo "🔍 所有文件:"
+            find . -type f -maxdepth 1
             echo "🔍 所有目录:"
             find . -type d -maxdepth 2
           fi
@@ -149,6 +160,9 @@ jobs:
           elif [ -d "./docs/.vitepress/dist" ]; then
             ARTIFACT_DIR="./docs/.vitepress/dist"
             echo "📁 找到 docs/.vitepress/dist 目录"
+          elif [ -d "./.vitepress/dist" ]; then
+            ARTIFACT_DIR="./.vitepress/dist"
+            echo "📁 找到 .vitepress/dist 目录"
           else
             # 构建产物直接在当前目录
             ARTIFACT_DIR="."
