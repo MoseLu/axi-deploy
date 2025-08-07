@@ -37,21 +37,6 @@ on:
         description: '启动命令（后端项目）'
         required: false
         type: string
-      domain:
-        description: '域名'
-        required: false
-        default: 'redamancy.com.cn'
-        type: string
-      apps_root:
-        description: '应用目录路径'
-        required: false
-        default: '/srv/apps'
-        type: string
-      static_root:
-        description: '静态文件目录路径'
-        required: false
-        default: '/srv/static'
-        type: string
 
 jobs:
   deployment-orchestrator:
@@ -64,10 +49,10 @@ jobs:
       nginx_config: ${{ inputs.nginx_config }}
       test_url: ${{ inputs.test_url }}
       start_cmd: ${{ inputs.start_cmd }}
-      domain: ${{ inputs.domain }}
-      apps_root: ${{ inputs.apps_root }}
-      static_root: ${{ inputs.static_root }}
-      # 固定参数使用默认值
+      # 固定服务器环境参数
+      domain: 'redamancy.com.cn'
+      apps_root: '/srv/apps'
+      static_root: '/srv/static'
       backup_root: '/srv/backups'
       run_user: 'deploy'
       nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
