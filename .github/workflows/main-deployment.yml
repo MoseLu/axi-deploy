@@ -49,28 +49,116 @@ on:
         default: 'star-cloud'
 
 jobs:
-  deployment-orchestrator:
-    uses: MoseLu/axi-deploy/.github/workflows/deployment-orchestrator.yml@master
+  download-artifact:
+    uses: ./.github/workflows/download-artifact.yml
     with:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
       run_id: ${{ inputs.run_id }}
-      deploy_type: ${{ inputs.deploy_type }}
-      nginx_config: ${{ inputs.nginx_config }}
-      test_url: ${{ inputs.test_url }}
-      start_cmd: ${{ inputs.start_cmd }}
-      backend_port: ${{ inputs.backend_port }}
-      service_name: ${{ inputs.service_name }}
-      # 固定服务器环境参数
-      domain: 'redamancy.com.cn'
-      apps_root: '/srv/apps'
-      static_root: '/srv/static'
-      backup_root: '/srv/backups'
-      run_user: 'deploy'
-      nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
-      # Secrets 参数
       github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-files:
+    needs: download-artifact
+    uses: ./.github/workflows/upload-files.yml
+    with:
+      project: ${{ inputs.project }}
       server_host: ${{ vars.SERVER_HOST }}
       server_user: ${{ vars.SERVER_USER }}
       server_key: ${{ secrets.SERVER_KEY }}
       server_port: ${{ vars.SERVER_PORT }}
+      artifact_path: ${{ needs.download-artifact.outputs.artifact_path }}
+      run_user: 'deploy'
+
+  deploy-project:
+    needs: upload-files
+    uses: ./.github/workflows/deploy-project.yml
+    with:
+      project: ${{ inputs.project }}
+      deploy_type: ${{ inputs.deploy_type }}
+      server_host: ${{ vars.SERVER_HOST }}
+      server_user: ${{ vars.SERVER_USER }}
+      server_key: ${{ secrets.SERVER_KEY }}
+      server_port: ${{ vars.SERVER_PORT }}
+      apps_root: '/srv/apps'
+      static_root: '/srv/static'
+      backup_root: '/srv/backups'
+      run_user: 'deploy'
+
+  configure-nginx:
+    needs: deploy-project
+    if: ${{ inputs.nginx_config != '' }}
+    uses: ./.github/workflows/configure-nginx.yml
+    with:
+      project: ${{ inputs.project }}
+      nginx_config: ${{ inputs.nginx_config }}
+      server_host: ${{ vars.SERVER_HOST }}
+      server_user: ${{ vars.SERVER_USER }}
+      server_key: ${{ secrets.SERVER_KEY }}
+      server_port: ${{ vars.SERVER_PORT }}
+      domain: 'redamancy.com.cn'
+      nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
+      apps_root: '/srv/apps'
+      static_root: '/srv/static'
+      backend_port: ${{ inputs.backend_port }}
+      service_name: ${{ inputs.service_name }}
+
+  start-service:
+    needs: [deploy-project, configure-nginx]
+    if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
+    uses: ./.github/workflows/start-service.yml
+    with:
+      project: ${{ inputs.project }}
+      start_cmd: ${{ inputs.start_cmd }}
+      deploy_type: ${{ inputs.deploy_type }}
+      server_host: ${{ vars.SERVER_HOST }}
+      server_user: ${{ vars.SERVER_USER }}
+      server_key: ${{ secrets.SERVER_KEY }}
+      server_port: ${{ vars.SERVER_PORT }}
+      apps_root: '/srv/apps'
+
+  test-website:
+    needs: [deploy-project, configure-nginx, start-service]
+    if: ${{ inputs.test_url != '' }}
+    uses: ./.github/workflows/test-website.yml
+    with:
+      project: ${{ inputs.project }}
+      test_url: ${{ inputs.test_url }}
+      deploy_type: ${{ inputs.deploy_type }}
+      server_host: ${{ vars.SERVER_HOST }}
+      server_user: ${{ vars.SERVER_USER }}
+      server_key: ${{ secrets.SERVER_KEY }}
+      server_port: ${{ vars.SERVER_PORT }}
+      apps_root: '/srv/apps'
+      static_root: '/srv/static'
+      nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
+
+  deployment-summary:
+    needs: [download-artifact, upload-files, deploy-project, configure-nginx, start-service, test-website]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 部署完成总结
+        run: |
+          echo "🎉 部署流程完成"
+          echo "=========================================="
+          echo "📋 部署信息:"
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 构建ID: ${{ inputs.run_id }}"
+          echo ""
+          echo "📊 执行状态:"
+          echo "- 下载构建产物: ${{ needs.download-artifact.result }}"
+          echo "- 上传文件: ${{ needs.upload-files.result }}"
+          echo "- 部署项目: ${{ needs.deploy-project.result }}"
+          echo "- 配置Nginx: ${{ needs.configure-nginx.result || 'skipped' }}"
+          echo "- 启动服务: ${{ needs.start-service.result || 'skipped' }}"
+          echo "- 网站测试: ${{ needs.test-website.result || 'skipped' }}"
+          echo ""
+          echo "🔗 访问信息:"
+          echo "- 域名: redamancy.com.cn"
+          echo "- 项目路径: /srv/apps/${{ inputs.project }}"
+          if [ "${{ inputs.test_url }}" != "" ]; then
+            echo "- 测试URL: ${{ inputs.test_url }}"
+          fi
+          echo "=========================================="
