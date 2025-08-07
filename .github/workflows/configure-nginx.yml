@@ -356,7 +356,7 @@ jobs:
             
             echo "✅ Nginx配置完成"
             echo "📋 实际应用的配置:"
-            echo "location /docs/ { alias /srv/static/$PROJECT/; try_files \$uri \$uri/ /docs/index.html; }"
+            cat $ROUTE_CONF
             echo "📋 完整配置已写入: $ROUTE_CONF"
 
       - name: 设置输出
