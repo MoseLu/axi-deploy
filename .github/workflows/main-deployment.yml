@@ -29,24 +29,10 @@ on:
         description: 'Nginx配置（可选）'
         required: false
         type: string
-      test_url:
-        description: '测试URL（可选）'
-        required: false
-        type: string
       start_cmd:
         description: '启动命令（后端项目）'
         required: false
         type: string
-      backend_port:
-        description: '后端服务端口'
-        required: false
-        type: string
-        default: '8080'
-      service_name:
-        description: '服务名称'
-        required: false
-        type: string
-        default: 'star-cloud'
       server_host:
         description: '服务器地址'
         required: true
@@ -244,8 +230,8 @@ jobs:
             PROJECT="${{ inputs.project }}"
             NGINX_CONFIG='${{ inputs.nginx_config }}'
             NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
-            BACKEND_PORT="${{ inputs.backend_port }}"
-            SERVICE_NAME="${{ inputs.service_name }}"
+            BACKEND_PORT="8080"
+            SERVICE_NAME="star-cloud"
             
             # 生成项目路由配置
             ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
@@ -316,40 +302,10 @@ jobs:
           echo "start_success=true" >> $GITHUB_OUTPUT
           echo "✅ 启动完成"
 
-  test-website:
-    needs: [deploy-project, configure-nginx, start-service]
-    if: ${{ inputs.test_url != '' }}
-    runs-on: ubuntu-latest
-    outputs:
-      test_success: ${{ steps.set-outputs.outputs.test_success }}
-    
-    steps:
-      - name: 测试网站
-        run: |
-          echo "🧪 测试网站..."
-          
-          TEST_URL="${{ inputs.test_url }}"
-          
-          # 等待网站启动
-          echo "⏳ 等待网站启动..."
-          sleep 10
-          
-          # 测试网站可访问性
-          if curl -f -s "$TEST_URL" > /dev/null; then
-            echo "✅ 网站测试通过: $TEST_URL"
-          else
-            echo "❌ 网站测试失败: $TEST_URL"
-            exit 1
-          fi
 
-      - name: 设置输出
-        id: set-outputs
-        run: |
-          echo "test_success=true" >> $GITHUB_OUTPUT
-          echo "✅ 测试完成"
 
   deployment-summary:
-    needs: [download-artifact, upload-files, deploy-project, configure-nginx, start-service, test-website]
+    needs: [download-artifact, upload-files, deploy-project, configure-nginx, start-service]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -369,12 +325,8 @@ jobs:
           echo "- 部署项目: ${{ needs.deploy-project.result }}"
           echo "- 配置Nginx: ${{ needs.configure-nginx.result || 'skipped' }}"
           echo "- 启动服务: ${{ needs.start-service.result || 'skipped' }}"
-          echo "- 网站测试: ${{ needs.test-website.result || 'skipped' }}"
           echo ""
           echo "🔗 访问信息:"
           echo "- 域名: redamancy.com.cn"
           echo "- 项目路径: ${{ needs.deploy-project.outputs.deploy_path }}"
-          if [ "${{ inputs.test_url }}" != "" ]; then
-            echo "- 测试URL: ${{ inputs.test_url }}"
-          fi
           echo "=========================================="
