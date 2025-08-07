@@ -129,7 +129,6 @@ jobs:
             sudo chown $RUN_USER:$RUN_USER "$TEMP_DIR"
             
             echo "✅ 临时目录已创建: $TEMP_DIR"
-            echo "temp_dir=$TEMP_DIR" >> $GITHUB_ENV
 
       - name: 上传构建产物
         uses: appleboy/scp-action@v0.1.7
@@ -172,7 +171,7 @@ jobs:
             APPS_ROOT="/srv/apps"
             STATIC_ROOT="/srv/static"
             BACKUP_ROOT="/srv/backups"
-            TEMP_DIR="${{ needs.upload-files.outputs.temp_dir }}"
+            TEMP_DIR="/tmp/deploy-$PROJECT"
             
             # 确定部署路径
             if [ "$DEPLOY_TYPE" = "backend" ]; then
@@ -200,13 +199,12 @@ jobs:
             sudo chown -R $RUN_USER:$RUN_USER "$DEPLOY_PATH"
             
             echo "✅ 部署完成"
-            echo "deploy_path=$DEPLOY_PATH" >> $GITHUB_ENV
 
       - name: 设置输出
         id: set-outputs
         run: |
           echo "deploy_success=true" >> $GITHUB_OUTPUT
-          echo "deploy_path=${{ env.deploy_path }}" >> $GITHUB_OUTPUT
+          echo "deploy_path=/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}" >> $GITHUB_OUTPUT
           echo "✅ 部署完成"
 
   configure-nginx:
@@ -263,7 +261,7 @@ jobs:
           echo "✅ 配置完成"
 
   start-service:
-    needs: [deploy-project, configure-nginx]
+    needs: [deploy-project]
     if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
     runs-on: ubuntu-latest
     outputs:
@@ -305,7 +303,7 @@ jobs:
 
 
   deployment-summary:
-    needs: [download-artifact, upload-files, deploy-project, configure-nginx, start-service]
+    needs: [download-artifact, upload-files, deploy-project]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -323,8 +321,6 @@ jobs:
           echo "- 下载构建产物: ${{ needs.download-artifact.result }}"
           echo "- 上传文件: ${{ needs.upload-files.result }}"
           echo "- 部署项目: ${{ needs.deploy-project.result }}"
-          echo "- 配置Nginx: ${{ needs.configure-nginx.result || 'skipped' }}"
-          echo "- 启动服务: ${{ needs.start-service.result || 'skipped' }}"
           echo ""
           echo "🔗 访问信息:"
           echo "- 域名: redamancy.com.cn"
