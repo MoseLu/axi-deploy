@@ -111,9 +111,14 @@ jobs:
           echo "源仓库: ${{ inputs.source_repo }}"
           echo "运行ID: ${{ inputs.run_id }}"
           
+          # 检查 token 权限
+          echo "🔍 检查 token 权限..."
+          curl -H "Authorization: token ${{ secrets.DEPLOY_CENTER_PAT }}" \
+               "https://api.github.com/user" | jq '.login'
+          
           # 尝试使用 curl 检查构建产物是否存在
           echo "🔍 检查 GitHub API..."
-          curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          curl -H "Authorization: token ${{ secrets.DEPLOY_CENTER_PAT }}" \
                "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}/artifacts" \
                | jq '.artifacts[] | select(.name == "dist-${{ inputs.project }}")'
 
