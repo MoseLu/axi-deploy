@@ -722,6 +722,15 @@ jobs:
               echo "📋 没有找到旧的路由配置文件: $ROUTE_CONF"
             fi
             
+            # 清理所有可能冲突的route配置文件，防止循环重定向
+            echo "🧹 清理所有可能冲突的route配置文件..."
+            for conflict_conf in /www/server/nginx/conf/conf.d/redamancy/route-*.conf; do
+              if [ -f "$conflict_conf" ] && [ "$conflict_conf" != "$ROUTE_CONF" ]; then
+                echo "🗑️ 删除冲突的配置文件: $conflict_conf"
+                sudo rm -f "$conflict_conf"
+              fi
+            done
+            
             # 检查nginx_config是否包含server块
             if echo '${{ inputs.nginx_config }}' | grep -q '^server {'; then
               # 如果包含server块，提取location块
@@ -905,6 +914,22 @@ jobs:
               echo "📋 测试HTTPS访问..."
               HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$DOMAIN$PATH_PART")
               echo "HTTPS测试结果: $HTTPS_STATUS"
+              
+              # 立即检查状态码，如果不是200则直接退出工作流
+              if [ "$HTTPS_STATUS" != "200" ]; then
+                echo "❌ 网站测试失败 - HTTPS返回状态码: $HTTPS_STATUS"
+                echo "🚨 工作流错误：网站未返回200状态码，直接退出工作流"
+                echo "可能的原因:"
+                echo "1. 域名解析问题"
+                echo "2. 服务器防火墙设置"
+                echo "3. Nginx配置问题"
+                echo "4. SSL证书问题"
+                echo "5. 后端服务未启动"
+                echo "6. 项目部署失败"
+                exit 1
+              fi
+              
+              echo "✅ 网站测试成功 - HTTPS返回200状态码"
             else
               # 如果没有提供test_url，跳过测试
               echo "📋 未提供test_url，跳过测试"
@@ -912,19 +937,16 @@ jobs:
               exit 0
             fi
             
-            # 检查是否有其他配置文件干扰
-            echo "📋 检查所有nginx配置文件..."
-            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "location" {} \;
+            # 如果测试成功，继续执行其他检查（可选）
+            echo "📋 执行额外的诊断检查..."
             
-            if [ "$HTTPS_STATUS" = "200" ]; then
-              echo "✅ HTTPS配置生效，返回 200"
-            elif [ "$HTTPS_STATUS" = "301" ]; then
-              echo "❌ HTTPS仍然返回 301，检查其他配置..."
-              echo "📋 检查是否有其他配置文件处理根路径:"
-              grep -r "location.*/" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他根路径location"
-            else
-              echo "⚠️ HTTPS返回状态码: $HTTPS_STATUS"
-            fi
+            # 检查nginx配置语法
+            echo "📋 检查nginx配置语法..."
+            nginx -t 2>&1 || echo "nginx配置语法错误"
+            
+            # 检查nginx错误日志
+            echo "📋 检查nginx错误日志..."
+            tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
 
       - name: 执行启动命令（后端项目）
         if: inputs.start_cmd != '' && inputs.deploy_type == 'backend'
@@ -985,52 +1007,47 @@ jobs:
                 REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
                 echo "重定向目标: $REDIRECT_URL"
               fi
+              
+              # 立即检查状态码，如果不是200则直接退出工作流
+              if [ "$HTTPS_STATUS" != "200" ]; then
+                echo "❌ 网站测试失败 - HTTPS返回状态码: $HTTPS_STATUS"
+                echo "🚨 工作流错误：网站未返回200状态码，直接退出工作流"
+                echo "可能的原因:"
+                echo "1. 域名解析问题"
+                echo "2. 服务器防火墙设置"
+                echo "3. Nginx配置问题"
+                echo "4. SSL证书问题"
+                echo "5. 后端服务未启动"
+                echo "6. 项目部署失败"
+                exit 1
+              fi
+              
+              echo "✅ 网站测试成功 - HTTPS返回200状态码"
             else
               echo "❌ 未提供测试URL，跳过测试"
               exit 0
             fi
             
-            # 检查配置文件
-            echo "📋 检查nginx配置文件..."
-            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "location" {} \;
+            # 如果测试成功，继续执行其他检查（可选）
+            echo "📋 执行额外的诊断检查..."
             
-            # 检查主配置文件中的重定向规则
-            echo "📋 检查主nginx.conf中的重定向规则..."
-            grep -n "301\|302\|redirect" /www/server/nginx/conf/nginx.conf || echo "主配置文件中没有重定向规则"
+            # 检查nginx配置语法
+            echo "📋 检查nginx配置语法..."
+            nginx -t 2>&1 || echo "nginx配置语法错误"
             
-            # 检查是否有其他server块处理当前域名
-            echo "📋 检查是否有其他server块处理当前域名..."
-            grep -r "server_name.*$DOMAIN" /www/server/nginx/conf/ || echo "没有找到其他$DOMAIN server块"
+            # 检查nginx错误日志
+            echo "📋 检查nginx错误日志..."
+            tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
             
-            # 检查宝塔面板的默认配置
-            echo "📋 检查宝塔面板默认配置..."
-            if [ -f "/www/server/panel/vhost/nginx/$DOMAIN.conf" ]; then
-              echo "发现宝塔面板配置文件:"
-              cat "/www/server/panel/vhost/nginx/$DOMAIN.conf"
+            # 检查当前nginx配置
+            echo "📋 检查当前nginx配置..."
+            ROUTE_CONF="/www/server/nginx/conf/conf.d/redamancy/route-$PROJECT.conf"
+            if [ -f "$ROUTE_CONF" ]; then
+              echo "route-$PROJECT.conf 内容:"
+              cat "$ROUTE_CONF"
             else
-              echo "没有找到宝塔面板配置文件"
+              echo "route-$PROJECT.conf 不存在"
             fi
-            
-            # 检查所有include的文件
-            echo "📋 检查所有include的文件..."
-            grep -r "include.*\.conf" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他include文件"
-            
-            # 检查是否有其他server块
-            echo "📋 检查所有server块..."
-            grep -r "server {" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他server块"
-            
-            # 检查网络层面
-            echo "📋 检查网络层面..."
-            echo "检查是否有CDN或代理:"
-            curl -I -H "Host: $DOMAIN" http://127.0.0.1$PATH_PART 2>/dev/null || echo "本地访问失败"
-            
-            # 检查DNS解析
-            echo "📋 检查DNS解析..."
-            nslookup $DOMAIN || echo "DNS解析失败"
-            
-            # 检查防火墙规则
-            echo "📋 检查防火墙规则..."
-            iptables -L -n | grep -E "(80|443)" || echo "没有找到相关防火墙规则"
             
             # 检查部署文件是否存在
             echo "📋 检查部署文件..."
@@ -1057,85 +1074,6 @@ jobs:
                 echo "部署目录内容:"
                 ls -la /srv/static/$PROJECT/ || echo "目录不存在"
               fi
-            fi
-            
-            # 检查nginx配置语法
-            echo "📋 检查nginx配置语法..."
-            nginx -t 2>&1 || echo "nginx配置语法错误"
-            
-            # 检查nginx错误日志
-            echo "📋 检查nginx错误日志..."
-            tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
-            
-            # 检查当前nginx配置
-            echo "📋 检查当前nginx配置..."
-            ROUTE_CONF="/www/server/nginx/conf/conf.d/redamancy/route-$PROJECT.conf"
-            if [ -f "$ROUTE_CONF" ]; then
-              echo "route-$PROJECT.conf 内容:"
-              cat "$ROUTE_CONF"
-            else
-              echo "route-$PROJECT.conf 不存在"
-            fi
-            
-            # 测试本地访问
-            echo "📋 测试本地访问..."
-            curl -I -H "Host: $DOMAIN" http://127.0.0.1$PATH_PART 2>/dev/null || echo "本地访问失败"
-            
-            # 检查nginx进程
-            echo "📋 检查nginx进程..."
-            ps aux | grep nginx | grep -v grep || echo "没有找到nginx进程"
-            
-            if [ "$HTTPS_STATUS" = "200" ]; then
-              echo "✅ HTTPS网站可访问 (HTTP $HTTPS_STATUS)"
-            elif [ "$HTTPS_STATUS" = "301" ]; then
-              # 检查重定向目标是否正确
-              if [ "$REDIRECT_URL" = "$TEST_URL" ]; then
-                echo "✅ HTTPS重定向到正确目标 (HTTP $HTTPS_STATUS)"
-                echo "重定向目标: $REDIRECT_URL"
-                echo "这是正常的HTTP到HTTPS重定向或路径规范化"
-              else
-                echo "⚠️ HTTPS重定向到不同目标 (HTTP $HTTPS_STATUS)"
-                echo "重定向目标: $REDIRECT_URL"
-                echo "期望目标: $TEST_URL"
-                echo "这可能是配置问题，但通常可以接受"
-              fi
-            elif [ "$HTTPS_STATUS" = "404" ]; then
-              echo "❌ HTTPS网站返回404 - 部署失败"
-              echo "可能的原因:"
-              echo "1. 项目未正确部署"
-              echo "2. Nginx配置问题"
-              echo "3. 文件路径错误"
-              false
-            else
-              echo "❌ HTTPS网站无法访问 (HTTP $HTTPS_STATUS) - 部署失败"
-              echo "可能的原因:"
-              echo "1. 域名解析问题"
-              echo "2. 服务器防火墙设置"
-              echo "3. Nginx配置问题"
-              echo "4. SSL证书问题"
-              echo "5. 后端服务未启动"
-              
-              # 显示网站标题
-              TITLE=$(curl -s "https://$DOMAIN$PATH_PART" | grep -o '<title>[^<]*</title>' | sed 's/<title>\(.*\)<\/title>/\1/')
-              echo "网站标题: $TITLE"
-              
-              # 检查后端服务状态
-              echo "🔍 检查后端服务状态..."
-              if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
-                echo "✅ 后端服务正常运行"
-              else
-                echo "❌ 后端服务未启动或无法访问"
-              fi
-              
-              # 检查 Nginx 状态
-              echo "🔍 检查 Nginx 状态..."
-              if systemctl is-active --quiet nginx; then
-                echo "✅ Nginx 服务正常运行"
-              else
-                echo "❌ Nginx 服务未运行"
-              fi
-              
-              false
             fi
 
       - name: 部署完成通知
