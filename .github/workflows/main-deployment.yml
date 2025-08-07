@@ -204,34 +204,54 @@ jobs:
             PROJECT="${{ inputs.project }}"
             TEMP_DIR="/tmp/deploy-$PROJECT"
             
-            if [ -d "$TEMP_DIR" ]; then
-              echo "✅ 临时目录存在: $TEMP_DIR"
-              echo "📁 临时目录内容:"
-              ls -la "$TEMP_DIR/"
-              
-              # 检查文件数量
-              FILE_COUNT=$(find "$TEMP_DIR" -type f | wc -l)
-              echo "📊 文件数量: $FILE_COUNT"
-              
-              if [ "$FILE_COUNT" -gt 0 ]; then
-                echo "✅ 文件上传验证通过"
-              else
-                echo "❌ 临时目录为空，检查是否有压缩文件..."
-                
-                # 查找压缩文件
-                ZIP_FILES=$(find "$TEMP_DIR" -name "*.zip" -type f)
-                TAR_FILES=$(find "$TEMP_DIR" -name "*.tar.gz" -o -name "*.tgz" -type f)
-                TAR_FILES_2=$(find "$TEMP_DIR" -name "*.tar" -type f)
-                
-                if [ -n "$ZIP_FILES" ] || [ -n "$TAR_FILES" ] || [ -n "$TAR_FILES_2" ]; then
-                  echo "📦 发现压缩文件，需要解压"
-                  echo "ZIP文件: $ZIP_FILES"
-                  echo "TAR文件: $TAR_FILES $TAR_FILES_2"
-                else
-                  echo "❌ 没有找到任何文件或压缩文件"
-                  exit 1
-                fi
-              fi
+                         if [ -d "$TEMP_DIR" ]; then
+               echo "✅ 临时目录存在: $TEMP_DIR"
+               echo "📁 临时目录内容:"
+               ls -la "$TEMP_DIR/"
+               
+               # 检查文件数量（包括子目录）
+               FILE_COUNT=$(find "$TEMP_DIR" -type f | wc -l)
+               echo "📊 文件数量: $FILE_COUNT"
+               
+               if [ "$FILE_COUNT" -gt 0 ]; then
+                 echo "✅ 文件上传验证通过"
+               else
+                 echo "❌ 临时目录为空，检查子目录..."
+                 
+                 # 检查子目录
+                 for subdir in "$TEMP_DIR"/*; do
+                   if [ -d "$subdir" ]; then
+                     echo "📁 检查子目录: $subdir"
+                     ls -la "$subdir/"
+                     SUBDIR_FILE_COUNT=$(find "$subdir" -type f | wc -l)
+                     echo "📊 子目录文件数量: $SUBDIR_FILE_COUNT"
+                     
+                     if [ "$SUBDIR_FILE_COUNT" -gt 0 ]; then
+                       echo "✅ 在子目录中找到文件"
+                       break
+                     fi
+                   fi
+                 done
+                 
+                 # 如果还是没有文件，检查压缩文件
+                 if [ "$FILE_COUNT" -eq 0 ]; then
+                   echo "❌ 临时目录为空，检查是否有压缩文件..."
+                   
+                   # 查找压缩文件
+                   ZIP_FILES=$(find "$TEMP_DIR" -name "*.zip" -type f)
+                   TAR_FILES=$(find "$TEMP_DIR" -name "*.tar.gz" -o -name "*.tgz" -type f)
+                   TAR_FILES_2=$(find "$TEMP_DIR" -name "*.tar" -type f)
+                   
+                   if [ -n "$ZIP_FILES" ] || [ -n "$TAR_FILES" ] || [ -n "$TAR_FILES_2" ]; then
+                     echo "📦 发现压缩文件，需要解压"
+                     echo "ZIP文件: $ZIP_FILES"
+                     echo "TAR文件: $TAR_FILES $TAR_FILES_2"
+                   else
+                     echo "❌ 没有找到任何文件或压缩文件"
+                     exit 1
+                   fi
+                 fi
+               fi
             else
               echo "❌ 临时目录不存在: $TEMP_DIR"
               echo "📁 /tmp 目录内容:"
