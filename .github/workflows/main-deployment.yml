@@ -177,6 +177,63 @@ jobs:
           source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
           target: "/tmp/deploy-${{ inputs.project }}/"
 
+      - name: 解压构建产物
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "📦 解压构建产物..."
+            
+            PROJECT="${{ inputs.project }}"
+            TEMP_DIR="/tmp/deploy-$PROJECT"
+            
+            echo "📁 检查临时目录内容..."
+            ls -la "$TEMP_DIR/"
+            
+            # 查找压缩文件并解压
+            cd "$TEMP_DIR"
+            
+            # 查找zip文件
+            ZIP_FILES=$(find . -name "*.zip" -type f)
+            if [ -n "$ZIP_FILES" ]; then
+              echo "📦 发现zip文件，正在解压..."
+              for zip_file in $ZIP_FILES; do
+                echo "📦 解压: $zip_file"
+                unzip -o "$zip_file" -d .
+                rm -f "$zip_file"
+              done
+            fi
+            
+            # 查找tar.gz文件
+            TAR_FILES=$(find . -name "*.tar.gz" -o -name "*.tgz" -type f)
+            if [ -n "$TAR_FILES" ]; then
+              echo "📦 发现tar.gz文件，正在解压..."
+              for tar_file in $TAR_FILES; do
+                echo "📦 解压: $tar_file"
+                tar -xzf "$tar_file"
+                rm -f "$tar_file"
+              done
+            fi
+            
+            # 查找tar文件
+            TAR_FILES=$(find . -name "*.tar" -type f)
+            if [ -n "$TAR_FILES" ]; then
+              echo "📦 发现tar文件，正在解压..."
+              for tar_file in $TAR_FILES; do
+                echo "📦 解压: $tar_file"
+                tar -xf "$tar_file"
+                rm -f "$tar_file"
+              done
+            fi
+            
+            echo "📁 解压后的目录内容:"
+            ls -la "$TEMP_DIR/"
+            
+            echo "✅ 解压完成"
+
       - name: 设置输出
         id: set-outputs
         run: |
