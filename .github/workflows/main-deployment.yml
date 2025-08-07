@@ -81,6 +81,8 @@ jobs:
             ARTIFACT_DIR="./dist"
           elif [ -d "./dist-${{ inputs.project }}" ]; then
             ARTIFACT_DIR="./dist-${{ inputs.project }}"
+          elif [ -d "./docs/.vitepress/dist" ]; then
+            ARTIFACT_DIR="./docs/.vitepress/dist"
           else
             # 构建产物直接在当前目录
             ARTIFACT_DIR="."
@@ -109,6 +111,8 @@ jobs:
             ARTIFACT_PATH="./dist"
           elif [ -d "./dist-${{ inputs.project }}" ]; then
             ARTIFACT_PATH="./dist-${{ inputs.project }}"
+          elif [ -d "./docs/.vitepress/dist" ]; then
+            ARTIFACT_PATH="./docs/.vitepress/dist"
           else
             # 构建产物直接在当前目录
             ARTIFACT_PATH="."
@@ -127,7 +131,7 @@ jobs:
       temp_dir: ${{ steps.set-outputs.outputs.temp_dir }}
     
     steps:
-      - name: 创建临时目录并上传文件
+      - name: 创建临时目录
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ inputs.server_host }}
@@ -135,7 +139,7 @@ jobs:
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
           script: |
-            echo "📤 上传文件到服务器..."
+            echo "📁 创建临时目录..."
             
             PROJECT="${{ inputs.project }}"
             RUN_USER="deploy"
@@ -174,8 +178,56 @@ jobs:
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}"
+          source: "${{ github.workspace }}/${{ needs.download-artifact.outputs.artifact_path }}/*"
           target: "/tmp/deploy-${{ inputs.project }}/"
+
+      - name: 验证上传结果
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔍 验证上传结果..."
+            
+            PROJECT="${{ inputs.project }}"
+            TEMP_DIR="/tmp/deploy-$PROJECT"
+            
+            if [ -d "$TEMP_DIR" ]; then
+              echo "✅ 临时目录存在: $TEMP_DIR"
+              echo "📁 临时目录内容:"
+              ls -la "$TEMP_DIR/"
+              
+              # 检查文件数量
+              FILE_COUNT=$(find "$TEMP_DIR" -type f | wc -l)
+              echo "📊 文件数量: $FILE_COUNT"
+              
+              if [ "$FILE_COUNT" -gt 0 ]; then
+                echo "✅ 文件上传验证通过"
+              else
+                echo "❌ 临时目录为空，检查是否有压缩文件..."
+                
+                # 查找压缩文件
+                ZIP_FILES=$(find "$TEMP_DIR" -name "*.zip" -type f)
+                TAR_FILES=$(find "$TEMP_DIR" -name "*.tar.gz" -o -name "*.tgz" -type f)
+                TAR_FILES_2=$(find "$TEMP_DIR" -name "*.tar" -type f)
+                
+                if [ -n "$ZIP_FILES" ] || [ -n "$TAR_FILES" ] || [ -n "$TAR_FILES_2" ]; then
+                  echo "📦 发现压缩文件，需要解压"
+                  echo "ZIP文件: $ZIP_FILES"
+                  echo "TAR文件: $TAR_FILES $TAR_FILES_2"
+                else
+                  echo "❌ 没有找到任何文件或压缩文件"
+                  exit 1
+                fi
+              fi
+            else
+              echo "❌ 临时目录不存在: $TEMP_DIR"
+              echo "📁 /tmp 目录内容:"
+              ls -la /tmp/ | grep "$PROJECT" || echo "没有找到项目相关目录"
+              exit 1
+            fi
 
       - name: 解压构建产物
         uses: appleboy/ssh-action@v1.0.3
@@ -314,21 +366,51 @@ jobs:
             echo "📁 检查临时目录内容结构..."
             ls -la "$TEMP_DIR/"
             
-            # 如果临时目录下有子目录，找到正确的构建产物目录
+            # 查找实际的构建产物文件
             if [ -d "$TEMP_DIR/github" ]; then
               echo "📁 发现github子目录，检查其内容..."
               ls -la "$TEMP_DIR/github/"
               
               if [ -d "$TEMP_DIR/github/workspace" ]; then
-                echo "📁 发现workspace子目录，这是构建产物的实际位置"
-                sudo mv "$TEMP_DIR/github/workspace" "$DEPLOY_PATH"
+                echo "📁 发现workspace子目录，检查其内容..."
+                ls -la "$TEMP_DIR/github/workspace/"
+                
+                # 在workspace中查找构建产物
+                if [ -d "$TEMP_DIR/github/workspace/dist" ]; then
+                  echo "📁 发现dist目录，这是构建产物"
+                  sudo mv "$TEMP_DIR/github/workspace/dist" "$DEPLOY_PATH"
+                elif [ -d "$TEMP_DIR/github/workspace/docs/.vitepress/dist" ]; then
+                  echo "📁 发现docs/.vitepress/dist目录，这是构建产物"
+                  sudo mv "$TEMP_DIR/github/workspace/docs/.vitepress/dist" "$DEPLOY_PATH"
+                else
+                  echo "📁 没有找到构建产物目录，使用整个workspace"
+                  sudo mv "$TEMP_DIR/github/workspace" "$DEPLOY_PATH"
+                fi
               else
-                echo "📁 没有workspace子目录，直接使用github目录"
-                sudo mv "$TEMP_DIR/github" "$DEPLOY_PATH"
+                echo "📁 没有workspace子目录，检查github目录内容..."
+                if [ -d "$TEMP_DIR/github/dist" ]; then
+                  echo "📁 发现dist目录，这是构建产物"
+                  sudo mv "$TEMP_DIR/github/dist" "$DEPLOY_PATH"
+                elif [ -d "$TEMP_DIR/github/docs/.vitepress/dist" ]; then
+                  echo "📁 发现docs/.vitepress/dist目录，这是构建产物"
+                  sudo mv "$TEMP_DIR/github/docs/.vitepress/dist" "$DEPLOY_PATH"
+                else
+                  echo "📁 没有找到构建产物目录，使用整个github目录"
+                  sudo mv "$TEMP_DIR/github" "$DEPLOY_PATH"
+                fi
               fi
             else
-              echo "📁 没有github子目录，直接使用临时目录"
-              sudo mv "$TEMP_DIR" "$DEPLOY_PATH"
+              echo "📁 没有github子目录，检查临时目录内容..."
+              if [ -d "$TEMP_DIR/dist" ]; then
+                echo "📁 发现dist目录，这是构建产物"
+                sudo mv "$TEMP_DIR/dist" "$DEPLOY_PATH"
+              elif [ -d "$TEMP_DIR/docs/.vitepress/dist" ]; then
+                echo "📁 发现docs/.vitepress/dist目录，这是构建产物"
+                sudo mv "$TEMP_DIR/docs/.vitepress/dist" "$DEPLOY_PATH"
+              else
+                echo "📁 没有找到构建产物目录，使用整个临时目录"
+                sudo mv "$TEMP_DIR" "$DEPLOY_PATH"
+              fi
             fi
             
             sudo chown -R $RUN_USER:$RUN_USER "$DEPLOY_PATH"
