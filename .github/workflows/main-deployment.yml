@@ -69,7 +69,7 @@ jobs:
           path: ./artifacts
           repo: ${{ inputs.source_repo }}
           run_id: ${{ inputs.run_id }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
 
       - name: 调试下载结果
         run: |
@@ -80,6 +80,18 @@ jobs:
           echo "当前目录: $(pwd)"
           echo "当前目录内容:"
           ls -la ./
+          echo "artifacts 目录是否存在:"
+          if [ -d "./artifacts" ]; then
+            echo "✅ artifacts 目录存在"
+            echo "artifacts 目录内容:"
+            ls -la ./artifacts/
+            echo "artifacts 子目录:"
+            find ./artifacts -type d -maxdepth 3
+            echo "artifacts 文件:"
+            find ./artifacts -type f -maxdepth 3 | head -20
+          else
+            echo "❌ artifacts 目录不存在"
+          fi
           echo "所有子目录:"
           find . -type d -maxdepth 3
           echo "所有文件:"
