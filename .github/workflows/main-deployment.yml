@@ -68,3 +68,9 @@ jobs:
       backup_root: '/srv/backups'
       run_user: 'deploy'
       nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
+      # Secrets 参数
+      github_token: ${{ secrets.GITHUB_TOKEN }}
+      server_host: ${{ vars.SERVER_HOST }}
+      server_user: ${{ vars.SERVER_USER }}
+      server_key: ${{ secrets.SERVER_KEY }}
+      server_port: ${{ vars.SERVER_PORT }}

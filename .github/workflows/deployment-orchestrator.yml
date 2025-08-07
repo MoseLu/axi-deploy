@@ -77,6 +77,26 @@ on:
         type: string
         description: "服务名称"
         default: "star-cloud"
+      github_token:
+        required: false
+        type: string
+        description: "GitHub Token"
+      server_host:
+        required: false
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: false
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: false
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: false
+        type: string
+        description: "服务器端口"
 
 jobs:
   download-artifact:
@@ -85,17 +105,17 @@ jobs:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
       run_id: ${{ inputs.run_id }}
-      github_token: ${{ secrets.GITHUB_TOKEN }}
+      github_token: ${{ inputs.github_token }}
 
   upload-files:
     needs: download-artifact
     uses: ./.github/workflows/upload-files.yml
     with:
       project: ${{ inputs.project }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
       artifact_path: ${{ needs.download-artifact.outputs.artifact_path }}
       run_user: ${{ inputs.run_user }}
 
@@ -105,10 +125,10 @@ jobs:
     with:
       project: ${{ inputs.project }}
       deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
       apps_root: ${{ inputs.apps_root }}
       static_root: ${{ inputs.static_root }}
       backup_root: ${{ inputs.backup_root }}
@@ -121,10 +141,10 @@ jobs:
     with:
       project: ${{ inputs.project }}
       nginx_config: ${{ inputs.nginx_config }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
       domain: ${{ inputs.domain }}
       nginx_conf_dir: ${{ inputs.nginx_conf_dir }}
       apps_root: ${{ inputs.apps_root }}
@@ -140,10 +160,10 @@ jobs:
       project: ${{ inputs.project }}
       start_cmd: ${{ inputs.start_cmd }}
       deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
       apps_root: ${{ inputs.apps_root }}
 
   test-website:
@@ -154,10 +174,10 @@ jobs:
       project: ${{ inputs.project }}
       test_url: ${{ inputs.test_url }}
       deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
       apps_root: ${{ inputs.apps_root }}
       static_root: ${{ inputs.static_root }}
       nginx_conf_dir: ${{ inputs.nginx_conf_dir }}
