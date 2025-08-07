@@ -50,87 +50,287 @@ on:
 
 jobs:
   download-artifact:
-    uses: ./.github/workflows/download-artifact.yml
-    with:
-      project: ${{ inputs.project }}
-      source_repo: ${{ inputs.source_repo }}
-      run_id: ${{ inputs.run_id }}
-      github_token: ${{ secrets.GITHUB_TOKEN }}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_path: ${{ steps.set-outputs.outputs.artifact_path }}
+      artifact_size: ${{ steps.set-outputs.outputs.artifact_size }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载构建产物
+        id: download
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          name: dist-${{ inputs.project }}
+          path: ./dist
+          repo: ${{ inputs.source_repo }}
+          workflow: ${{ inputs.project }}_deploy.yml
+          run_id: ${{ inputs.run_id }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 验证构建产物
+        run: |
+          echo "🔍 验证构建产物..."
+          
+          if [ ! -d "./dist" ]; then
+            echo "❌ 构建产物目录不存在"
+            exit 1
+          fi
+          
+          echo "📁 构建产物目录内容:"
+          ls -la ./dist/
+          
+          # 检查是否有文件
+          FILE_COUNT=$(find ./dist -type f | wc -l)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "❌ 构建产物目录为空"
+            exit 1
+          fi
+          
+          echo "✅ 构建产物验证通过"
+          echo "📊 文件数量: $FILE_COUNT"
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "artifact_path=./dist" >> $GITHUB_OUTPUT
+          echo "artifact_size=$(du -sb ./dist | cut -f1)" >> $GITHUB_OUTPUT
+          echo "✅ 输出已设置"
 
   upload-files:
     needs: download-artifact
-    uses: ./.github/workflows/upload-files.yml
-    with:
-      project: ${{ inputs.project }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
-      artifact_path: ${{ needs.download-artifact.outputs.artifact_path }}
-      run_user: 'deploy'
+    runs-on: ubuntu-latest
+    outputs:
+      upload_success: ${{ steps.set-outputs.outputs.upload_success }}
+      temp_dir: ${{ steps.set-outputs.outputs.temp_dir }}
+    
+    steps:
+      - name: 上传文件到服务器
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: ${{ vars.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ vars.SERVER_PORT }}
+          script: |
+            echo "📤 上传文件到服务器..."
+            
+            PROJECT="${{ inputs.project }}"
+            RUN_USER="deploy"
+            
+            # 创建临时目录
+            TEMP_DIR="/tmp/deploy-$PROJECT-$(date +%s)"
+            echo "📁 创建临时目录: $TEMP_DIR"
+            sudo mkdir -p "$TEMP_DIR"
+            sudo chown $RUN_USER:$RUN_USER "$TEMP_DIR"
+            
+            echo "temp_dir=$TEMP_DIR" >> $GITHUB_ENV
+            echo "✅ 临时目录已创建"
+
+      - name: 上传构建产物
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: ${{ vars.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ vars.SERVER_PORT }}
+          source: "${{ needs.download-artifact.outputs.artifact_path }}/*"
+          target: "${{ env.temp_dir }}/"
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "upload_success=true" >> $GITHUB_OUTPUT
+          echo "temp_dir=${{ env.temp_dir }}" >> $GITHUB_OUTPUT
+          echo "✅ 上传完成"
 
   deploy-project:
     needs: upload-files
-    uses: ./.github/workflows/deploy-project.yml
-    with:
-      project: ${{ inputs.project }}
-      deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
-      apps_root: '/srv/apps'
-      static_root: '/srv/static'
-      backup_root: '/srv/backups'
-      run_user: 'deploy'
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_success: ${{ steps.set-outputs.outputs.deploy_success }}
+      deploy_path: ${{ steps.set-outputs.outputs.deploy_path }}
+    
+    steps:
+      - name: 部署项目
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: ${{ vars.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ vars.SERVER_PORT }}
+          script: |
+            echo "🚀 部署项目..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            RUN_USER="deploy"
+            APPS_ROOT="/srv/apps"
+            STATIC_ROOT="/srv/static"
+            BACKUP_ROOT="/srv/backups"
+            TEMP_DIR="${{ needs.upload-files.outputs.temp_dir }}"
+            
+            # 确定部署路径
+            if [ "$DEPLOY_TYPE" = "backend" ]; then
+              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
+            else
+              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
+            fi
+            
+            echo "📁 部署路径: $DEPLOY_PATH"
+            
+            # 备份现有部署
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "📋 备份现有部署..."
+              BACKUP_PATH="$BACKUP_ROOT/$PROJECT/backup-$(date +%Y%m%d_%H%M%S)"
+              sudo mkdir -p "$BACKUP_PATH"
+              sudo cp -r "$DEPLOY_PATH" "$BACKUP_PATH/"
+              echo "✅ 备份完成: $BACKUP_PATH"
+            fi
+            
+            # 部署新文件
+            echo "📦 部署新文件..."
+            sudo mkdir -p "$(dirname $DEPLOY_PATH)"
+            sudo rm -rf "$DEPLOY_PATH"
+            sudo mv "$TEMP_DIR" "$DEPLOY_PATH"
+            sudo chown -R $RUN_USER:$RUN_USER "$DEPLOY_PATH"
+            
+            echo "✅ 部署完成"
+            echo "deploy_path=$DEPLOY_PATH" >> $GITHUB_ENV
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "deploy_success=true" >> $GITHUB_OUTPUT
+          echo "deploy_path=${{ env.deploy_path }}" >> $GITHUB_OUTPUT
+          echo "✅ 部署完成"
 
   configure-nginx:
     needs: deploy-project
     if: ${{ inputs.nginx_config != '' }}
-    uses: ./.github/workflows/configure-nginx.yml
-    with:
-      project: ${{ inputs.project }}
-      nginx_config: ${{ inputs.nginx_config }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
-      domain: 'redamancy.com.cn'
-      nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
-      apps_root: '/srv/apps'
-      static_root: '/srv/static'
-      backend_port: ${{ inputs.backend_port }}
-      service_name: ${{ inputs.service_name }}
+    runs-on: ubuntu-latest
+    outputs:
+      config_success: ${{ steps.set-outputs.outputs.config_success }}
+    
+    steps:
+      - name: 配置Nginx
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: ${{ vars.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ vars.SERVER_PORT }}
+          script: |
+            echo "🔧 配置Nginx..."
+            
+            PROJECT="${{ inputs.project }}"
+            NGINX_CONFIG='${{ inputs.nginx_config }}'
+            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
+            BACKEND_PORT="${{ inputs.backend_port }}"
+            SERVICE_NAME="${{ inputs.service_name }}"
+            
+            # 生成项目路由配置
+            ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
+            
+            # 备份旧配置
+            if [ -f "$ROUTE_CONF" ]; then
+              BACKUP_FILE="$NGINX_CONF_DIR/backups/route-$PROJECT.conf.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo mkdir -p "$(dirname $BACKUP_FILE)"
+              sudo cp "$ROUTE_CONF" "$BACKUP_FILE"
+              sudo rm -f "$ROUTE_CONF"
+            fi
+            
+            # 写入新配置
+            echo "$NGINX_CONFIG" | sudo tee "$ROUTE_CONF"
+            
+            # 检查配置语法
+            if sudo nginx -t; then
+              sudo systemctl reload nginx
+              echo "✅ Nginx配置完成"
+            else
+              echo "❌ Nginx配置语法错误"
+              exit 1
+            fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "config_success=true" >> $GITHUB_OUTPUT
+          echo "✅ 配置完成"
 
   start-service:
     needs: [deploy-project, configure-nginx]
     if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
-    uses: ./.github/workflows/start-service.yml
-    with:
-      project: ${{ inputs.project }}
-      start_cmd: ${{ inputs.start_cmd }}
-      deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
-      apps_root: '/srv/apps'
+    runs-on: ubuntu-latest
+    outputs:
+      start_success: ${{ steps.set-outputs.outputs.start_success }}
+    
+    steps:
+      - name: 启动服务
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: ${{ vars.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ vars.SERVER_PORT }}
+          script: |
+            echo "🚀 启动服务..."
+            
+            PROJECT="${{ inputs.project }}"
+            START_CMD="${{ inputs.start_cmd }}"
+            APPS_ROOT="/srv/apps"
+            
+            # 切换到项目目录
+            cd "$APPS_ROOT/$PROJECT"
+            
+            # 执行启动命令
+            echo "📋 执行启动命令: $START_CMD"
+            $START_CMD
+            
+            # 等待服务启动
+            sleep 5
+            
+            echo "✅ 服务启动完成"
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "start_success=true" >> $GITHUB_OUTPUT
+          echo "✅ 启动完成"
 
   test-website:
     needs: [deploy-project, configure-nginx, start-service]
     if: ${{ inputs.test_url != '' }}
-    uses: ./.github/workflows/test-website.yml
-    with:
-      project: ${{ inputs.project }}
-      test_url: ${{ inputs.test_url }}
-      deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ vars.SERVER_HOST }}
-      server_user: ${{ vars.SERVER_USER }}
-      server_key: ${{ secrets.SERVER_KEY }}
-      server_port: ${{ vars.SERVER_PORT }}
-      apps_root: '/srv/apps'
-      static_root: '/srv/static'
-      nginx_conf_dir: '/www/server/nginx/conf/conf.d/redamancy'
+    runs-on: ubuntu-latest
+    outputs:
+      test_success: ${{ steps.set-outputs.outputs.test_success }}
+    
+    steps:
+      - name: 测试网站
+        run: |
+          echo "🧪 测试网站..."
+          
+          TEST_URL="${{ inputs.test_url }}"
+          
+          # 等待网站启动
+          echo "⏳ 等待网站启动..."
+          sleep 10
+          
+          # 测试网站可访问性
+          if curl -f -s "$TEST_URL" > /dev/null; then
+            echo "✅ 网站测试通过: $TEST_URL"
+          else
+            echo "❌ 网站测试失败: $TEST_URL"
+            exit 1
+          fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "test_success=true" >> $GITHUB_OUTPUT
+          echo "✅ 测试完成"
 
   deployment-summary:
     needs: [download-artifact, upload-files, deploy-project, configure-nginx, start-service, test-website]
@@ -157,7 +357,7 @@ jobs:
           echo ""
           echo "🔗 访问信息:"
           echo "- 域名: redamancy.com.cn"
-          echo "- 项目路径: /srv/apps/${{ inputs.project }}"
+          echo "- 项目路径: ${{ needs.deploy-project.outputs.deploy_path }}"
           if [ "${{ inputs.test_url }}" != "" ]; then
             echo "- 测试URL: ${{ inputs.test_url }}"
           fi
