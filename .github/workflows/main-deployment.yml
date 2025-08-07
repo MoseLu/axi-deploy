@@ -107,7 +107,7 @@ jobs:
       temp_dir: ${{ steps.set-outputs.outputs.temp_dir }}
     
     steps:
-      - name: 上传文件到服务器
+      - name: 创建临时目录并上传文件
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ vars.SERVER_HOST }}
@@ -121,13 +121,13 @@ jobs:
             RUN_USER="deploy"
             
             # 创建临时目录
-            TEMP_DIR="/tmp/deploy-$PROJECT-$(date +%s)"
+            TEMP_DIR="/tmp/deploy-$PROJECT"
             echo "📁 创建临时目录: $TEMP_DIR"
             sudo mkdir -p "$TEMP_DIR"
             sudo chown $RUN_USER:$RUN_USER "$TEMP_DIR"
             
+            echo "✅ 临时目录已创建: $TEMP_DIR"
             echo "temp_dir=$TEMP_DIR" >> $GITHUB_ENV
-            echo "✅ 临时目录已创建"
 
       - name: 上传构建产物
         uses: appleboy/scp-action@v0.1.7
@@ -137,13 +137,13 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ vars.SERVER_PORT }}
           source: "${{ needs.download-artifact.outputs.artifact_path }}/*"
-          target: "${{ env.temp_dir }}/"
+          target: "/tmp/deploy-${{ inputs.project }}/"
 
       - name: 设置输出
         id: set-outputs
         run: |
           echo "upload_success=true" >> $GITHUB_OUTPUT
-          echo "temp_dir=${{ env.temp_dir }}" >> $GITHUB_OUTPUT
+          echo "temp_dir=/tmp/deploy-${{ inputs.project }}" >> $GITHUB_OUTPUT
           echo "✅ 上传完成"
 
   deploy-project:
