@@ -188,6 +188,11 @@ jobs:
               
               echo "📄 默认配置内容:"
               echo "$CLEANED_CONFIG"
+              
+              # 写入默认配置
+              echo "✅ 写入默认配置"
+              echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              echo "✅ 默认配置已写入: $ROUTE_CONF"
             else
               # 检查nginx_config是否包含server块
               if echo '${{ inputs.nginx_config }}' | grep -q '^server {'; then
@@ -203,6 +208,7 @@ jobs:
                 
                 # 清理和格式化nginx_config，确保正确的缩进
                 CLEANED_CONFIG=$(echo '${{ inputs.nginx_config }}' | sed 's/\\\\.html$/\\.html$/g' | sed 's/\\"/"/g' | sed 's/^/    /')
+              fi
               
               # 写入配置
               echo "✅ 写入新配置"
