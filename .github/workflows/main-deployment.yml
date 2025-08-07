@@ -232,7 +232,28 @@ jobs:
             echo "📦 部署新文件..."
             sudo mkdir -p "$(dirname $DEPLOY_PATH)"
             sudo rm -rf "$DEPLOY_PATH"
-            sudo mv "$TEMP_DIR" "$DEPLOY_PATH"
+            
+            # 检查临时目录的内容结构
+            echo "📁 检查临时目录内容结构..."
+            ls -la "$TEMP_DIR/"
+            
+            # 如果临时目录下有子目录，找到正确的构建产物目录
+            if [ -d "$TEMP_DIR/github" ]; then
+              echo "📁 发现github子目录，检查其内容..."
+              ls -la "$TEMP_DIR/github/"
+              
+              if [ -d "$TEMP_DIR/github/workspace" ]; then
+                echo "📁 发现workspace子目录，这是构建产物的实际位置"
+                sudo mv "$TEMP_DIR/github/workspace" "$DEPLOY_PATH"
+              else
+                echo "📁 没有workspace子目录，直接使用github目录"
+                sudo mv "$TEMP_DIR/github" "$DEPLOY_PATH"
+              fi
+            else
+              echo "📁 没有github子目录，直接使用临时目录"
+              sudo mv "$TEMP_DIR" "$DEPLOY_PATH"
+            fi
+            
             sudo chown -R $RUN_USER:$RUN_USER "$DEPLOY_PATH"
             
             echo "✅ 部署完成"
