@@ -316,23 +316,37 @@ jobs:
         run: |
           echo "🔍 检查构建产物是否存在..."
           
-          if [ ! -d "./dist-${{ inputs.project }}" ]; then
-            echo "🚨 构建产物目录不存在: ./dist-${{ inputs.project }}"
+          # 检查是否有构建产物目录
+          if [ -d "./dist-${{ inputs.project }}" ]; then
+            echo "✅ 找到构建产物目录: ./dist-${{ inputs.project }}"
+            echo "📁 构建产物内容:"
+            ls -la "./dist-${{ inputs.project }}/"
+            echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
+          else
+            echo "📝 构建产物目录不存在，检查当前目录内容..."
             echo "📁 当前目录内容:"
             ls -la ./
             echo ""
             echo "🔍 所有文件和目录:"
             find . -type f -maxdepth 2
             find . -type d -maxdepth 2
-            echo ""
-            echo "❌ 构建产物下载失败，无法继续部署"
-            exit 1
+            
+            # 检查当前目录是否包含构建产物文件
+            if [ -f "index.html" ] || [ -f "package.json" ] || [ -d "assets" ]; then
+              echo "✅ 发现构建产物文件在当前目录，创建标准目录结构..."
+              mkdir -p "./dist-${{ inputs.project }}"
+              # 移动所有文件到构建产物目录（除了隐藏文件）
+              find . -maxdepth 1 -type f ! -name ".*" -exec mv {} "./dist-${{ inputs.project }}/" \;
+              find . -maxdepth 1 -type d ! -name "." ! -name ".*" -exec mv {} "./dist-${{ inputs.project }}/" \;
+              echo "✅ 构建产物已移动到标准目录: ./dist-${{ inputs.project }}"
+              echo "📁 构建产物内容:"
+              ls -la "./dist-${{ inputs.project }}/"
+              echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
+            else
+              echo "❌ 构建产物下载失败，无法继续部署"
+              exit 1
+            fi
           fi
-          
-          echo "✅ 构建产物目录存在"
-          echo "📁 构建产物内容:"
-          ls -la "./dist-${{ inputs.project }}/"
-          echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
 
       - name: 上传构建产物到服务器
         uses: appleboy/scp-action@v0.1.4
