@@ -37,9 +37,25 @@ on:
         description: '启动命令（后端项目）'
         required: false
         type: string
-      deploy_secrets:
-        description: '部署密钥 (JSON格式或base64编码的JSON: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})，DEPLOY_CENTER_PAT可选，默认使用内置Token'
+      server_host:
+        description: '服务器主机地址'
         required: true
+        type: string
+      server_port:
+        description: '服务器端口'
+        required: true
+        type: string
+      server_user:
+        description: '服务器用户名'
+        required: true
+        type: string
+      server_key:
+        description: '服务器SSH密钥'
+        required: true
+        type: string
+      deploy_center_pat:
+        description: 'GitHub Token（可选，默认使用内置Token）'
+        required: false
         type: string
       skip_init:
         description: '跳过服务器初始化步骤'
@@ -70,32 +86,13 @@ jobs:
           echo "期望的构建产物名称: dist-${{ inputs.project }}"
           echo ""
           
-          # 从部署密钥中提取GitHub Token
-          DEPLOY_SECRETS='${{ inputs.deploy_secrets }}'
-          
-          # 检查是否为base64编码
-          if echo "$DEPLOY_SECRETS" | base64 -d &>/dev/null; then
-            echo "📦 检测到base64编码的部署密钥，正在解码..."
-            DEPLOY_SECRETS=$(echo "$DEPLOY_SECRETS" | base64 -d)
-          fi
-          
-          # 提取GitHub Token
-          if echo "$DEPLOY_SECRETS" | jq -e '.DEPLOY_CENTER_PAT' >/dev/null 2>&1; then
-            GITHUB_TOKEN=$(echo "$DEPLOY_SECRETS" | jq -r '.DEPLOY_CENTER_PAT')
+          # 确定使用的GitHub Token
+          if [ -n "${{ inputs.deploy_center_pat }}" ] && [ "${{ inputs.deploy_center_pat }}" != "null" ]; then
+            GITHUB_TOKEN="${{ inputs.deploy_center_pat }}"
+            echo "✅ 使用外部提供的GitHub Token"
           else
-            echo "🚨 无法解析DEPLOY_CENTER_PAT参数"
-            echo "🔍 部署密钥内容预览:"
-            echo "$DEPLOY_SECRETS" | head -c 100
-            echo "available=false" >> $GITHUB_OUTPUT
-            echo "info=无法解析GitHub Token" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-          
-          if [ "$GITHUB_TOKEN" = "null" ] || [ -z "$GITHUB_TOKEN" ]; then
-            echo "🚨 缺少必需的DEPLOY_CENTER_PAT参数"
-            echo "available=false" >> $GITHUB_OUTPUT
-            echo "info=缺少GitHub Token" >> $GITHUB_OUTPUT
-            exit 1
+            GITHUB_TOKEN="${{ github.token }}"
+            echo "✅ 使用内置GITHUB_TOKEN"
           fi
           
           echo "📋 获取最近一次成功的构建产物..."
@@ -201,155 +198,49 @@ jobs:
             exit 1
           fi
 
-  # 步骤2: 解析部署密钥
-  parse-secrets:
-    needs: [validate-artifact]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-      packages: read
-    outputs:
-      server_host: ${{ steps.parse-secrets.outputs.server_host }}
-      server_port: ${{ steps.parse-secrets.outputs.server_port }}
-      server_user: ${{ steps.parse-secrets.outputs.server_user }}
-      server_key: ${{ steps.parse-secrets.outputs.server_key }}
-      deploy_center_pat: ${{ steps.parse-secrets.outputs.deploy_center_pat }}
-    
-    steps:
-      - name: 解析部署密钥
-        id: parse-secrets
-        run: |
-          echo "🔍 解析部署密钥..."
-          
-          # 从输入参数获取部署密钥
-          DEPLOY_SECRETS='${{ inputs.deploy_secrets }}'
-          
-          # 检查是否为base64编码
-          if echo "$DEPLOY_SECRETS" | base64 -d &>/dev/null; then
-            echo "📦 检测到base64编码的部署密钥，正在解码..."
-            DEPLOY_SECRETS=$(echo "$DEPLOY_SECRETS" | base64 -d)
-          fi
-          
-          # 使用jq解析JSON配置
-          if echo "$DEPLOY_SECRETS" | jq -e '.' >/dev/null 2>&1; then
-            SERVER_HOST=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_HOST // empty')
-            SERVER_PORT=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_PORT // empty')
-            SERVER_USER=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_USER // empty')
-            SERVER_KEY=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_KEY // empty')
-            DEPLOY_CENTER_PAT=$(echo "$DEPLOY_SECRETS" | jq -r '.DEPLOY_CENTER_PAT // empty')
-          else
-            echo "🚨 无法解析部署密钥JSON格式"
-            echo "🔍 部署密钥内容预览:"
-            echo "$DEPLOY_SECRETS" | head -c 100
-            exit 1
-          fi
-          
-          # 验证必需参数
-          if [ "$SERVER_HOST" = "null" ] || [ -z "$SERVER_HOST" ]; then
-            echo "🚨 缺少必需的SERVER_HOST参数"
-            exit 1
-          fi
-          if [ "$SERVER_PORT" = "null" ] || [ -z "$SERVER_PORT" ]; then
-            echo "🚨 缺少必需的SERVER_PORT参数"
-            exit 1
-          fi
-          if [ "$SERVER_USER" = "null" ] || [ -z "$SERVER_USER" ]; then
-            echo "🚨 缺少必需的SERVER_USER参数"
-            exit 1
-          fi
-          if [ "$SERVER_KEY" = "null" ] || [ -z "$SERVER_KEY" ]; then
-            echo "🚨 缺少必需的SERVER_KEY参数"
-            exit 1
-          fi
-          if [ "$DEPLOY_CENTER_PAT" = "null" ] || [ -z "$DEPLOY_CENTER_PAT" ]; then
-            echo "📝 DEPLOY_CENTER_PAT参数未提供，将使用内置GITHUB_TOKEN"
-            DEPLOY_CENTER_PAT=""
-          fi
-          
-          # 设置输出 - 对于简单字符串使用普通输出语法
-          echo "server_host=$SERVER_HOST" >> $GITHUB_OUTPUT
-          echo "server_port=$SERVER_PORT" >> $GITHUB_OUTPUT
-          echo "server_user=$SERVER_USER" >> $GITHUB_OUTPUT
-          
-          # 对于包含换行符的SERVER_KEY，使用多行输出语法
-          {
-            echo 'server_key<<EOF' >> $GITHUB_OUTPUT
-            echo "$SERVER_KEY" >> $GITHUB_OUTPUT
-            echo 'EOF' >> $GITHUB_OUTPUT
-          }
-          
-          # 对于PAT，如果为空则使用空字符串，否则使用多行输出语法
-          if [ -n "$DEPLOY_CENTER_PAT" ]; then
-            {
-              echo 'deploy_center_pat<<EOF' >> $GITHUB_OUTPUT
-              echo "$DEPLOY_CENTER_PAT" >> $GITHUB_OUTPUT
-              echo 'EOF' >> $GITHUB_OUTPUT
-            }
-          else
-            echo "deploy_center_pat=" >> $GITHUB_OUTPUT
-          fi
-          
-          echo "✅ 部署密钥解析完成"
-          echo "📋 服务器信息:"
-          echo "- 主机: $SERVER_HOST"
-          echo "- 端口: $SERVER_PORT"
-          echo "- 用户: $SERVER_USER"
-          echo "🔍 PAT调试信息:"
-          echo "- PAT长度: $(echo "$DEPLOY_CENTER_PAT" | wc -c)"
-          echo "- PAT是否为空: $([ -z "$DEPLOY_CENTER_PAT" ] && echo '是' || echo '否')"
-          echo "- PAT是否为null: $([ "$DEPLOY_CENTER_PAT" = "null" ] && echo '是' || echo '否')"
-          echo "- PAT前10个字符: ${DEPLOY_CENTER_PAT:0:10}..."
-          
-          # 调试输出设置
-          echo "🔍 调试输出设置:"
-          echo "- server_host: $SERVER_HOST"
-          echo "- server_port: $SERVER_PORT"
-          echo "- server_user: $SERVER_USER"
-          echo "- server_key长度: $(echo "$SERVER_KEY" | wc -c)"
-          echo "- deploy_center_pat长度: $(echo "$DEPLOY_CENTER_PAT" | wc -c)"
 
-  # 步骤3: 服务器初始化（可选，使用可复用工作流）
+
+  # 步骤2: 服务器初始化（可选，使用可复用工作流）
   server-init:
-    needs: [parse-secrets, validate-artifact]
+    needs: [validate-artifact]
     if: ${{ inputs.skip_init != 'true' }}
     uses: MoseLu/axi-deploy/.github/workflows/server-init.yml@master
     with:
-      server_host: ${{ needs.parse-secrets.outputs.server_host }}
-      server_user: ${{ needs.parse-secrets.outputs.server_user }}
-      server_key: ${{ needs.parse-secrets.outputs.server_key }}
-      server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
 
-  # 步骤4: 部署项目
+  # 步骤3: 部署项目
   deploy-project:
-    needs: [parse-secrets, validate-artifact]
+    needs: [validate-artifact]
     uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
     with:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
       run_id: ${{ needs.validate-artifact.outputs.run_id }}
       deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ needs.parse-secrets.outputs.server_host }}
-      server_user: ${{ needs.parse-secrets.outputs.server_user }}
-      server_key: ${{ needs.parse-secrets.outputs.server_key }}
-      server_port: ${{ needs.parse-secrets.outputs.server_port }}
-      deploy_center_pat: ${{ needs.parse-secrets.outputs.deploy_center_pat || '' }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
+      deploy_center_pat: ${{ inputs.deploy_center_pat || '' }}
 
-  # 步骤5: 配置Nginx（可选）
+  # 步骤4: 配置Nginx（可选）
   configure-nginx:
     needs: [deploy-project]
     if: ${{ inputs.nginx_config != '' }}
     uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       project: ${{ inputs.project }}
-      server_host: ${{ needs.parse-secrets.outputs.server_host }}
-      server_user: ${{ needs.parse-secrets.outputs.server_user }}
-      server_key: ${{ needs.parse-secrets.outputs.server_key }}
-      server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
       deploy_type: ${{ inputs.deploy_type }}
       nginx_config: ${{ inputs.nginx_config }}
 
-  # 步骤6: 启动服务（可选，仅后端项目）
+  # 步骤5: 启动服务（可选，仅后端项目）
   start-service:
     needs: [deploy-project]
     if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
@@ -358,12 +249,12 @@ jobs:
       project: ${{ inputs.project }}
       start_cmd: ${{ inputs.start_cmd }}
       deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ needs.parse-secrets.outputs.server_host }}
-      server_user: ${{ needs.parse-secrets.outputs.server_user }}
-      server_key: ${{ needs.parse-secrets.outputs.server_key }}
-      server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
 
-  # 步骤7: 测试网站（可选）
+  # 步骤6: 测试网站（可选）
   test-website:
     needs: [deploy-project, configure-nginx, start-service]
     if: ${{ inputs.test_url != '' }}
@@ -372,14 +263,14 @@ jobs:
       project: ${{ inputs.project }}
       test_url: ${{ inputs.test_url }}
       deploy_type: ${{ inputs.deploy_type }}
-      server_host: ${{ needs.parse-secrets.outputs.server_host }}
-      server_user: ${{ needs.parse-secrets.outputs.server_user }}
-      server_key: ${{ needs.parse-secrets.outputs.server_key }}
-      server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      server_host: ${{ inputs.server_host }}
+      server_user: ${{ inputs.server_user }}
+      server_key: ${{ inputs.server_key }}
+      server_port: ${{ inputs.server_port }}
 
-  # 步骤8: 部署完成总结
+  # 步骤7: 部署完成总结
   deployment-summary:
-    needs: [parse-secrets, server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website]
+    needs: [server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -394,7 +285,6 @@ jobs:
           echo "- 构建ID: ${{ inputs.run_id }}"
           echo ""
           echo "📊 执行状态:"
-          echo "- 解析密钥: ${{ needs.parse-secrets.result }}"
           echo "- 服务器初始化: ${{ needs.server-init.result || 'skipped' }}"
           echo "- 验证构建产物: ${{ needs.validate-artifact.result }}"
           echo "- 部署项目: ${{ needs.deploy-project.result }}"
