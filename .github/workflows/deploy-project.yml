@@ -129,7 +129,6 @@ jobs:
           github-token: ${{ inputs.deploy_center_pat }}
           repository: ${{ inputs.source_repo }}
           run-id: ${{ inputs.run_id }}
-        continue-on-error: true
 
       - name: 调试下载结果
         run: |
@@ -254,6 +253,28 @@ jobs:
             sudo mkdir -p $DEPLOY_PATH
             sudo chown deploy:deploy $DEPLOY_PATH
             echo "✅ 部署目录已清理并重新创建"
+
+      - name: 检查构建产物是否存在
+        run: |
+          echo "🔍 检查构建产物是否存在..."
+          
+          if [ ! -d "./dist-${{ inputs.project }}" ]; then
+            echo "🚨 构建产物目录不存在: ./dist-${{ inputs.project }}"
+            echo "📁 当前目录内容:"
+            ls -la ./
+            echo ""
+            echo "🔍 所有文件和目录:"
+            find . -type f -maxdepth 2
+            find . -type d -maxdepth 2
+            echo ""
+            echo "❌ 构建产物下载失败，无法继续部署"
+            exit 1
+          fi
+          
+          echo "✅ 构建产物目录存在"
+          echo "📁 构建产物内容:"
+          ls -la "./dist-${{ inputs.project }}/"
+          echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
 
       - name: 上传构建产物到服务器
         uses: appleboy/scp-action@v0.1.4
