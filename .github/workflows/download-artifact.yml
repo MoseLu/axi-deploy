@@ -38,6 +38,36 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 调试构建产物可用性
+        run: |
+          echo "🔍 调试构建产物可用性..."
+          echo "项目名称: ${{ inputs.project }}"
+          echo "源仓库: ${{ inputs.source_repo }}"
+          echo "运行ID: ${{ inputs.run_id }}"
+          echo "期望的构建产物名称: dist-${{ inputs.project }}"
+          echo "GitHub Token: ${{ inputs.github_token != '' && '已提供' || '未提供' }}"
+          echo ""
+          echo "📋 检查构建产物是否存在..."
+          
+          # 使用 curl 检查构建产物
+          RESPONSE=$(curl -s -H "Authorization: token ${{ inputs.github_token }}" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}/artifacts" 2>/dev/null || echo "API调用失败")
+          
+          echo "API响应:"
+          echo "$RESPONSE" | head -20
+          
+          # 检查是否包含目标构建产物
+          if echo "$RESPONSE" | grep -q "dist-${{ inputs.project }}"; then
+            echo "✅ 找到构建产物: dist-${{ inputs.project }}"
+          else
+            echo "❌ 未找到构建产物: dist-${{ inputs.project }}"
+            echo "🔍 可用的构建产物:"
+            echo "$RESPONSE" | grep -o '"name":"[^"]*"' | head -10
+          fi
+          
+          echo ""
+          echo "⏳ 继续尝试下载构建产物..."
+
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
@@ -60,19 +90,29 @@ jobs:
             echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
             echo "- GitHub Token: ${{ inputs.github_token != '' && '已提供' || '未提供' }}"
             echo ""
-            echo "可能的原因:"
-            echo "1. 构建产物名称不匹配"
-            echo "2. 构建产物已过期 (retention-days)"
+            echo "🚨 可能的原因:"
+            echo "1. 构建产物已过期 (retention-days)"
+            echo "2. 构建产物名称不匹配"
             echo "3. 源仓库或运行ID错误"
             echo "4. GitHub Token权限不足"
             echo "5. 构建产物上传失败"
             echo ""
-            echo "建议检查:"
-            echo "1. 确认源仓库的构建产物名称是否为 'dist-${{ inputs.project }}'"
-            echo "2. 检查构建产物的保留期限"
+            echo "🔧 解决方案:"
+            echo "1. 重新触发源仓库的构建工作流"
+            echo "2. 检查源仓库的构建产物名称是否为 'dist-${{ inputs.project }}'"
             echo "3. 验证GitHub Token权限"
             echo "4. 检查源仓库的构建日志"
             echo "5. 确认源仓库的构建是否成功完成"
+            echo ""
+            echo "📋 立即解决方案:"
+            echo "1. 访问源仓库: https://github.com/${{ inputs.source_repo }}"
+            echo "2. 手动触发构建工作流"
+            echo "3. 等待构建完成后重新触发部署"
+            echo ""
+            echo "🔍 调试信息:"
+            echo "- 当前时间: $(date)"
+            echo "- 构建产物保留期限: 30天 (已更新)"
+            echo "- 建议检查源仓库最近的构建记录"
             exit 1
           else
             echo "✅ 构建产物下载成功"
