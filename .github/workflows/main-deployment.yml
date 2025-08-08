@@ -76,7 +76,16 @@ jobs:
           fi
           
           # 提取GitHub Token
-          GITHUB_TOKEN=$(echo "$DEPLOY_SECRETS" | jq -r '.DEPLOY_CENTER_PAT')
+          if echo "$DEPLOY_SECRETS" | jq -e '.DEPLOY_CENTER_PAT' >/dev/null 2>&1; then
+            GITHUB_TOKEN=$(echo "$DEPLOY_SECRETS" | jq -r '.DEPLOY_CENTER_PAT')
+          else
+            echo "🚨 无法解析DEPLOY_CENTER_PAT参数"
+            echo "🔍 部署密钥内容预览:"
+            echo "$DEPLOY_SECRETS" | head -c 100
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "info=无法解析GitHub Token" >> $GITHUB_OUTPUT
+            exit 1
+          fi
           
           if [ "$GITHUB_TOKEN" = "null" ] || [ -z "$GITHUB_TOKEN" ]; then
             echo "🚨 缺少必需的DEPLOY_CENTER_PAT参数"
@@ -99,18 +108,30 @@ jobs:
           
           # 检查API响应是否包含错误
           if echo "$RUNS_RESPONSE" | grep -q '"message"'; then
-            echo "❌ API调用失败:"
-            echo "$RUNS_RESPONSE" | jq -r '.message' 2>/dev/null || echo "$RUNS_RESPONSE"
-            echo "available=false" >> $GITHUB_OUTPUT
-            echo "info=API调用失败" >> $GITHUB_OUTPUT
-            exit 1
+            ERROR_MSG=$(echo "$RUNS_RESPONSE" | jq -r '.message // empty' 2>/dev/null)
+            if [ -n "$ERROR_MSG" ]; then
+              echo "❌ API调用失败:"
+              echo "$ERROR_MSG"
+              echo "available=false" >> $GITHUB_OUTPUT
+              echo "info=API调用失败" >> $GITHUB_OUTPUT
+              exit 1
+            fi
           fi
           
           echo "📊 最近的构建记录:"
-          echo "$RUNS_RESPONSE" | jq -r '.workflow_runs[] | "ID: \(.id), 状态: \(.status), 结论: \(.conclusion), 时间: \(.created_at)"' 2>/dev/null || echo "无法解析构建记录"
+          if echo "$RUNS_RESPONSE" | jq -e '.workflow_runs' >/dev/null 2>&1; then
+            echo "$RUNS_RESPONSE" | jq -r '.workflow_runs[] | "ID: \(.id), 状态: \(.status), 结论: \(.conclusion), 时间: \(.created_at)"' 2>/dev/null || echo "无法解析构建记录"
+          else
+            echo "无法解析构建记录响应"
+            echo "响应内容: $RUNS_RESPONSE"
+          fi
           
           # 获取最近一次成功的run ID
-          LATEST_RUN_ID=$(echo "$RUNS_RESPONSE" | jq -r '.workflow_runs[] | select(.conclusion == "success") | .id' 2>/dev/null | head -1)
+          if echo "$RUNS_RESPONSE" | jq -e '.workflow_runs' >/dev/null 2>&1; then
+            LATEST_RUN_ID=$(echo "$RUNS_RESPONSE" | jq -r '.workflow_runs[] | select(.conclusion == "success") | .id' 2>/dev/null | head -1)
+          else
+            LATEST_RUN_ID=""
+          fi
           
           if [ "$LATEST_RUN_ID" = "null" ] || [ -z "$LATEST_RUN_ID" ]; then
             echo "❌ 未找到成功的构建记录"
@@ -142,7 +163,12 @@ jobs:
             "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/$LATEST_RUN_ID/artifacts" 2>/dev/null || echo "API调用失败")
           
           echo "📦 构建产物列表:"
-          echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "名称: \(.name), 大小: \(.size_in_bytes) bytes"' 2>/dev/null || echo "无法解析构建产物"
+          if echo "$ARTIFACTS_RESPONSE" | jq -e '.artifacts' >/dev/null 2>&1; then
+            echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "名称: \(.name), 大小: \(.size_in_bytes) bytes"' 2>/dev/null || echo "无法解析构建产物"
+          else
+            echo "无法解析构建产物响应"
+            echo "响应内容: $ARTIFACTS_RESPONSE"
+          fi
           
           # 检查是否包含目标构建产物
           if echo "$ARTIFACTS_RESPONSE" | grep -q "dist-${{ inputs.project }}"; then
@@ -153,7 +179,11 @@ jobs:
           else
             echo "❌ 未找到构建产物: dist-${{ inputs.project }}"
             echo "🔍 可用的构建产物:"
-            echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[].name' 2>/dev/null || echo "$ARTIFACTS_RESPONSE" | grep -o '"name":"[^"]*"' | head -10
+            if echo "$ARTIFACTS_RESPONSE" | jq -e '.artifacts' >/dev/null 2>&1; then
+              echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[].name' 2>/dev/null || echo "无法解析构建产物名称"
+            else
+              echo "$ARTIFACTS_RESPONSE" | grep -o '"name":"[^"]*"' | head -10 || echo "无法解析构建产物"
+            fi
             echo "available=false" >> $GITHUB_OUTPUT
             echo "info=构建产物不可用" >> $GITHUB_OUTPUT
             echo ""
@@ -192,11 +222,18 @@ jobs:
           fi
           
           # 使用jq解析JSON配置
-          SERVER_HOST=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_HOST')
-          SERVER_PORT=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_PORT')
-          SERVER_USER=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_USER')
-          SERVER_KEY=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_KEY')
-          DEPLOY_CENTER_PAT=$(echo "$DEPLOY_SECRETS" | jq -r '.DEPLOY_CENTER_PAT')
+          if echo "$DEPLOY_SECRETS" | jq -e '.' >/dev/null 2>&1; then
+            SERVER_HOST=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_HOST // empty')
+            SERVER_PORT=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_PORT // empty')
+            SERVER_USER=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_USER // empty')
+            SERVER_KEY=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_KEY // empty')
+            DEPLOY_CENTER_PAT=$(echo "$DEPLOY_SECRETS" | jq -r '.DEPLOY_CENTER_PAT // empty')
+          else
+            echo "🚨 无法解析部署密钥JSON格式"
+            echo "🔍 部署密钥内容预览:"
+            echo "$DEPLOY_SECRETS" | head -c 100
+            exit 1
+          fi
           
           # 验证必需参数
           if [ "$SERVER_HOST" = "null" ] || [ -z "$SERVER_HOST" ]; then
