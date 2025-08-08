@@ -277,6 +277,11 @@ jobs:
           echo "- 主机: $SERVER_HOST"
           echo "- 端口: $SERVER_PORT"
           echo "- 用户: $SERVER_USER"
+          echo "🔍 PAT调试信息:"
+          echo "- PAT长度: $(echo "$DEPLOY_CENTER_PAT" | wc -c)"
+          echo "- PAT是否为空: $([ -z "$DEPLOY_CENTER_PAT" ] && echo '是' || echo '否')"
+          echo "- PAT是否为null: $([ "$DEPLOY_CENTER_PAT" = "null" ] && echo '是' || echo '否')"
+          echo "- PAT前10个字符: ${DEPLOY_CENTER_PAT:0:10}..."
 
   # 步骤3: 服务器初始化（可选，使用可复用工作流）
   server-init:

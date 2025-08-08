@@ -116,6 +116,13 @@ jobs:
           echo "Token长度: $(echo '${{ inputs.deploy_center_pat }}' | wc -c)"
           echo "Token是否为空: ${{ inputs.deploy_center_pat == '' && '是' || '否' }}"
           echo "Token是否为null: ${{ inputs.deploy_center_pat == 'null' && '是' || '否' }}"
+          echo "Token原始值: '${{ inputs.deploy_center_pat }}'"
+          if [ -n "${{ inputs.deploy_center_pat }}" ]; then
+            TOKEN="${{ inputs.deploy_center_pat }}"
+            echo "Token前20个字符: '${TOKEN:0:20}'"
+          else
+            echo "Token前20个字符: 未提供"
+          fi
           
           if [ -n "${{ inputs.deploy_center_pat }}" ] && [ "${{ inputs.deploy_center_pat }}" != "null" ]; then
             echo "GitHub Token: 已提供"
