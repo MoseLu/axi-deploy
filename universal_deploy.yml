@@ -1,0 +1,1152 @@
+name: Universal Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+      source_repo:
+        description: '源仓库 (格式: owner/repo)'
+        required: true
+        type: string
+      run_id:
+        description: '构建运行ID'
+        required: true
+        type: string
+      deploy_type:
+        description: '部署类型'
+        required: true
+        default: 'static'
+        type: choice
+        options:
+          - static
+          - backend
+      nginx_config:
+        description: 'Nginx配置（可选）'
+        required: false
+        type: string
+      test_url:
+        description: '测试URL（可选）'
+        required: false
+        type: string
+      start_cmd:
+        description: '启动命令（后端项目）'
+        required: false
+        type: string
+      skip_init:
+        description: '跳过服务器初始化'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  # 步骤1: 服务器初始化
+  server-init:
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_init }}
+    steps:
+      - name: 服务器初始化
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🚀 开始服务器初始化..."
+            
+            # 获取输入参数
+            DOMAIN="redamancy.com.cn"
+            RUN_USER="deploy"
+            APPS_ROOT="/srv/apps"
+            STATIC_ROOT="/srv/static"
+            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
+            CERT_SRC="/www/server/panel/vhost/cert/redamancy.com.cn"
+            CERT_DST="/www/server/nginx/ssl/redamancy"
+            FORCE_REBUILD="false"
+            
+            echo "📋 初始化配置:"
+            echo "- 域名: $DOMAIN"
+            echo "- 运行用户: $RUN_USER"
+            echo "- 应用目录: $APPS_ROOT"
+            echo "- 静态目录: $STATIC_ROOT"
+            echo "- Nginx配置: $NGINX_CONF_DIR"
+            echo "- 证书源: $CERT_SRC"
+            echo "- 证书目标: $CERT_DST"
+            echo "- 强制重建: $FORCE_REBUILD"
+            
+            # 0. 前置检查
+            echo "🔍 前置检查..."
+            if ! command -v nginx &> /dev/null; then
+              echo "❌ Nginx未安装，无法继续初始化"
+              exit 1
+            fi
+            echo "✅ Nginx已安装: $(nginx -v)"
+            
+            # 检查并启动Nginx服务
+            echo "🔍 检查Nginx进程状态..."
+            if pgrep nginx > /dev/null; then
+              echo "✅ 发现Nginx进程正在运行"
+              NGINX_PIDS=$(pgrep nginx)
+              echo "Nginx进程ID: $NGINX_PIDS"
+              
+              # 检查systemd服务状态
+              if systemctl is-active --quiet nginx; then
+                echo "✅ Nginx服务状态正常"
+              else
+                echo "⚠️  Nginx进程运行但systemd状态异常，尝试修复..."
+                                 # 停止所有Nginx进程
+                 echo "🛑 停止所有Nginx进程..."
+                 sudo pkill -f nginx || true
+                 sleep 3
+                 
+                 # 确保进程完全停止
+                 if pgrep nginx > /dev/null; then
+                   echo "⚠️  强制停止残留的Nginx进程..."
+                   sudo pkill -9 -f nginx || true
+                   sleep 2
+                 fi
+                
+                # 清理systemd状态
+                echo "🧹 清理systemd状态..."
+                sudo systemctl reset-failed nginx
+                
+                # 重新启动服务
+                echo "🚀 重新启动Nginx服务..."
+                if systemctl start nginx; then
+                  echo "✅ Nginx服务启动成功"
+                else
+                  echo "❌ Nginx服务启动失败"
+                  systemctl status nginx --no-pager -l
+                  exit 1
+                fi
+              fi
+            else
+              echo "⚠️  Nginx进程未运行，尝试启动服务..."
+              if systemctl start nginx; then
+                echo "✅ Nginx服务启动成功"
+              else
+                echo "❌ Nginx服务启动失败，尝试诊断..."
+                systemctl status nginx --no-pager -l
+                echo "尝试重新加载配置..."
+                if systemctl reload nginx; then
+                  echo "✅ Nginx服务重载成功"
+                else
+                  echo "❌ Nginx服务重载失败，尝试重启..."
+                  if systemctl restart nginx; then
+                    echo "✅ Nginx服务重启成功"
+                  else
+                    echo "❌ Nginx服务重启失败，请手动检查"
+                    systemctl status nginx --no-pager -l
+                    exit 1
+                  fi
+                fi
+              fi
+            fi
+            
+            # 1. 创建业务运行用户（灾后自愈）
+            echo "👤 检查业务运行用户..."
+            if ! id "$RUN_USER" &>/dev/null; then
+              echo "🆕 创建用户 $RUN_USER..."
+              sudo useradd -m -s /bin/bash $RUN_USER
+              echo "✅ 用户 $RUN_USER 创建完成"
+            else
+              echo "✅ 用户 $RUN_USER 已存在"
+            fi
+            
+            # 2. 创建所需目录（灾后自愈）
+            echo "📁 检查并创建目录..."
+            sudo mkdir -p $APPS_ROOT $STATIC_ROOT $NGINX_CONF_DIR $CERT_DST
+            sudo chown $RUN_USER:$RUN_USER $APPS_ROOT $STATIC_ROOT
+            sudo chmod 755 $NGINX_CONF_DIR $CERT_DST
+            echo "✅ 目录结构检查完成"
+            
+            # 3. 软链宝塔证书（健康巡检）
+            echo "🔗 检查证书软链..."
+            if [ ! -d "$CERT_SRC" ]; then
+              echo "❌ 证书源目录不存在: $CERT_SRC"
+              echo "请确保宝塔面板已为域名 $DOMAIN 配置SSL证书"
+              exit 1
+            fi
+            
+            # 检查并重新创建软链
+            if [ -f "$CERT_SRC/fullchain.pem" ]; then
+              sudo ln -sf $CERT_SRC/fullchain.pem $CERT_DST/fullchain.pem
+              echo "✅ 软链 fullchain.pem 完成"
+            else
+              echo "❌ 证书文件不存在: $CERT_SRC/fullchain.pem"
+              exit 1
+            fi
+            
+            if [ -f "$CERT_SRC/privkey.pem" ]; then
+              sudo ln -sf $CERT_SRC/privkey.pem $CERT_DST/privkey.pem
+              echo "✅ 软链 privkey.pem 完成"
+            else
+              echo "❌ 私钥文件不存在: $CERT_SRC/privkey.pem"
+              exit 1
+            fi
+            
+            # 4. 写入/更新主配置（配置变更）
+            echo "📝 更新主配置文件..."
+            MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
+            
+            # 创建主配置文件备份目录
+            MAIN_BACKUP_DIR="$NGINX_CONF_DIR/backups/main"
+            echo "📁 创建主配置文件备份目录: $MAIN_BACKUP_DIR"
+            sudo mkdir -p "$MAIN_BACKUP_DIR"
+            sudo chmod 755 "$MAIN_BACKUP_DIR"
+            
+            # 备份现有主配置文件（如果存在）
+            if [ -f "$MAIN_CONF" ]; then
+              echo "📋 备份现有主配置文件: $MAIN_CONF"
+              MAIN_BACKUP_FILE="$MAIN_BACKUP_DIR/00-main.conf.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp "$MAIN_CONF" "$MAIN_BACKUP_FILE"
+              echo "✅ 主配置文件已备份到: $MAIN_BACKUP_FILE"
+              
+              # 清理旧的备份文件，只保留最近3个
+              echo "🧹 清理旧的主配置文件备份..."
+              BACKUP_FILES=$(ls -t "$MAIN_BACKUP_DIR"/00-main.conf.backup.* 2>/dev/null | tail -n +4)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的主配置文件备份:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -f
+                echo "✅ 旧主配置文件备份已清理，保留最近3个备份"
+              else
+                echo "📋 没有需要清理的旧主配置文件备份"
+              fi
+            else
+              echo "📋 主配置文件不存在，将创建新文件"
+            fi
+            
+            # 检查是否需要重新生成配置
+            if [ ! -f "$MAIN_CONF" ] || [ "$FORCE_REBUILD" = "true" ] || [ "$(stat -c %Y $MAIN_CONF)" -lt "$(date -d '1 hour ago' +%s)" ] || [ "$(grep -c 'location ~ \^/\(?!docs|api|health|uploads|static|\$\)' $MAIN_CONF 2>/dev/null || echo 0)" -gt 0 ]; then
+              echo "🔄 重新生成主配置文件..."
+              sudo tee $MAIN_CONF <<'EOF'
+            server {
+                listen 443 ssl;
+                server_name redamancy.com.cn;
+                http2 on;
+            
+                ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
+                ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
+            
+                client_max_body_size 100m;
+            
+                # 这里自动加载 route-*.conf（项目路由）——主配置永远不用再改
+                include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
+            }
+            
+            server {
+                listen 80;
+                server_name redamancy.com.cn;
+                
+                # HTTP到HTTPS重定向
+                return 301 https://$host$request_uri;
+            }
+            EOF
+              echo "✅ 主配置文件已更新"
+            else
+              echo "✅ 主配置文件无需更新"
+            fi
+            
+            # 5. 检查并重载Nginx（健康巡检）
+            echo "🔄 检查Nginx配置..."
+            if sudo nginx -t; then
+              echo "✅ Nginx配置语法检查通过"
+            else
+              echo "❌ Nginx配置语法错误"
+              echo "配置错误详情:"
+              sudo nginx -t 2>&1
+              exit 1
+            fi
+            
+            echo "🔄 尝试重载Nginx..."
+            # 先检查Nginx进程是否正在运行
+            if pgrep nginx > /dev/null; then
+              echo "✅ Nginx进程正在运行，尝试重载..."
+              if sudo systemctl reload nginx; then
+                echo "✅ Nginx热加载完成"
+              else
+                                 echo "❌ Nginx重载失败，尝试重启..."
+                 # 停止所有Nginx进程
+                 echo "🛑 停止所有Nginx进程..."
+                 sudo pkill -f nginx || true
+                 sleep 3
+                 
+                 # 确保进程完全停止
+                 if pgrep nginx > /dev/null; then
+                   echo "⚠️  强制停止残留的Nginx进程..."
+                   sudo pkill -9 -f nginx || true
+                   sleep 2
+                 fi
+                
+                # 清理systemd状态
+                sudo systemctl reset-failed nginx
+                
+                # 重新启动
+                if sudo systemctl start nginx; then
+                  echo "✅ Nginx重启成功"
+                else
+                  echo "❌ Nginx重启失败，显示详细错误:"
+                  sudo systemctl status nginx --no-pager -l
+                  echo "Nginx错误日志:"
+                  sudo tail -n 20 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
+                  exit 1
+                fi
+              fi
+            else
+              echo "⚠️  Nginx进程未运行，尝试启动..."
+              if sudo systemctl start nginx; then
+                echo "✅ Nginx启动成功"
+              else
+                echo "❌ Nginx启动失败，显示详细错误:"
+                sudo systemctl status nginx --no-pager -l
+                echo "Nginx错误日志:"
+                sudo tail -n 20 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
+                exit 1
+              fi
+            fi
+            
+            # 6. 防火墙检查（健康巡检）
+            echo "🔥 检查防火墙规则..."
+            if command -v firewall-cmd &> /dev/null; then
+              if ! sudo firewall-cmd --list-services | grep -q http; then
+                echo "⚠️  HTTP端口未开放，尝试开放..."
+                sudo firewall-cmd --add-service=http --permanent
+                sudo firewall-cmd --add-service=https --permanent
+                sudo firewall-cmd --reload
+                echo "✅ HTTP/HTTPS端口已开放"
+              else
+                echo "✅ HTTP/HTTPS端口已开放"
+              fi
+            else
+              echo "未检测到 firewalld，跳过防火墙配置"
+            fi
+            
+            # 7. 最终验证
+            echo "🔍 最终验证..."
+            echo "📁 配置文件:"
+            ls -la $NGINX_CONF_DIR/
+            echo "🔗 证书软链:"
+            ls -la $CERT_DST/
+            echo "📂 目录权限:"
+            ls -la $APPS_ROOT/
+            ls -la $STATIC_ROOT/
+            
+            # 测试HTTPS访问
+            echo "🌐 测试HTTPS访问:"
+            if curl -f -s https://$DOMAIN > /dev/null 2>&1; then
+              echo "✅ HTTPS访问正常"
+            else
+              echo "⚠️  HTTPS访问测试失败（可能尚未部署项目）"
+            fi
+            
+            echo "✅ 服务器初始化完成！"
+            echo ""
+            echo "📋 初始化摘要:"
+            echo "- 域名: $DOMAIN"
+            echo "- 运行用户: $RUN_USER"
+            echo "- 应用目录: $APPS_ROOT"
+            echo "- 静态目录: $STATIC_ROOT"
+            echo "- Nginx配置: $NGINX_CONF_DIR"
+            echo "- 证书源: $CERT_SRC"
+            echo "- 证书目标: $CERT_DST"
+
+  # 步骤2: 项目部署
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [server-init]
+    if: ${{ !inputs.skip_init }} || always()
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载构建产物
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          name: dist-${{ inputs.project }}
+          path: ./dist
+          repo: ${{ inputs.source_repo }}
+          workflow: ${{ inputs.project }}_deploy.yml
+          run_id: ${{ inputs.run_id }}
+          github_token: ${{ secrets.DEPLOY_CENTER_PAT }}
+
+      - name: 显示构建产物信息
+        run: |
+          echo "📦 构建产物信息:"
+          ls -la ./dist/
+          echo "📋 部署参数:"
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 构建ID: ${{ inputs.run_id }}"
+
+      - name: 上传到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          source: "./dist/*"
+          target: "/tmp/${{ inputs.project }}/"
+          command_timeout: "10m"
+          
+      - name: 验证上传
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🔍 验证上传文件..."
+            TEMP_DIR="/tmp/${{ inputs.project }}"
+            
+            if [ -d "$TEMP_DIR" ]; then
+              echo "✅ 临时目录存在: $TEMP_DIR"
+              echo "📁 临时目录内容:"
+              ls -la $TEMP_DIR/
+              
+              if [ -f "$TEMP_DIR/deployment.tar.gz" ]; then
+                echo "✅ deployment.tar.gz 存在"
+                echo "📦 文件大小: $(ls -lh $TEMP_DIR/deployment.tar.gz | awk '{print $5}')"
+                echo "📋 压缩包内容预览:"
+                tar -tzf $TEMP_DIR/deployment.tar.gz | head -10
+              else
+                echo "❌ deployment.tar.gz 不存在"
+                echo "📁 查找所有文件:"
+                find $TEMP_DIR -type f
+              fi
+            else
+              echo "❌ 临时目录不存在: $TEMP_DIR"
+              echo "📁 /tmp 目录内容:"
+              ls -la /tmp/
+            fi
+
+      - name: 部署到服务器
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🚀 开始部署项目: ${{ inputs.project }}"
+            
+            # 标准化目录结构
+            APPS_ROOT="/srv/apps"
+            STATIC_ROOT="/srv/static"
+            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
+            PROJECT="${{ inputs.project }}"
+            TEMP_DIR="/tmp/$PROJECT"
+            
+            echo "📁 项目临时目录: $TEMP_DIR"
+            
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              # 后端项目部署到应用目录
+              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
+              echo "📁 后端项目部署到: $DEPLOY_PATH"
+            else
+              # 静态项目部署到静态文件目录
+              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
+              echo "📁 静态项目部署到: $DEPLOY_PATH"
+            fi
+            
+            # 创建部署目录
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown deploy:deploy $DEPLOY_PATH
+            
+            # 创建项目专用备份目录
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              BACKUP_ROOT="/srv/backups/apps"
+            else
+              BACKUP_ROOT="/srv/backups/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 清理目标部署目录（避免残留文件）
+            echo "🧹 清理目标部署目录..."
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "📋 备份旧部署目录: $DEPLOY_PATH"
+              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
+              sudo rm -rf $DEPLOY_PATH
+              echo "✅ 旧部署目录已备份到: $BACKUP_NAME"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            fi
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown deploy:deploy $DEPLOY_PATH
+            echo "✅ 部署目录已清理并重新创建"
+            
+            # 检查临时目录是否存在
+            if [ ! -d "$TEMP_DIR" ]; then
+              echo "❌ 临时目录不存在: $TEMP_DIR"
+              echo "📁 /tmp 目录内容:"
+              ls -la /tmp/
+              exit 1
+            fi
+            
+            # 进入项目临时目录
+            cd $TEMP_DIR
+            echo "📁 当前临时目录内容:"
+            ls -la
+            
+            # 根据部署类型处理文件
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              # 后端项目：查找 deployment.tar.gz 文件
+              DEPLOYMENT_FILE=""
+              if [ -f "deployment.tar.gz" ]; then
+                DEPLOYMENT_FILE="deployment.tar.gz"
+                echo "✅ 在根目录找到 deployment.tar.gz"
+              elif [ -f "dist/deployment.tar.gz" ]; then
+                DEPLOYMENT_FILE="dist/deployment.tar.gz"
+                echo "✅ 在 dist 目录找到 deployment.tar.gz"
+              else
+                echo "❌ 未找到 deployment.tar.gz"
+                echo "📁 当前目录所有文件:"
+                find . -type f
+                exit 1
+              fi
+              
+              echo "📦 文件大小: $(ls -lh $DEPLOYMENT_FILE | awk '{print $5}')"
+              echo "📋 压缩包内容预览:"
+              tar -tzf $DEPLOYMENT_FILE | head -10
+              
+              # 解压并部署文件
+              echo "📦 解压部署文件..."
+              if [ -f "$DEPLOYMENT_FILE" ]; then
+                # 后端项目部署
+                echo "🔧 部署后端项目..."
+                sudo tar xzf $DEPLOYMENT_FILE -C $DEPLOY_PATH
+                sudo chown -R deploy:deploy $DEPLOY_PATH
+                
+                # 设置可执行权限
+                if [ -f "$DEPLOY_PATH/star-cloud-linux" ]; then
+                  sudo chmod +x $DEPLOY_PATH/star-cloud-linux
+                  echo "✅ 二进制文件权限设置完成"
+                else
+                  echo "❌ 二进制文件不存在: $DEPLOY_PATH/star-cloud-linux"
+                  echo "📁 部署目录内容:"
+                  ls -la $DEPLOY_PATH/
+                  exit 1
+                fi
+                
+                # 创建必要目录
+                sudo mkdir -p $DEPLOY_PATH/uploads/{image,document,audio,video,other,avatars}
+                sudo mkdir -p $DEPLOY_PATH/logs
+                sudo chown -R deploy:deploy $DEPLOY_PATH/uploads $DEPLOY_PATH/logs
+                
+                # 检查文件权限和目录结构
+                echo "🔍 检查文件权限和目录结构..."
+                echo "📁 部署目录内容:"
+                ls -la $DEPLOY_PATH/
+                
+                if [ -f "$DEPLOY_PATH/star-cloud-linux" ]; then
+                  echo "✅ 二进制文件:"
+                  ls -la $DEPLOY_PATH/star-cloud-linux
+                else
+                  echo "❌ 二进制文件不存在"
+                  echo "📁 查找二进制文件:"
+                  find $DEPLOY_PATH -name "star-cloud-linux" -type f
+                fi
+                
+                if [ -f "$DEPLOY_PATH/star-cloud.service" ]; then
+                  echo "✅ 服务文件:"
+                  ls -la $DEPLOY_PATH/star-cloud.service
+                else
+                  echo "❌ 服务文件不存在"
+                  echo "📁 查找服务文件:"
+                  find $DEPLOY_PATH -name "star-cloud.service" -type f
+                fi
+                
+                if [ -d "$DEPLOY_PATH/backend/config" ]; then
+                  echo "✅ 配置文件:"
+                  ls -la $DEPLOY_PATH/backend/config/
+                else
+                  echo "❌ 配置文件目录不存在"
+                  echo "📁 查找配置文件:"
+                  find $DEPLOY_PATH -name "config" -type d
+                fi
+                 
+                 # 检查服务文件内容
+                 if [ -f "$DEPLOY_PATH/star-cloud.service" ]; then
+                   echo "📋 服务文件内容:"
+                   cat $DEPLOY_PATH/star-cloud.service
+                 else
+                   echo "❌ 服务文件不存在，无法显示内容"
+                 fi
+                 
+                 # 启动服务
+                 echo "🚀 启动后端服务..."
+                 sudo systemctl daemon-reload
+                 sudo systemctl enable star-cloud.service
+                 sudo systemctl restart star-cloud.service
+                 
+                 # 等待服务启动
+                 echo "⏳ 等待服务启动..."
+                 sleep 10
+                 
+                 # 健康检查
+                 echo "🔍 检查服务健康状态..."
+                 if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+                   echo "✅ 服务启动成功 - 健康检查通过"
+                 else
+                   echo "❌ 服务启动失败 - 健康检查失败"
+                   echo "📊 服务状态:"
+                   sudo systemctl status star-cloud.service --no-pager -l
+                   echo "📋 服务日志:"
+                   sudo journalctl -u star-cloud.service --no-pager -n 20
+                   echo "🔍 检查端口占用:"
+                   sudo netstat -tlnp | grep :8080
+                   echo "🔍 检查进程:"
+                   ps aux | grep star-cloud
+                   exit 1
+                 fi
+              else
+                echo "❌ deployment.tar.gz 文件不存在"
+                exit 1
+              fi
+            else
+              # 静态项目：直接复制文件
+              echo "📁 部署静态项目..."
+              echo "📁 当前目录内容:"
+              ls -la
+              
+              # 检查是否有 dist 目录
+              if [ -d "dist" ]; then
+                echo "✅ 找到 dist 目录，复制其内容..."
+                sudo cp -r dist/* $DEPLOY_PATH/
+              else
+                echo "📁 没有 dist 目录，复制所有文件..."
+                sudo cp -r * $DEPLOY_PATH/
+              fi
+              
+              sudo chown -R deploy:deploy $DEPLOY_PATH
+              echo "✅ 静态项目部署完成"
+              
+              # 显示部署结果
+              echo "📁 部署目录内容:"
+              ls -la $DEPLOY_PATH/
+            fi
+            
+            # 清理临时目录
+            echo "🧹 清理临时目录..."
+            sudo rm -rf $TEMP_DIR
+            echo "✅ 临时目录已清理: $TEMP_DIR"
+            
+            echo "✅ 项目部署完成: ${{ inputs.project }}"
+
+      - name: 配置Nginx（如果提供配置）
+        if: inputs.nginx_config != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🔧 配置Nginx..."
+            
+            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
+            PROJECT="${{ inputs.project }}"
+            
+            # 生成项目路由配置
+            ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
+            
+            # 保护主配置文件 - 确保不会被修改
+            MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
+            echo "🛡️ 保护主配置文件: $MAIN_CONF"
+            if [ -f "$MAIN_CONF" ]; then
+              echo "✅ 主配置文件存在，设置只读权限保护"
+              sudo chmod 444 "$MAIN_CONF"
+              echo "📋 主配置文件权限: $(ls -la $MAIN_CONF)"
+              
+              # 显示备份信息
+              MAIN_BACKUP_DIR="$NGINX_CONF_DIR/backups/main"
+              if [ -d "$MAIN_BACKUP_DIR" ]; then
+                echo "📋 主配置文件备份目录: $MAIN_BACKUP_DIR"
+                BACKUP_COUNT=$(ls -1 "$MAIN_BACKUP_DIR"/00-main.conf.backup.* 2>/dev/null | wc -l)
+                echo "📊 当前备份数量: $BACKUP_COUNT"
+                if [ "$BACKUP_COUNT" -gt 0 ]; then
+                  echo "📋 最新备份文件:"
+                  ls -la "$MAIN_BACKUP_DIR"/00-main.conf.backup.* | tail -1
+                fi
+              fi
+            else
+              echo "⚠️ 主配置文件不存在: $MAIN_CONF"
+            fi
+            
+            # 创建项目专用备份目录
+            BACKUP_DIR="$NGINX_CONF_DIR/backups"
+            PROJECT_BACKUP_DIR="$BACKUP_DIR/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 清理旧的 Nginx 配置文件（仅路由配置）
+            echo "🧹 清理旧的路由配置文件..."
+            if [ -f "$ROUTE_CONF" ]; then
+              echo "📋 备份旧路由配置文件: $ROUTE_CONF"
+              BACKUP_FILE="$PROJECT_BACKUP_DIR/route-$PROJECT.conf.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp "$ROUTE_CONF" "$BACKUP_FILE"
+              sudo rm -f "$ROUTE_CONF"
+              echo "✅ 旧路由配置文件已备份到: $BACKUP_FILE"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/route-$PROJECT.conf.backup.* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -f
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 没有找到旧的路由配置文件: $ROUTE_CONF"
+            fi
+            
+            # 检查nginx_config是否包含server块
+            if echo "${{ inputs.nginx_config }}" | grep -q '^server {'; then
+              # 如果包含server块，提取location块
+              echo "📝 检测到server块配置，提取location块..."
+              LOCATION_CONFIG=$(echo "${{ inputs.nginx_config }}" | sed -n '/location /,/}/p' | sed 's/^/    /')
+              
+              # 清理和格式化location配置
+              CLEANED_CONFIG=$(echo "$LOCATION_CONFIG")
+              
+              # 直接写入配置
+              echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              echo "✅ Nginx配置已写入: $ROUTE_CONF (提取的location块)"
+            else
+              # 如果不包含server块，直接使用location块
+              echo "📝 检测到location块配置，直接写入..."
+              
+              # 清理和格式化nginx_config，确保正确的缩进
+              CLEANED_CONFIG=$(echo "${{ inputs.nginx_config }}" | sed 's/^/    /')
+              
+              # 检查配置是否包含正确的路径
+              if echo "$CLEANED_CONFIG" | grep -q "/srv/static/axi-docs/"; then
+                echo "✅ 检测到正确的部署路径 (/srv/static/axi-docs/)"
+              elif echo "$CLEANED_CONFIG" | grep -q "/www/wwwroot/redamancy.com.cn/docs/"; then
+                echo "✅ 检测到正确的部署路径 (/www/wwwroot/redamancy.com.cn/docs/)"
+              elif echo "$CLEANED_CONFIG" | grep -q "/srv/apps/axi-star-cloud/"; then
+                echo "✅ 检测到正确的部署路径 (/srv/apps/axi-star-cloud/)"
+              else
+                echo "⚠️ 警告: 配置中可能使用了错误的路径"
+                echo "当前配置: $CLEANED_CONFIG"
+              fi
+              
+              # 检查是否有重复的location定义
+              echo "🔍 检查location冲突..."
+              
+              # 检查当前配置中是否包含location /
+              CURRENT_HAS_LOCATION_ROOT=false
+              if echo "$CLEANED_CONFIG" | grep -q "location /"; then
+                CURRENT_HAS_LOCATION_ROOT=true
+                echo "📋 当前配置包含 location /"
+              fi
+              
+              # 检查现有配置中是否包含location /
+              EXISTING_HAS_LOCATION_ROOT=false
+              if [ -f "$ROUTE_CONF" ] && grep -q "location /" "$ROUTE_CONF"; then
+                EXISTING_HAS_LOCATION_ROOT=true
+                echo "📋 现有配置包含 location /"
+              fi
+              
+              # 检查其他route文件中是否包含location /
+              OTHER_HAS_LOCATION_ROOT=false
+              for other_conf in /www/server/nginx/conf/conf.d/redamancy/route-*.conf; do
+                if [ -f "$other_conf" ] && [ "$other_conf" != "$ROUTE_CONF" ] && grep -q "location /" "$other_conf"; then
+                  OTHER_HAS_LOCATION_ROOT=true
+                  echo "📋 其他配置文件 $other_conf 包含 location /"
+                  break
+                fi
+              done
+              
+              # 如果当前配置包含location /，且其他配置也包含location /，则强制覆盖
+              if [ "$CURRENT_HAS_LOCATION_ROOT" = true ] && [ "$OTHER_HAS_LOCATION_ROOT" = true ]; then
+                echo "⚠️ 检测到多个配置文件都有 location /，强制覆盖当前配置"
+                echo "📋 清理其他冲突的配置文件..."
+                for other_conf in /www/server/nginx/conf/conf.d/redamancy/route-*.conf; do
+                  if [ -f "$other_conf" ] && [ "$other_conf" != "$ROUTE_CONF" ] && grep -q "location /" "$other_conf"; then
+                    echo "🗑️ 删除冲突的配置文件: $other_conf"
+                    sudo rm -f "$other_conf"
+                  fi
+                done
+                echo "✅ 写入新配置"
+                echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              else
+                echo "✅ 没有location冲突，写入新配置"
+                echo "$CLEANED_CONFIG" | sudo tee $ROUTE_CONF
+              fi
+              
+              echo "✅ Nginx配置已写入: $ROUTE_CONF (location块)"
+            fi
+            
+            # 详细的调试信息
+            echo "🔍 调试信息开始..."
+            echo "📁 检查所有 Nginx 配置文件:"
+            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "docs\|301\|302" {} \;
+            
+            echo "📋 检查主配置文件:"
+            if [ -f "/www/server/nginx/conf/vhost/redamancy.com.cn.conf" ]; then
+              echo "主配置文件内容:"
+              cat /www/server/nginx/conf/vhost/redamancy.com.cn.conf
+            else
+              echo "主配置文件不存在"
+            fi
+            
+            echo "📋 检查生成的配置文件:"
+            if [ -f "$ROUTE_CONF" ]; then
+              echo "生成的配置文件内容:"
+              cat $ROUTE_CONF
+            else
+              echo "生成的配置文件不存在"
+            fi
+            
+            echo "📋 检查所有包含 'docs' 的配置:"
+            grep -r "docs" /www/server/nginx/conf/ || echo "没有找到包含 'docs' 的配置"
+            
+            echo "📋 检查所有重定向规则:"
+            grep -r "301\|302\|redirect" /www/server/nginx/conf/ || echo "没有找到重定向规则"
+            
+            echo "📁 检查部署目录:"
+            ls -la /srv/static/axi-docs/ || echo "部署目录不存在"
+            
+            echo "📋 检查 index.html 是否存在:"
+            if [ -f "/srv/static/axi-docs/index.html" ]; then
+              echo "✅ index.html 存在"
+              ls -la /srv/static/axi-docs/index.html
+            else
+              echo "❌ index.html 不存在"
+              echo "部署目录内容:"
+              ls -la /srv/static/axi-docs/
+            fi
+            
+            # 检查Nginx配置语法
+            if sudo nginx -t; then
+              echo "✅ Nginx配置语法检查通过"
+            else
+              echo "❌ Nginx配置语法错误"
+              echo "📋 生成的配置文件内容:"
+              cat $ROUTE_CONF
+              echo "📋 Nginx 错误日志:"
+              sudo tail -n 20 /var/log/nginx/error.log
+              exit 1
+            fi
+            
+            # 检查生成的配置文件
+            echo "📋 生成的 Nginx 配置文件内容:"
+            cat $ROUTE_CONF
+            
+            # 重载Nginx配置
+            if sudo systemctl reload nginx; then
+              echo "✅ Nginx配置重载完成"
+            else
+              echo "❌ Nginx重载失败"
+              echo "📋 Nginx 错误日志:"
+              sudo tail -n 20 /var/log/nginx/error.log
+              exit 1
+            fi
+            
+            # 恢复主配置文件权限
+            echo "🛡️ 恢复主配置文件权限..."
+            if [ -f "$MAIN_CONF" ]; then
+              sudo chmod 644 "$MAIN_CONF"
+              echo "✅ 主配置文件权限已恢复: $(ls -la $MAIN_CONF)"
+            fi
+            
+            # 测试配置是否生效
+            echo "🔍 测试配置是否生效..."
+            sleep 5
+            
+            # 根据项目类型和配置确定测试URL
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            TEST_URL="${{ inputs.test_url }}"
+            
+            # 如果提供了test_url，使用它进行测试
+            if [ -n "$TEST_URL" ]; then
+              echo "📋 使用提供的测试URL: $TEST_URL"
+              # 提取域名和路径
+              DOMAIN=$(echo "$TEST_URL" | sed -E 's|^https?://([^/]+).*|\1|')
+              PATH_PART=$(echo "$TEST_URL" | sed -E 's|^https?://[^/]+(/.*)?|\1|')
+              if [ "$PATH_PART" = "" ]; then
+                PATH_PART="/"
+              fi
+              
+              echo "📋 解析测试URL:"
+              echo "- 域名: $DOMAIN"
+              echo "- 路径: $PATH_PART"
+              
+              # 先测试HTTP
+              echo "📋 测试HTTP访问..."
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART")
+              echo "HTTP测试结果: $HTTP_STATUS"
+              
+              # 再测试HTTPS
+              echo "📋 测试HTTPS访问..."
+              HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$DOMAIN$PATH_PART")
+              echo "HTTPS测试结果: $HTTPS_STATUS"
+            else
+              # 如果没有提供test_url，跳过测试
+              echo "📋 未提供test_url，跳过测试"
+              echo "⚠️ 建议在业务仓库的部署配置中提供test_url参数"
+              exit 0
+            fi
+            
+            # 检查是否有其他配置文件干扰
+            echo "📋 检查所有nginx配置文件..."
+            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "location" {} \;
+            
+            if [ "$HTTPS_STATUS" = "200" ]; then
+              echo "✅ HTTPS配置生效，返回 200"
+            elif [ "$HTTPS_STATUS" = "301" ]; then
+              echo "❌ HTTPS返回301重定向 - 配置测试失败"
+              echo "📋 检查是否有其他配置文件处理根路径:"
+              grep -r "location.*/" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他根路径location"
+              false
+            else
+              echo "⚠️ HTTPS返回状态码: $HTTPS_STATUS"
+            fi
+
+      - name: 执行启动命令（后端项目）
+        if: inputs.start_cmd != '' && inputs.deploy_type == 'backend'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🚀 执行启动命令..."
+            cd /srv/apps/${{ inputs.project }}
+            ${{ inputs.start_cmd }}
+
+      - name: 测试网站可访问性
+        if: inputs.test_url != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🌐 测试网站可访问性..."
+            echo "测试URL: ${{ inputs.test_url }}"
+            
+            # 等待一段时间让服务完全启动
+            sleep 10
+            
+            # 从test_url中提取域名和路径
+            TEST_URL="${{ inputs.test_url }}"
+            if [ -n "$TEST_URL" ]; then
+              # 提取域名部分
+              DOMAIN=$(echo "$TEST_URL" | sed -E 's|^https?://([^/]+).*|\1|')
+              # 提取路径部分
+              PATH_PART=$(echo "$TEST_URL" | sed -E 's|^https?://[^/]+(/.*)?|\1|')
+              if [ "$PATH_PART" = "" ]; then
+                PATH_PART="/"
+              fi
+              
+              echo "📋 解析测试URL:"
+              echo "- 完整URL: $TEST_URL"
+              echo "- 域名: $DOMAIN"
+              echo "- 路径: $PATH_PART"
+              
+              # 分别测试HTTP和HTTPS
+              echo "📋 测试HTTP访问..."
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART")
+              echo "HTTP测试结果: $HTTP_STATUS"
+              
+              echo "📋 测试HTTPS访问..."
+              HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
+              echo "HTTPS测试结果: $HTTPS_STATUS"
+              
+              # 如果HTTPS返回301，检查重定向目标
+              if [ "$HTTPS_STATUS" = "301" ]; then
+                echo "📋 检查HTTPS重定向目标..."
+                REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
+                echo "重定向目标: $REDIRECT_URL"
+              fi
+            else
+              echo "❌ 未提供测试URL，跳过测试"
+              exit 0
+            fi
+            
+            # 检查配置文件
+            echo "📋 检查nginx配置文件..."
+            find /www/server/nginx/conf -name "*.conf" -exec echo "文件: {}" \; -exec grep -l "location" {} \;
+            
+            # 检查主配置文件中的重定向规则
+            echo "📋 检查主nginx.conf中的重定向规则..."
+            grep -n "301\|302\|redirect" /www/server/nginx/conf/nginx.conf || echo "主配置文件中没有重定向规则"
+            
+            # 检查是否有其他server块处理当前域名
+            echo "📋 检查是否有其他server块处理当前域名..."
+            grep -r "server_name.*$DOMAIN" /www/server/nginx/conf/ || echo "没有找到其他$DOMAIN server块"
+            
+            # 检查宝塔面板的默认配置
+            echo "📋 检查宝塔面板默认配置..."
+            if [ -f "/www/server/panel/vhost/nginx/$DOMAIN.conf" ]; then
+              echo "发现宝塔面板配置文件:"
+              cat "/www/server/panel/vhost/nginx/$DOMAIN.conf"
+            else
+              echo "没有找到宝塔面板配置文件"
+            fi
+            
+            # 检查所有include的文件
+            echo "📋 检查所有include的文件..."
+            grep -r "include.*\.conf" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他include文件"
+            
+            # 检查是否有其他server块
+            echo "📋 检查所有server块..."
+            grep -r "server {" /www/server/nginx/conf/ | grep -v "route-" || echo "没有找到其他server块"
+            
+            # 检查网络层面
+            echo "📋 检查网络层面..."
+            echo "检查是否有CDN或代理:"
+            curl -I -H "Host: $DOMAIN" http://127.0.0.1$PATH_PART 2>/dev/null || echo "本地访问失败"
+            
+            # 检查DNS解析
+            echo "📋 检查DNS解析..."
+            nslookup $DOMAIN || echo "DNS解析失败"
+            
+            # 检查防火墙规则
+            echo "📋 检查防火墙规则..."
+            iptables -L -n | grep -E "(80|443)" || echo "没有找到相关防火墙规则"
+            
+            # 检查部署文件是否存在
+            echo "📋 检查部署文件..."
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            
+            if [ "$DEPLOY_TYPE" = "backend" ]; then
+              # 后端项目检查
+              if [ -f "/srv/apps/$PROJECT/front/index.html" ]; then
+                echo "✅ index.html 存在"
+                ls -la /srv/apps/$PROJECT/front/index.html
+              else
+                echo "❌ index.html 不存在"
+                echo "部署目录内容:"
+                ls -la /srv/apps/$PROJECT/front/ || echo "目录不存在"
+              fi
+            else
+              # 静态项目检查
+              if [ -f "/srv/static/$PROJECT/index.html" ]; then
+                echo "✅ index.html 存在"
+                ls -la /srv/static/$PROJECT/index.html
+              else
+                echo "❌ index.html 不存在"
+                echo "部署目录内容:"
+                ls -la /srv/static/$PROJECT/ || echo "目录不存在"
+              fi
+            fi
+            
+            # 检查nginx配置语法
+            echo "📋 检查nginx配置语法..."
+            nginx -t 2>&1 || echo "nginx配置语法错误"
+            
+            # 检查nginx错误日志
+            echo "📋 检查nginx错误日志..."
+            tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
+            
+            # 检查当前nginx配置
+            echo "📋 检查当前nginx配置..."
+            ROUTE_CONF="/www/server/nginx/conf/conf.d/redamancy/route-$PROJECT.conf"
+            if [ -f "$ROUTE_CONF" ]; then
+              echo "route-$PROJECT.conf 内容:"
+              cat "$ROUTE_CONF"
+            else
+              echo "route-$PROJECT.conf 不存在"
+            fi
+            
+            # 测试本地访问
+            echo "📋 测试本地访问..."
+            curl -I -H "Host: $DOMAIN" http://127.0.0.1$PATH_PART 2>/dev/null || echo "本地访问失败"
+            
+            # 检查nginx进程
+            echo "📋 检查nginx进程..."
+            ps aux | grep nginx | grep -v grep || echo "没有找到nginx进程"
+            
+            if [ "$HTTPS_STATUS" = "200" ]; then
+              echo "✅ HTTPS网站可访问 (HTTP $HTTPS_STATUS)"
+            elif [ "$HTTPS_STATUS" = "301" ]; then
+              echo "❌ HTTPS返回301重定向 - 测试失败"
+              echo "重定向目标: $REDIRECT_URL"
+              echo "期望目标: $TEST_URL"
+              echo "可能的原因:"
+              echo "1. Nginx配置问题导致无限重定向"
+              echo "2. 路径配置错误"
+              echo "3. 其他配置文件干扰"
+              false
+            elif [ "$HTTPS_STATUS" = "404" ]; then
+              echo "❌ HTTPS网站返回404 - 部署失败"
+              echo "可能的原因:"
+              echo "1. 项目未正确部署"
+              echo "2. Nginx配置问题"
+              echo "3. 文件路径错误"
+              false
+            else
+              echo "❌ HTTPS网站无法访问 (HTTP $HTTPS_STATUS) - 部署失败"
+              echo "可能的原因:"
+              echo "1. 域名解析问题"
+              echo "2. 服务器防火墙设置"
+              echo "3. Nginx配置问题"
+              echo "4. SSL证书问题"
+              echo "5. 后端服务未启动"
+              
+              # 显示网站标题
+              TITLE=$(curl -s "https://$DOMAIN$PATH_PART" | grep -o '<title>[^<]*</title>' | sed 's/<title>\(.*\)<\/title>/\1/')
+              echo "网站标题: $TITLE"
+              
+              # 检查后端服务状态
+              echo "🔍 检查后端服务状态..."
+              if curl -f -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+                echo "✅ 后端服务正常运行"
+              else
+                echo "❌ 后端服务未启动或无法访问"
+              fi
+              
+              # 检查 Nginx 状态
+              echo "🔍 检查 Nginx 状态..."
+              if systemctl is-active --quiet nginx; then
+                echo "✅ Nginx 服务正常运行"
+              else
+                echo "❌ Nginx 服务未运行"
+              fi
+              
+              false
+            fi
+
+      - name: 部署完成通知
+        run: |
+          echo "🎉 部署完成！"
+          echo ""
+          echo "📋 部署摘要:"
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 构建ID: ${{ inputs.run_id }}"
+          if [ "${{ inputs.test_url }}" != "" ]; then
+            echo "- 测试URL: ${{ inputs.test_url }}"
+          fi
+          echo ""
+          echo "✅ 项目已成功部署到服务器" 

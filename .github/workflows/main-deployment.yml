@@ -42,10 +42,188 @@ on:
         description: '部署密钥 (JSON格式或base64编码的JSON: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})'
         required: true
         type: string
+      skip_init:
+        description: '跳过服务器初始化步骤'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
+  # 步骤1: 服务器初始化（可选）
+  server-init:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.skip_init != 'true' }}
+    steps:
+      - name: 服务器初始化
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🚀 开始服务器初始化..."
+            
+            # 获取输入参数
+            DOMAIN="redamancy.com.cn"
+            RUN_USER="deploy"
+            APPS_ROOT="/srv/apps"
+            STATIC_ROOT="/srv/static"
+            NGINX_CONF_DIR="/www/server/nginx/conf/conf.d/redamancy"
+            CERT_SRC="/www/server/panel/vhost/cert/redamancy.com.cn"
+            CERT_DST="/www/server/nginx/ssl/redamancy"
+            
+            echo "📋 初始化配置:"
+            echo "- 域名: $DOMAIN"
+            echo "- 运行用户: $RUN_USER"
+            echo "- 应用目录: $APPS_ROOT"
+            echo "- 静态目录: $STATIC_ROOT"
+            echo "- Nginx配置: $NGINX_CONF_DIR"
+            echo "- 证书源: $CERT_SRC"
+            echo "- 证书目标: $CERT_DST"
+            
+            # 0. 前置检查
+            echo "🔍 前置检查..."
+            if ! command -v nginx &> /dev/null; then
+              echo "❌ Nginx未安装，无法继续初始化"
+              exit 1
+            fi
+            echo "✅ Nginx已安装: $(nginx -v)"
+            
+            # 1. 创建业务运行用户（灾后自愈）
+            echo "👤 检查业务运行用户..."
+            if ! id "$RUN_USER" &>/dev/null; then
+              echo "🆕 创建用户 $RUN_USER..."
+              sudo useradd -m -s /bin/bash $RUN_USER
+              echo "✅ 用户 $RUN_USER 创建完成"
+            else
+              echo "✅ 用户 $RUN_USER 已存在"
+            fi
+            
+            # 2. 创建所需目录（灾后自愈）
+            echo "📁 检查并创建目录..."
+            sudo mkdir -p $APPS_ROOT $STATIC_ROOT $NGINX_CONF_DIR $CERT_DST
+            sudo chown $RUN_USER:$RUN_USER $APPS_ROOT $STATIC_ROOT
+            sudo chmod 755 $NGINX_CONF_DIR $CERT_DST
+            echo "✅ 目录结构检查完成"
+            
+            # 3. 软链宝塔证书（健康巡检）
+            echo "🔗 检查证书软链..."
+            if [ ! -d "$CERT_SRC" ]; then
+              echo "❌ 证书源目录不存在: $CERT_SRC"
+              echo "请确保宝塔面板已为域名 $DOMAIN 配置SSL证书"
+              exit 1
+            fi
+            
+            # 检查并重新创建软链
+            if [ -f "$CERT_SRC/fullchain.pem" ]; then
+              sudo ln -sf $CERT_SRC/fullchain.pem $CERT_DST/fullchain.pem
+              echo "✅ 软链 fullchain.pem 完成"
+            else
+              echo "❌ 证书文件不存在: $CERT_SRC/fullchain.pem"
+              exit 1
+            fi
+            
+            if [ -f "$CERT_SRC/privkey.pem" ]; then
+              sudo ln -sf $CERT_SRC/privkey.pem $CERT_DST/privkey.pem
+              echo "✅ 软链 privkey.pem 完成"
+            else
+              echo "❌ 私钥文件不存在: $CERT_SRC/privkey.pem"
+              exit 1
+            fi
+            
+            # 4. 写入/更新主配置（配置变更）
+            echo "📝 更新主配置文件..."
+            MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
+            
+            # 创建主配置文件备份目录
+            MAIN_BACKUP_DIR="$NGINX_CONF_DIR/backups/main"
+            echo "📁 创建主配置文件备份目录: $MAIN_BACKUP_DIR"
+            sudo mkdir -p "$MAIN_BACKUP_DIR"
+            sudo chmod 755 "$MAIN_BACKUP_DIR"
+            
+            # 备份现有主配置文件（如果存在）
+            if [ -f "$MAIN_CONF" ]; then
+              echo "📋 备份现有主配置文件: $MAIN_CONF"
+              MAIN_BACKUP_FILE="$MAIN_BACKUP_DIR/00-main.conf.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp "$MAIN_CONF" "$MAIN_BACKUP_FILE"
+              echo "✅ 主配置文件已备份到: $MAIN_BACKUP_FILE"
+            else
+              echo "📋 主配置文件不存在，将创建新文件"
+            fi
+            
+            # 检查是否需要重新生成配置
+            if [ ! -f "$MAIN_CONF" ] || [ "$(grep -c 'location ~ \^/\(?!docs|api|health|uploads|static|\$\)' $MAIN_CONF 2>/dev/null || echo 0)" -gt 0 ]; then
+              echo "🔄 重新生成主配置文件..."
+              sudo tee $MAIN_CONF <<'EOF'
+            server {
+                listen 443 ssl;
+                server_name redamancy.com.cn;
+                http2 on;
+            
+                ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
+                ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
+            
+                client_max_body_size 100m;
+            
+                # 这里自动加载 route-*.conf（项目路由）——主配置永远不用再改
+                include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
+            }
+            
+            server {
+                listen 80;
+                server_name redamancy.com.cn;
+                
+                # HTTP到HTTPS重定向
+                return 301 https://$host$request_uri;
+            }
+            EOF
+              echo "✅ 主配置文件已更新"
+            else
+              echo "✅ 主配置文件无需更新"
+            fi
+            
+            # 5. 检查并重载Nginx（健康巡检）
+            echo "🔄 检查Nginx配置..."
+            if sudo nginx -t; then
+              echo "✅ Nginx配置语法检查通过"
+            else
+              echo "❌ Nginx配置语法错误"
+              echo "配置错误详情:"
+              sudo nginx -t 2>&1
+              exit 1
+            fi
+            
+            echo "🔄 尝试重载Nginx..."
+            if pgrep nginx > /dev/null; then
+              echo "✅ Nginx进程正在运行，尝试重载..."
+              if sudo systemctl reload nginx; then
+                echo "✅ Nginx热加载完成"
+              else
+                echo "❌ Nginx重载失败，尝试重启..."
+                if sudo systemctl restart nginx; then
+                  echo "✅ Nginx重启成功"
+                else
+                  echo "❌ Nginx重启失败"
+                  exit 1
+                fi
+              fi
+            else
+              echo "⚠️  Nginx进程未运行，尝试启动..."
+              if sudo systemctl start nginx; then
+                echo "✅ Nginx启动成功"
+              else
+                echo "❌ Nginx启动失败"
+                exit 1
+              fi
+            fi
+            
+            echo "✅ 服务器初始化完成！"
+
   download-artifact:
     runs-on: ubuntu-latest
+    needs: [server-init]
+    if: always()
     outputs:
       artifact_path: ${{ steps.set-outputs.outputs.artifact_path }}
       artifact_size: ${{ steps.set-outputs.outputs.artifact_size }}
@@ -325,7 +503,7 @@ jobs:
           echo "构建产物大小: $(du -sh $ARTIFACT_PATH | cut -f1)"
 
   deploy-project:
-    needs: download-artifact
+    needs: [download-artifact]
     runs-on: ubuntu-latest
     outputs:
       deploy_success: ${{ steps.set-outputs.outputs.deploy_success }}
@@ -399,6 +577,52 @@ jobs:
           
           # 设置输出
           echo "artifact_path=$ARTIFACT_PATH" >> $GITHUB_OUTPUT
+
+      - name: 备份现有部署
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ needs.download-artifact.outputs.server_host }}
+          username: ${{ needs.download-artifact.outputs.server_user }}
+          key: ${{ needs.download-artifact.outputs.server_key }}
+          port: ${{ needs.download-artifact.outputs.server_port }}
+          script: |
+            echo "📋 备份现有部署..."
+            
+            PROJECT="${{ needs.download-artifact.outputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            DEPLOY_PATH="/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/$PROJECT"
+            
+            # 创建项目专用备份目录
+            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
+              BACKUP_ROOT="/srv/backups/apps"
+            else
+              BACKUP_ROOT="/srv/backups/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 备份现有部署目录（如果存在）
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "📋 备份现有部署目录: $DEPLOY_PATH"
+              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
+              echo "✅ 现有部署目录已备份到: $BACKUP_NAME"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 部署目录不存在，无需备份: $DEPLOY_PATH"
+            fi
 
       - name: 直接部署到目标目录
         uses: appleboy/scp-action@v0.1.7
