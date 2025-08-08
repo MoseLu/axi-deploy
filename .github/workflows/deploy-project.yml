@@ -112,8 +112,14 @@ jobs:
           echo "构建产物名称: dist-${{ inputs.project }}"
           echo "源仓库: ${{ inputs.source_repo }}"
           echo "运行ID: ${{ inputs.run_id }}"
-          echo "GitHub Token: ${{ inputs.deploy_center_pat != '' && '已提供' || '未提供' }}"
-          echo "Token 前10个字符: ${#{{ inputs.deploy_center_pat }}:0:10}..."
+          if [ -n "${{ inputs.deploy_center_pat }}" ]; then
+            echo "GitHub Token: 已提供"
+            TOKEN="${{ inputs.deploy_center_pat }}"
+            echo "Token 前10个字符: ${TOKEN:0:10}..."
+          else
+            echo "GitHub Token: 未提供"
+            echo "Token 前10个字符: 未提供"
+          fi
 
       - name: 下载构建产物
         uses: actions/download-artifact@v4
