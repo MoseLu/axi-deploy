@@ -7,6 +7,14 @@ on:
         required: true
         type: string
         description: "项目名称"
+      source_repo:
+        required: true
+        type: string
+        description: "源仓库 (owner/repo)"
+      run_id:
+        required: true
+        type: string
+        description: "构建运行ID"
       deploy_type:
         required: true
         type: string
@@ -28,6 +36,10 @@ on:
         required: true
         type: string
         description: "服务器端口"
+      deploy_center_pat:
+        required: true
+        type: string
+        description: "GitHub Token用于下载构建产物"
       apps_root:
         required: false
         type: string
@@ -68,6 +80,8 @@ jobs:
         run: |
           echo "🔍 验证输入参数..."
           echo "- 项目: ${{ inputs.project }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 运行ID: ${{ inputs.run_id }}"
           echo "- 部署类型: ${{ inputs.deploy_type }}"
           echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
           
@@ -77,6 +91,63 @@ jobs:
           fi
           
           echo "✅ 输入参数验证通过"
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ inputs.project }}
+          path: ./
+          github-token: ${{ inputs.deploy_center_pat }}
+          repository: ${{ inputs.source_repo }}
+          run-id: ${{ inputs.run_id }}
+        continue-on-error: true
+
+      - name: 检查下载结果
+        run: |
+          echo "🔍 检查下载结果..."
+          echo "当前目录: $(pwd)"
+          echo "当前目录内容:"
+          ls -la ./
+          
+          # 检查是否有构建产物文件
+          if [ -d "./dist-${{ inputs.project }}" ]; then
+            echo "✅ dist-${{ inputs.project }} 目录存在"
+            echo "dist-${{ inputs.project }} 目录内容:"
+            ls -la "./dist-${{ inputs.project }}/"
+            echo "📊 文件数量:"
+            find "./dist-${{ inputs.project }}" -type f | wc -l
+            echo "📁 前10个文件:"
+            find "./dist-${{ inputs.project }}" -type f | head -10
+          elif [ -f "./dist-${{ inputs.project }}.zip" ]; then
+            echo "✅ 找到构建产物压缩包"
+            echo "📦 压缩包大小:"
+            ls -lh "./dist-${{ inputs.project }}.zip"
+            echo "🔧 解压构建产物..."
+            unzip -q "./dist-${{ inputs.project }}.zip"
+            echo "📁 解压后内容:"
+            ls -la ./
+          elif [ -f "./index.html" ]; then
+            echo "✅ 找到构建产物（直接在当前目录）"
+            echo "📁 构建产物内容:"
+            ls -la ./
+            echo "📊 文件数量:"
+            find . -type f -maxdepth 1 | wc -l
+            echo "📁 前10个文件:"
+            find . -type f -maxdepth 1 | head -10
+          else
+            echo "❌ 未找到构建产物"
+            echo "🔍 调试信息:"
+            echo "- 项目名称: ${{ inputs.project }}"
+            echo "- 源仓库: ${{ inputs.source_repo }}"
+            echo "- 运行ID: ${{ inputs.run_id }}"
+            echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
+            echo "🔍 所有文件:"
+            find . -type f -maxdepth 1
+            echo "🔍 所有目录:"
+            find . -type d -maxdepth 2
+            echo "🚨 工作流错误：未找到构建产物，终止部署"
+            exit 1
+          fi
 
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
@@ -92,9 +163,7 @@ jobs:
             APPS_ROOT="${{ inputs.apps_root || '/srv/apps' }}"
             STATIC_ROOT="${{ inputs.static_root || '/srv/static' }}"
             PROJECT="${{ inputs.project }}"
-            TEMP_DIR="/tmp/$PROJECT"
-            
-            echo "📁 项目临时目录: $TEMP_DIR"
+            DEPLOY_PATH=""
             
             # 根据部署类型确定部署路径
             if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
@@ -149,76 +218,74 @@ jobs:
             sudo mkdir -p $DEPLOY_PATH
             sudo chown deploy:deploy $DEPLOY_PATH
             echo "✅ 部署目录已清理并重新创建"
+
+      - name: 上传构建产物到服务器
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          source: "./dist-${{ inputs.project }}/"
+          target: "/tmp/"
+          strip_components: 0
+
+      - name: 移动构建产物到部署目录
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "📁 移动构建产物到部署目录..."
             
-            # 检查临时目录是否存在
-            if [ ! -d "$TEMP_DIR" ]; then
-              echo "🚨 临时目录不存在: $TEMP_DIR"
+            PROJECT="${{ inputs.project }}"
+            
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              DEPLOY_PATH="${{ inputs.apps_root || '/srv/apps' }}/$PROJECT"
+            else
+              DEPLOY_PATH="${{ inputs.static_root || '/srv/static' }}/$PROJECT"
+            fi
+            
+            # 检查临时目录中的构建产物
+            TEMP_SOURCE="/tmp/dist-$PROJECT"
+            echo "📁 检查临时构建产物: $TEMP_SOURCE"
+            
+            if [ ! -d "$TEMP_SOURCE" ]; then
+              echo "🚨 临时构建产物目录不存在: $TEMP_SOURCE"
               echo "📁 /tmp 目录内容:"
               ls -la /tmp/
               exit 1
             fi
             
-            # 检查临时目录是否有文件
-            if [ ! "$(ls -A $TEMP_DIR)" ]; then
-              echo "🚨 临时目录为空: $TEMP_DIR"
-              echo "🔍 调试信息:"
-              echo "临时目录: $TEMP_DIR"
-              echo "目录是否存在: $(test -d "$TEMP_DIR" && echo '是' || echo '否')"
-              echo "目录权限: $(ls -ld "$TEMP_DIR" 2>/dev/null || echo '无法获取权限')"
-              exit 1
-            fi
-            
-            echo "📁 临时目录内容:"
-            ls -la $TEMP_DIR/
+            echo "📁 临时构建产物内容:"
+            ls -la "$TEMP_SOURCE/"
             
             # 统计文件数量
-            FILE_COUNT=$(find "$TEMP_DIR" -type f | wc -l)
-            echo "📊 临时目录文件数量: $FILE_COUNT"
+            FILE_COUNT=$(find "$TEMP_SOURCE" -type f | wc -l)
+            echo "📊 构建产物文件数量: $FILE_COUNT"
             
             if [ "$FILE_COUNT" -eq 0 ]; then
-              echo "🚨 临时目录中没有文件，部署失败"
+              echo "🚨 构建产物为空"
               exit 1
             fi
             
-            # 部署文件
-            echo "📤 开始部署文件..."
-            sudo cp -r $TEMP_DIR/* $DEPLOY_PATH/
+            # 移动构建产物到部署目录
+            echo "📁 移动构建产物到部署目录: $DEPLOY_PATH"
+            sudo cp -r "$TEMP_SOURCE"/* "$DEPLOY_PATH/"
+            sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} "$DEPLOY_PATH"
             
-            # 验证部署结果
-            echo "🔍 验证部署结果..."
-            if [ ! -d "$DEPLOY_PATH" ]; then
-              echo "🚨 部署目录不存在: $DEPLOY_PATH"
-              exit 1
-            fi
+            echo "✅ 构建产物已成功部署到: $DEPLOY_PATH"
+            echo "📁 部署目录内容:"
+            ls -la "$DEPLOY_PATH/"
+            echo "📊 部署文件数量: $(find "$DEPLOY_PATH" -type f | wc -l)"
             
-            DEPLOYED_FILE_COUNT=$(find "$DEPLOY_PATH" -type f | wc -l)
-            echo "📊 部署后文件数量: $DEPLOYED_FILE_COUNT"
-            
-            if [ "$DEPLOYED_FILE_COUNT" -eq 0 ]; then
-              echo "🚨 部署目录为空，部署失败"
-              echo "🔍 调试信息:"
-              echo "部署路径: $DEPLOY_PATH"
-              echo "目录是否存在: $(test -d "$DEPLOY_PATH" && echo '是' || echo '否')"
-              echo "目录权限: $(ls -ld "$DEPLOY_PATH" 2>/dev/null || echo '无法获取权限')"
-              echo "目录内容:"
-              ls -la "$DEPLOY_PATH/" || echo "无法列出目录内容"
-              exit 1
-            fi
-            
-            # 检查关键文件
-            if [ -f "$DEPLOY_PATH/index.html" ]; then
-              echo "✅ 找到 index.html 文件"
-            else
-              echo "⚠️ 未找到 index.html 文件"
-              echo "📁 部署的文件列表:"
-              find "$DEPLOY_PATH" -type f | head -10
-            fi
-            
-            # 设置正确的文件权限
-            sudo chown -R deploy:deploy $DEPLOY_PATH
-            sudo chmod -R 755 $DEPLOY_PATH
-            
-            echo "✅ 文件部署完成，文件数量: $DEPLOYED_FILE_COUNT"
+            # 清理临时文件
+            echo "🧹 清理临时文件..."
+            sudo rm -rf "$TEMP_SOURCE"
+            echo "✅ 临时文件已清理"
             
             # 最终验证
             echo "🔍 最终验证部署结果..."
@@ -226,7 +293,7 @@ jobs:
               echo "✅ 部署验证通过"
               echo "📁 部署目录内容:"
               ls -la $DEPLOY_PATH/
-              echo "📊 最终文件数量: $DEPLOYED_FILE_COUNT"
+              echo "📊 最终文件数量: $(find "$DEPLOY_PATH" -type f | wc -l)"
             else
               echo "🚨 部署验证失败"
               exit 1

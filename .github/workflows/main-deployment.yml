@@ -48,8 +48,75 @@ on:
         default: false
 
 jobs:
-  # 步骤1: 解析部署密钥
+  # 步骤1: 验证构建产物可用性
+  validate-artifact:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_available: ${{ steps.check-artifact.outputs.available }}
+      artifact_info: ${{ steps.check-artifact.outputs.info }}
+    
+    steps:
+      - name: 验证构建产物可用性
+        id: check-artifact
+        run: |
+          echo "🔍 验证构建产物可用性..."
+          echo "项目名称: ${{ inputs.project }}"
+          echo "源仓库: ${{ inputs.source_repo }}"
+          echo "运行ID: ${{ inputs.run_id }}"
+          echo "期望的构建产物名称: dist-${{ inputs.project }}"
+          echo ""
+          
+          # 从部署密钥中提取GitHub Token
+          DEPLOY_SECRETS='${{ inputs.deploy_secrets }}'
+          
+          # 检查是否为base64编码
+          if echo "$DEPLOY_SECRETS" | base64 -d &>/dev/null; then
+            echo "📦 检测到base64编码的部署密钥，正在解码..."
+            DEPLOY_SECRETS=$(echo "$DEPLOY_SECRETS" | base64 -d)
+          fi
+          
+          # 提取GitHub Token
+          GITHUB_TOKEN=$(echo "$DEPLOY_SECRETS" | jq -r '.DEPLOY_CENTER_PAT')
+          
+          if [ "$GITHUB_TOKEN" = "null" ] || [ -z "$GITHUB_TOKEN" ]; then
+            echo "🚨 缺少必需的DEPLOY_CENTER_PAT参数"
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "info=缺少GitHub Token" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "📋 检查构建产物是否存在..."
+          
+          # 使用 curl 检查构建产物
+          RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}/artifacts" 2>/dev/null || echo "API调用失败")
+          
+          echo "API响应:"
+          echo "$RESPONSE" | head -20
+          
+          # 检查是否包含目标构建产物
+          if echo "$RESPONSE" | grep -q "dist-${{ inputs.project }}"; then
+            echo "✅ 找到构建产物: dist-${{ inputs.project }}"
+            echo "available=true" >> $GITHUB_OUTPUT
+            echo "info=构建产物可用" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 未找到构建产物: dist-${{ inputs.project }}"
+            echo "🔍 可用的构建产物:"
+            echo "$RESPONSE" | grep -o '"name":"[^"]*"' | head -10
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "info=构建产物不可用" >> $GITHUB_OUTPUT
+            echo ""
+            echo "🚨 构建产物验证失败，终止部署"
+            echo "🔧 解决方案:"
+            echo "1. 重新触发源仓库的构建工作流"
+            echo "2. 检查构建产物名称是否正确"
+            echo "3. 确认构建是否成功完成"
+            exit 1
+          fi
+
+  # 步骤2: 解析部署密钥
   parse-secrets:
+    needs: [validate-artifact]
     runs-on: ubuntu-latest
     outputs:
       server_host: ${{ steps.parse-secrets.outputs.server_host }}
@@ -121,9 +188,9 @@ jobs:
           echo "- 端口: $SERVER_PORT"
           echo "- 用户: $SERVER_USER"
 
-  # 步骤2: 服务器初始化（可选，使用可复用工作流）
+  # 步骤3: 服务器初始化（可选，使用可复用工作流）
   server-init:
-    needs: [parse-secrets]
+    needs: [parse-secrets, validate-artifact]
     if: ${{ inputs.skip_init != 'true' }}
     uses: MoseLu/axi-deploy/.github/workflows/server-init.yml@master
     with:
@@ -132,80 +199,22 @@ jobs:
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
 
-  # 步骤3: 下载并验证构建产物（使用可复用工作流）
-  download-artifact:
-    needs: [parse-secrets]
-    uses: MoseLu/axi-deploy/.github/workflows/download-artifact.yml@master
+  # 步骤4: 部署项目
+  deploy-project:
+    needs: [parse-secrets, validate-artifact]
+    uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
     with:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
       run_id: ${{ inputs.run_id }}
-      github_token: ${{ needs.parse-secrets.outputs.deploy_center_pat }}
-
-  # 步骤4: 备份现有部署
-  backup-deployment:
-    needs: [parse-secrets, download-artifact]
-    runs-on: ubuntu-latest
-    steps:
-      - name: 备份现有部署
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ needs.parse-secrets.outputs.server_host }}
-          username: ${{ needs.parse-secrets.outputs.server_user }}
-          key: ${{ needs.parse-secrets.outputs.server_key }}
-          port: ${{ needs.parse-secrets.outputs.server_port }}
-          script: |
-            echo "📋 备份现有部署..."
-            
-            PROJECT="${{ inputs.project }}"
-            DEPLOY_TYPE="${{ inputs.deploy_type }}"
-            DEPLOY_PATH="/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/$PROJECT"
-            
-            # 创建项目专用备份目录
-            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
-              BACKUP_ROOT="/srv/backups/apps"
-            else
-              BACKUP_ROOT="/srv/backups/static"
-            fi
-            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
-            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
-            sudo mkdir -p "$PROJECT_BACKUP_DIR"
-            sudo chmod 755 "$PROJECT_BACKUP_DIR"
-            
-            # 备份现有部署目录（如果存在）
-            if [ -d "$DEPLOY_PATH" ]; then
-              echo "📋 备份现有部署目录: $DEPLOY_PATH"
-              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
-              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
-              echo "✅ 现有部署目录已备份到: $BACKUP_NAME"
-              
-              # 清理旧的备份文件，只保留最近2个
-              echo "🧹 清理旧的备份文件..."
-              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +3)
-              if [ -n "$BACKUP_FILES" ]; then
-                echo "🗑️ 删除旧的备份文件:"
-                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
-                echo "✅ 旧备份文件已清理，保留最近2个备份"
-              else
-                echo "📋 没有需要清理的旧备份文件"
-              fi
-            else
-              echo "📋 部署目录不存在，无需备份: $DEPLOY_PATH"
-            fi
-
-  # 步骤5: 部署项目
-  deploy-project:
-    needs: [parse-secrets, download-artifact, backup-deployment]
-    uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
-    with:
-      project: ${{ inputs.project }}
       deploy_type: ${{ inputs.deploy_type }}
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      deploy_center_pat: ${{ needs.parse-secrets.outputs.deploy_center_pat }}
 
-  # 步骤6: 配置Nginx（可选）
+  # 步骤5: 配置Nginx（可选）
   configure-nginx:
     needs: [deploy-project]
     if: ${{ inputs.nginx_config != '' }}
@@ -219,7 +228,7 @@ jobs:
       deploy_type: ${{ inputs.deploy_type }}
       nginx_config: ${{ inputs.nginx_config }}
 
-  # 步骤7: 启动服务（可选，仅后端项目）
+  # 步骤6: 启动服务（可选，仅后端项目）
   start-service:
     needs: [deploy-project]
     if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
@@ -233,7 +242,7 @@ jobs:
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
 
-  # 步骤8: 测试网站（可选）
+  # 步骤7: 测试网站（可选）
   test-website:
     needs: [deploy-project, configure-nginx, start-service]
     if: ${{ inputs.test_url != '' }}
@@ -247,9 +256,9 @@ jobs:
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
 
-  # 步骤9: 部署完成总结
+  # 步骤8: 部署完成总结
   deployment-summary:
-    needs: [parse-secrets, server-init, download-artifact, backup-deployment, deploy-project, configure-nginx, start-service, test-website]
+    needs: [parse-secrets, server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -266,8 +275,7 @@ jobs:
           echo "📊 执行状态:"
           echo "- 解析密钥: ${{ needs.parse-secrets.result }}"
           echo "- 服务器初始化: ${{ needs.server-init.result || 'skipped' }}"
-          echo "- 下载构建产物: ${{ needs.download-artifact.result }}"
-          echo "- 备份部署: ${{ needs.backup-deployment.result }}"
+          echo "- 验证构建产物: ${{ needs.validate-artifact.result }}"
           echo "- 部署项目: ${{ needs.deploy-project.result }}"
           echo "- 配置Nginx: ${{ needs.configure-nginx.result || 'skipped' }}"
           echo "- 启动服务: ${{ needs.start-service.result || 'skipped' }}"
