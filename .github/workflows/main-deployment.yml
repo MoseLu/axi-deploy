@@ -54,6 +54,7 @@ jobs:
     outputs:
       artifact_available: ${{ steps.check-artifact.outputs.available }}
       artifact_info: ${{ steps.check-artifact.outputs.info }}
+      run_id: ${{ steps.check-artifact.outputs.run_id }}
     
     steps:
       - name: 验证构建产物可用性
@@ -62,7 +63,6 @@ jobs:
           echo "🔍 验证构建产物可用性..."
           echo "项目名称: ${{ inputs.project }}"
           echo "源仓库: ${{ inputs.source_repo }}"
-          echo "运行ID: ${{ inputs.run_id }}"
           echo "期望的构建产物名称: dist-${{ inputs.project }}"
           echo ""
           
@@ -85,33 +85,44 @@ jobs:
             exit 1
           fi
           
-          echo "📋 检查构建产物是否存在..."
+          echo "📋 获取最近一次成功的构建产物..."
           
-          # 使用 curl 检查构建产物
-          RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}/artifacts" 2>/dev/null || echo "API调用失败")
+          # 获取最近一次成功的workflow run
+          RUNS_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs?status=completed&conclusion=success&per_page=5" 2>/dev/null || echo "API调用失败")
           
-          echo "API响应:"
-          echo "$RESPONSE" | head -20
+          echo "📊 最近的成功构建:"
+          echo "$RUNS_RESPONSE" | jq -r '.workflow_runs[] | "ID: \(.id), 状态: \(.status), 结论: \(.conclusion), 时间: \(.created_at)"' 2>/dev/null || echo "无法解析构建记录"
           
-          # 检查API响应是否包含错误
-          if echo "$RESPONSE" | grep -q '"message"'; then
-            echo "❌ API调用失败:"
-            echo "$RESPONSE" | jq -r '.message' 2>/dev/null || echo "$RESPONSE"
+          # 获取最近一次成功的run ID
+          LATEST_RUN_ID=$(echo "$RUNS_RESPONSE" | jq -r '.workflow_runs[0].id' 2>/dev/null)
+          
+          if [ "$LATEST_RUN_ID" = "null" ] || [ -z "$LATEST_RUN_ID" ]; then
+            echo "❌ 未找到成功的构建记录"
             echo "available=false" >> $GITHUB_OUTPUT
-            echo "info=API调用失败" >> $GITHUB_OUTPUT
+            echo "info=未找到成功的构建记录" >> $GITHUB_OUTPUT
             exit 1
           fi
           
+          echo "✅ 找到最近的成功构建，运行ID: $LATEST_RUN_ID"
+          
+          # 检查该run的构建产物
+          ARTIFACTS_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/$LATEST_RUN_ID/artifacts" 2>/dev/null || echo "API调用失败")
+          
+          echo "📦 构建产物列表:"
+          echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "名称: \(.name), 大小: \(.size_in_bytes) bytes"' 2>/dev/null || echo "无法解析构建产物"
+          
           # 检查是否包含目标构建产物
-          if echo "$RESPONSE" | grep -q "dist-${{ inputs.project }}"; then
+          if echo "$ARTIFACTS_RESPONSE" | grep -q "dist-${{ inputs.project }}"; then
             echo "✅ 找到构建产物: dist-${{ inputs.project }}"
             echo "available=true" >> $GITHUB_OUTPUT
             echo "info=构建产物可用" >> $GITHUB_OUTPUT
+            echo "run_id=$LATEST_RUN_ID" >> $GITHUB_OUTPUT
           else
             echo "❌ 未找到构建产物: dist-${{ inputs.project }}"
             echo "🔍 可用的构建产物:"
-            echo "$RESPONSE" | jq -r '.artifacts[].name' 2>/dev/null || echo "$RESPONSE" | grep -o '"name":"[^"]*"' | head -10
+            echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[].name' 2>/dev/null || echo "$ARTIFACTS_RESPONSE" | grep -o '"name":"[^"]*"' | head -10
             echo "available=false" >> $GITHUB_OUTPUT
             echo "info=构建产物不可用" >> $GITHUB_OUTPUT
             echo ""
@@ -215,7 +226,7 @@ jobs:
     with:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
-      run_id: ${{ inputs.run_id }}
+      run_id: ${{ needs.validate-artifact.outputs.run_id }}
       deploy_type: ${{ inputs.deploy_type }}
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
