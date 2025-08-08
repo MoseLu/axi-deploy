@@ -94,6 +94,20 @@ jobs:
             exit 1
           fi
           
+          # 验证服务器参数
+          if [ -z "${{ inputs.server_host }}" ]; then
+            echo "❌ 服务器主机地址为空"
+            exit 1
+          fi
+          if [ -z "${{ inputs.server_user }}" ]; then
+            echo "❌ 服务器用户名为空"
+            exit 1
+          fi
+          if [ -z "${{ inputs.server_port }}" ]; then
+            echo "❌ 服务器端口为空"
+            exit 1
+          fi
+          
           echo "✅ 输入参数验证通过"
 
       - name: 调试运行ID
