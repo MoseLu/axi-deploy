@@ -157,6 +157,8 @@ jobs:
           fi
           
           echo "✅ 找到最近的成功构建，运行ID: $LATEST_RUN_ID"
+          echo "🔍 构建时间信息:"
+          echo "$RUNS_RESPONSE" | jq -r '.workflow_runs[] | select(.id == '$LATEST_RUN_ID') | "创建时间: \(.created_at), 更新时间: \(.updated_at)"' 2>/dev/null || echo "无法获取时间信息"
           
           # 检查该run的构建产物
           ARTIFACTS_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
