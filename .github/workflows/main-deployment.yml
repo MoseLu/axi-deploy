@@ -125,7 +125,7 @@ jobs:
   server-init:
     needs: [parse-secrets]
     if: ${{ inputs.skip_init != 'true' }}
-    uses: MoseLu/axi-deploy/.github/workflows/server-init.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/server-init.yml@master
     with:
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
@@ -135,7 +135,7 @@ jobs:
   # 步骤3: 下载并验证构建产物（使用可复用工作流）
   download-artifact:
     needs: [parse-secrets]
-    uses: MoseLu/axi-deploy/.github/workflows/download-artifact.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/download-artifact.yml@master
     with:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
@@ -196,7 +196,7 @@ jobs:
   # 步骤5: 部署项目
   deploy-project:
     needs: [parse-secrets, download-artifact, backup-deployment]
-    uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
     with:
       project: ${{ inputs.project }}
       deploy_type: ${{ inputs.deploy_type }}
@@ -209,7 +209,7 @@ jobs:
   configure-nginx:
     needs: [deploy-project]
     if: ${{ inputs.nginx_config != '' }}
-    uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       project: ${{ inputs.project }}
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
@@ -223,7 +223,7 @@ jobs:
   start-service:
     needs: [deploy-project]
     if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
-    uses: MoseLu/axi-deploy/.github/workflows/start-service.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/start-service.yml@master
     with:
       project: ${{ inputs.project }}
       start_cmd: ${{ inputs.start_cmd }}
@@ -237,7 +237,7 @@ jobs:
   test-website:
     needs: [deploy-project, configure-nginx, start-service]
     if: ${{ inputs.test_url != '' }}
-    uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@main
+    uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
       project: ${{ inputs.project }}
       test_url: ${{ inputs.test_url }}

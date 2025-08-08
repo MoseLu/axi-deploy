@@ -6,33 +6,145 @@ Axi Deploy 是一个统一的部署中心，用于管理多个项目的自动化
 
 ## 最新更新
 
-### 🚀 工作流链重构 (v3.0)
+### 🚀 工作流链重构 (v4.0)
 
 **主要改进：**
-- ✅ 拆分为模块化的工作流链，提高可维护性
-- ✅ 完整的10步部署流程，包含所有必要步骤
+- ✅ 拆分为18个模块化工作流，提高可维护性和复用性
+- ✅ 完整的部署流程，包含核心功能和可选增强功能
 - ✅ 智能条件执行，支持可选步骤跳过
 - ✅ 全面的错误处理和重试机制
 - ✅ 支持Go、Python等后端服务启动
+- ✅ 完整的运维监控和故障恢复功能
 
 **新的工作流结构：**
+
 ```
 外部请求 → repository_dispatch_handler.yml
                 ↓
-         main-deployment.yml
-                ↓
-      deployment-orchestrator.yml
+         main-deployment.yml (主入口)
                 ↓
     ┌─────────────────────────────────┐
-    │ 1. download-artifact.yml       │ ← 检出代码、下载构建产物、显示信息
-    │ 2. upload-files.yml            │ ← 上传到服务器、验证上传
-    │ 3. deploy-project.yml          │ ← 部署到服务器
-    │ 4. configure-nginx.yml (可选)  │ ← 配置Nginx
-    │ 5. start-service.yml (可选)    │ ← 执行启动命令
-    │ 6. test-website.yml (可选)     │ ← 测试网站可访问性
-    │ 7. deployment-summary          │ ← 部署完成通知
+    │ 核心部署工作流 (MVP必需)        │
+    │ 1. parse-secrets.yml           │ ← 解析部署密钥
+    │ 2. server-init.yml             │ ← 服务器初始化
+    │ 3. download-artifact.yml       │ ← 下载构建产物
+    │ 4. backup-deployment.yml       │ ← 备份现有部署
+    │ 5. deploy-project.yml          │ ← 部署项目
+    │ 6. configure-nginx.yml (可选)  │ ← 配置Nginx
+    │ 7. start-service.yml (可选)    │ ← 启动服务
+    │ 8. test-website.yml (可选)     │ ← 测试网站
+    └─────────────────────────────────┘
+                ↓
+    ┌─────────────────────────────────┐
+    │ 运维监控工作流 (可选增强)       │
+    │ 9. health-check.yml            │ ← 健康检查
+    │ 10. diagnose.yml               │ ← 问题诊断
+    │ 11. rollback.yml               │ ← 部署回滚
+    │ 12. cleanup.yml                │ ← 清理维护
+    │ 13. deployment-orchestrator.yml│ ← 部署编排
+    │ 14. upload-files.yml           │ ← 文件上传
+    │ 15. download-and-validate.yml  │ ← 下载验证
+    │ 16. validate-artifact.yml      │ ← 产物验证
     └─────────────────────────────────┘
 ```
+
+## 工作流分类
+
+### 🎯 核心部署工作流 (MVP必需 - 8个)
+
+#### 1. `main-deployment.yml` - 主部署工作流
+- **作用**: 整个部署流程的入口点，协调所有部署步骤
+- **触发方式**: `workflow_dispatch` (手动触发)
+- **功能**: 接收部署参数并调用各个部署步骤
+
+#### 2. `parse-secrets.yml` - 解析部署密钥
+- **作用**: 解析和验证部署密钥
+- **功能**: 从JSON或base64编码的JSON中提取服务器配置
+- **输出**: server_host, server_port, server_user, server_key, deploy_center_pat
+
+#### 3. `server-init.yml` - 服务器初始化
+- **作用**: 初始化服务器环境
+- **功能**: 创建必要目录、配置用户权限、设置SSL证书
+- **输出**: init_success
+
+#### 4. `download-artifact.yml` - 下载构建产物
+- **作用**: 从源仓库下载构建产物
+- **功能**: 检出代码、下载构建产物、验证完整性、显示信息
+- **输出**: artifact_path, artifact_size
+
+#### 5. `backup-deployment.yml` - 备份部署
+- **作用**: 部署前备份现有版本
+- **功能**: 备份现有部署、清理旧备份、保留最近2个备份
+- **输出**: backup_success, backup_path
+
+#### 6. `deploy-project.yml` - 部署项目
+- **作用**: 将构建产物部署到服务器
+- **功能**: 备份现有部署、部署到目标目录、设置权限、验证结果
+- **输出**: deploy_success, deploy_path
+
+#### 7. `configure-nginx.yml` - 配置Nginx
+- **作用**: 配置Nginx反向代理和SSL证书
+- **功能**: 生成Nginx配置、验证语法、应用配置
+- **输出**: config_success
+
+#### 8. `start-service.yml` - 启动服务
+- **作用**: 启动后端服务
+- **功能**: 执行启动命令、检查服务状态、等待服务启动
+- **输出**: start_success
+
+### 🔧 配置和测试工作流 (MVP重要 - 1个)
+
+#### 9. `test-website.yml` - 测试网站
+- **作用**: 验证部署后的网站可访问性
+- **功能**: HTTP/HTTPS访问测试、Nginx配置验证、部署文件检查
+- **输出**: test_success
+
+### 🛡️ 运维监控工作流 (可选增强 - 9个)
+
+#### 10. `health-check.yml` - 健康检查
+- **作用**: 定期检查服务器和部署状态
+- **触发方式**: `schedule` (每天凌晨2点) + `workflow_dispatch`
+- **功能**: 系统信息检查、网络连接检查、关键服务检查
+
+#### 11. `diagnose.yml` - 诊断工作流
+- **作用**: 诊断部署问题
+- **触发方式**: `workflow_dispatch`
+- **功能**: 系统诊断、网络诊断、Nginx诊断、服务诊断
+
+#### 12. `rollback.yml` - 回滚部署
+- **作用**: 快速回滚到之前的版本
+- **触发方式**: `workflow_dispatch`
+- **功能**: 检查可用备份、回滚到指定版本、验证回滚结果
+
+#### 13. `cleanup.yml` - 清理工作流
+- **作用**: 清理旧的备份和日志文件
+- **触发方式**: `schedule` (每周日凌晨3点) + `workflow_dispatch`
+- **功能**: 清理旧备份、清理日志文件、清理临时文件
+
+#### 14. `deployment-orchestrator.yml` - 部署编排器
+- **作用**: 协调整个部署流程
+- **触发方式**: `workflow_call`
+- **功能**: 按顺序调用各个部署步骤
+
+#### 15. `repository_dispatch_handler.yml` - 仓库分发处理器
+- **作用**: 处理来自其他仓库的部署请求
+- **触发方式**: `repository_dispatch`
+- **功能**: 接收外部部署请求并触发主部署工作流
+
+#### 16. `upload-files.yml` - 上传文件
+- **作用**: 上传文件到服务器
+- **触发方式**: `workflow_call`
+- **功能**: 上传构建产物到服务器临时目录、验证上传结果、重试机制
+
+#### 17. `download-and-validate.yml` - 下载并验证
+- **作用**: 下载并验证构建产物
+- **触发方式**: `workflow_call`
+- **功能**: 下载构建产物、验证完整性、显示详细信息
+
+#### 18. `validate-artifact.yml` - 验证构建产物
+- **作用**: 验证构建产物的完整性
+- **触发方式**: `workflow_call`
+- **功能**: 检查构建产物、验证文件完整性、输出验证结果
 
 ## 支持的部署类型
 
@@ -46,120 +158,52 @@ Axi Deploy 是一个统一的部署中心，用于管理多个项目的自动化
 - Node.js 应用
 - Python 应用
 
-## 工作流文件说明
-
-### 主入口工作流
-
-#### `main-deployment.yml`
-- **作用**: 整个部署流程的主入口点
-- **触发方式**: `workflow_dispatch` (手动触发)
-- **功能**: 接收部署参数并调用部署编排器
-
-#### `repository_dispatch_handler.yml`
-- **作用**: 处理来自其他仓库的部署请求
-- **触发方式**: `repository_dispatch` (外部仓库触发)
-- **功能**: 接收外部部署请求并触发主部署工作流
-
-### 部署编排器
-
-#### `deployment-orchestrator.yml`
-- **作用**: 协调整个部署流程
-- **触发方式**: `workflow_call` (被其他工作流调用)
-- **功能**: 按顺序调用各个部署步骤
-
-### 核心部署步骤
-
-#### `download-artifact.yml`
-- **作用**: 下载构建产物
-- **功能**: 
-  - 检出代码
-  - 从源仓库下载构建产物
-  - 验证产物完整性
-  - 显示构建产物信息
-  - 输出产物路径和大小
-
-#### `upload-files.yml`
-- **作用**: 上传文件到服务器
-- **功能**: 
-  - 上传构建产物到服务器临时目录
-  - 验证上传结果
-  - 重试机制
-  - 输出临时目录路径
-
-#### `deploy-project.yml`
-- **作用**: 部署项目到服务器
-- **功能**:
-  - 备份现有部署
-  - 从临时目录部署到目标目录
-  - 设置文件权限
-  - 验证部署结果
-  - 清理临时目录
-  - 输出部署路径
-
-#### `configure-nginx.yml`
-- **作用**: 配置Nginx
-- **功能**:
-  - 生成Nginx配置
-  - 验证配置语法
-  - 应用配置到服务器
-
-#### `start-service.yml`
-- **作用**: 执行启动命令（后端项目）
-- **功能**:
-  - 执行自定义启动命令
-  - 检查服务状态
-  - 等待服务启动
-  - 支持Go、Python等后端服务
-
-#### `test-website.yml`
-- **作用**: 测试网站可访问性
-- **功能**:
-  - HTTP/HTTPS访问测试
-  - Nginx配置验证
-  - 部署文件检查
-  - 错误诊断
-
 ## 详细步骤说明
 
-### 步骤1: 检出代码和下载构建产物
-- ✅ 检出代码 (`actions/checkout@v4`)
-- ✅ 下载构建产物 (`dawidd6/action-download-artifact@v2`)
-- ✅ 验证构建产物完整性
+### 核心部署流程 (8步)
+
+#### 步骤1: 解析部署密钥
+- ✅ 解析JSON或base64编码的部署密钥
+- ✅ 验证必需参数 (SERVER_HOST, SERVER_PORT, SERVER_USER, SERVER_KEY, DEPLOY_CENTER_PAT)
+- ✅ 输出服务器配置信息
+
+#### 步骤2: 服务器初始化 (可选)
+- ✅ 创建必要目录结构 (/srv/apps, /srv/static, /srv/backups)
+- ✅ 配置用户权限和SSH密钥
+- ✅ 设置SSL证书和Nginx配置目录
+- ✅ 验证系统环境
+
+#### 步骤3: 下载构建产物
+- ✅ 检出代码
+- ✅ 从源仓库下载构建产物
+- ✅ 验证产物完整性
 - ✅ 显示构建产物信息
 
-### 步骤2: 上传到服务器
-- ✅ 创建服务器临时目录
-- ✅ 上传文件到服务器 (带重试机制)
-- ✅ 验证上传结果
+#### 步骤4: 备份现有部署
+- ✅ 备份现有部署目录
+- ✅ 清理旧备份文件 (保留最近2个)
+- ✅ 验证备份结果
 
-### 步骤3: 部署到服务器
-- ✅ 备份现有部署
+#### 步骤5: 部署项目
 - ✅ 从临时目录部署到目标目录
 - ✅ 设置文件权限
 - ✅ 验证部署结果
 - ✅ 清理临时目录
 
-### 步骤4: 配置Nginx (可选)
+#### 步骤6: 配置Nginx (可选)
 - ✅ 生成Nginx配置
 - ✅ 验证配置语法
 - ✅ 应用配置到服务器
 
-### 步骤5: 执行启动命令 (可选，后端项目)
+#### 步骤7: 启动服务 (可选，后端项目)
 - ✅ 执行自定义启动命令
 - ✅ 检查服务状态
 - ✅ 等待服务启动
-- ✅ 支持Go、Python等后端服务
 
-### 步骤6: 测试网站可访问性 (可选)
+#### 步骤8: 测试网站 (可选)
 - ✅ HTTP/HTTPS访问测试
 - ✅ Nginx配置验证
 - ✅ 部署文件检查
-- ✅ 错误诊断
-
-### 步骤7: 部署完成通知
-- ✅ 显示部署摘要
-- ✅ 报告各步骤执行状态
-- ✅ 显示访问信息
 
 ## 快速开始
 
@@ -221,11 +265,14 @@ jobs:
             }
         }
       test_url: https://your-domain.com/your-path/
-    secrets:
-      SERVER_HOST: ${{ secrets.SERVER_HOST }}
-      SERVER_PORT: ${{ secrets.SERVER_PORT }}
-      SERVER_USER: ${{ secrets.SERVER_USER }}
-      SERVER_KEY: ${{ secrets.SERVER_KEY }}
+      deploy_secrets: |
+        {
+          "SERVER_HOST": "${{ secrets.SERVER_HOST }}",
+          "SERVER_PORT": "${{ secrets.SERVER_PORT }}",
+          "SERVER_USER": "${{ secrets.SERVER_USER }}",
+          "SERVER_KEY": "${{ secrets.SERVER_KEY }}",
+          "DEPLOY_CENTER_PAT": "${{ secrets.DEPLOY_CENTER_PAT }}"
+        }
 ```
 
 #### 后端项目配置示例
@@ -309,11 +356,14 @@ jobs:
         }
       test_url: https://your-domain.com/
       start_cmd: sudo systemctl daemon-reload; sudo systemctl enable star-cloud.service; sudo systemctl restart star-cloud.service
-    secrets:
-      SERVER_HOST: ${{ secrets.SERVER_HOST }}
-      SERVER_PORT: ${{ secrets.SERVER_PORT }}
-      SERVER_USER: ${{ secrets.SERVER_USER }}
-      SERVER_KEY: ${{ secrets.SERVER_KEY }}
+      deploy_secrets: |
+        {
+          "SERVER_HOST": "${{ secrets.SERVER_HOST }}",
+          "SERVER_PORT": "${{ secrets.SERVER_PORT }}",
+          "SERVER_USER": "${{ secrets.SERVER_USER }}",
+          "SERVER_KEY": "${{ secrets.SERVER_KEY }}",
+          "DEPLOY_CENTER_PAT": "${{ secrets.DEPLOY_CENTER_PAT }}"
+        }
 ```
 
 ### 2. 配置服务器密钥
@@ -322,6 +372,7 @@ jobs:
 
 #### 必需的 Secrets
 - `SERVER_KEY`: 服务器SSH私钥
+- `DEPLOY_CENTER_PAT`: GitHub Personal Access Token (用于下载构建产物)
 
 #### 必需的 Variables
 - `SERVER_HOST`: 服务器地址
@@ -336,10 +387,11 @@ jobs:
 - `source_repo`: 源仓库 (格式: owner/repo)
 - `run_id`: 构建运行ID
 - `deploy_type`: 部署类型 (static/backend)
+- `deploy_secrets`: 部署密钥 (JSON格式)
 - `nginx_config`: Nginx配置（可选）
 - `test_url`: 测试URL（可选）
 - `start_cmd`: 启动命令（后端项目，可选）
-- 其他可选参数...
+- `skip_init`: 跳过服务器初始化（可选）
 
 ### 4. 外部仓库触发部署
 
@@ -356,11 +408,13 @@ await github.rest.repos.createDispatchEvent({
     project: 'my-project',
     source_repo: 'owner/repo',
     run_id: '1234567890',
-    server_host: 'your-server.com',
-    server_user: 'deploy',
-    server_key: 'your-ssh-private-key',
-    server_port: '22',
-    deploy_center_pat: 'your-github-token',
+    deploy_secrets: JSON.stringify({
+      SERVER_HOST: 'your-server.com',
+      SERVER_USER: 'deploy',
+      SERVER_KEY: 'your-ssh-private-key',
+      SERVER_PORT: '22',
+      DEPLOY_CENTER_PAT: 'your-github-token'
+    }),
     
     // 可选参数
     deploy_type: 'static',
@@ -371,45 +425,56 @@ await github.rest.repos.createDispatchEvent({
 });
 ```
 
-**支持的参数说明：**
-
-| 参数 | 类型 | 必需 | 描述 |
-|------|------|------|------|
-| `project` | string | ✅ | 项目名称 |
-| `source_repo` | string | ✅ | 源仓库 (格式: owner/repo) |
-| `run_id` | string | ✅ | 构建运行ID |
-| `server_host` | string | ✅ | 服务器地址 |
-| `server_user` | string | ✅ | 服务器用户名 |
-| `server_key` | string | ✅ | 服务器SSH私钥 |
-| `server_port` | string | ✅ | 服务器SSH端口 |
-| `deploy_type` | string | ❌ | 部署类型 (static/backend，默认: static) |
-| `nginx_config` | string | ❌ | Nginx配置 |
-| `test_url` | string | ❌ | 测试URL |
-| `start_cmd` | string | ❌ | 启动命令（后端项目） |
-| `deploy_center_pat` | string | ❌ | GitHub Token (用于下载构建产物) |
-
 ## 部署流程
 
 ### 静态项目部署流程
 
-1. **检出代码和下载构建产物** → 从源仓库下载
-2. **上传到服务器** → `/tmp/<project>/`
-3. **验证上传** → 检查文件完整性
-4. **部署到服务器** → `/srv/static/<project>/`
-5. **配置 Nginx 路由** (可选)
-6. **测试网站可访问性** (可选)
-7. **部署完成通知**
+1. **解析部署密钥** → 验证服务器配置
+2. **服务器初始化** (可选) → 创建目录结构
+3. **下载构建产物** → 从源仓库下载
+4. **备份现有部署** → 备份当前版本
+5. **部署到服务器** → `/srv/static/<project>/`
+6. **配置 Nginx 路由** (可选)
+7. **测试网站可访问性** (可选)
+8. **部署完成通知**
 
 ### 后端项目部署流程
 
-1. **检出代码和下载构建产物** → 从源仓库下载
-2. **上传到服务器** → `/tmp/<project>/`
-3. **验证上传** → 检查文件完整性
-4. **部署到服务器** → `/srv/apps/<project>/`
-5. **配置 Nginx 路由** (可选)
-6. **执行启动命令** (可选) → 启动Go/Python服务
-7. **测试网站可访问性** (可选)
-8. **部署完成通知**
+1. **解析部署密钥** → 验证服务器配置
+2. **服务器初始化** (可选) → 创建目录结构
+3. **下载构建产物** → 从源仓库下载
+4. **备份现有部署** → 备份当前版本
+5. **部署到服务器** → `/srv/apps/<project>/`
+6. **配置 Nginx 路由** (可选)
+7. **执行启动命令** (可选) → 启动Go/Python服务
+8. **测试网站可访问性** (可选)
+9. **部署完成通知**
+
+## 运维功能
+
+### 健康检查
+```bash
+# 手动触发健康检查
+gh workflow run health-check.yml -f check_type=all
+```
+
+### 问题诊断
+```bash
+# 手动触发诊断
+gh workflow run diagnose.yml -f diagnose_type=all
+```
+
+### 部署回滚
+```bash
+# 手动触发回滚
+gh workflow run rollback.yml -f project=my-project -f deploy_type=static
+```
+
+### 清理维护
+```bash
+# 手动触发清理
+gh workflow run cleanup.yml -f cleanup_type=all
+```
 
 ## 验证部署
 
@@ -463,11 +528,14 @@ curl -I https://your-domain.com/
 │       ├── front/
 │       ├── uploads/
 │       └── logs/
-└── static/                  # 静态项目目录
-    └── axi-docs/           # 静态项目
-        ├── index.html
-        ├── assets/
-        └── ...
+├── static/                  # 静态项目目录
+│   └── axi-docs/           # 静态项目
+│       ├── index.html
+│       ├── assets/
+│       └── ...
+└── backups/                 # 备份目录
+    ├── apps/               # 后端项目备份
+    └── static/             # 静态项目备份
 
 /www/server/nginx/conf/conf.d/redamancy/
 ├── 00-main.conf           # 主配置文件
@@ -478,14 +546,13 @@ curl -I https://your-domain.com/
 ## 功能特性
 
 ### 1. 完整的部署流程
-- ✅ 检出代码
+- ✅ 解析部署密钥
+- ✅ 服务器初始化
 - ✅ 下载构建产物
-- ✅ 显示构建产物信息
-- ✅ 上传到服务器
-- ✅ 验证上传
+- ✅ 备份现有部署
 - ✅ 部署到服务器
 - ✅ 配置Nginx
-- ✅ 执行启动命令（后端项目）
+- ✅ 启动服务（后端项目）
 - ✅ 测试网站可访问性
 - ✅ 部署完成通知
 
@@ -506,15 +573,22 @@ curl -I https://your-domain.com/
 - 系统服务管理
 - 服务状态检查
 
+### 5. 运维监控功能
+- 定期健康检查
+- 问题诊断和排查
+- 部署回滚功能
+- 自动清理维护
+
 ## 优势
 
-1. **模块化**: 每个工作流专注于特定功能
+1. **模块化**: 18个工作流各司其职，职责清晰
 2. **可重用**: 各个步骤可以独立调用
 3. **可维护**: 问题定位更容易
 4. **灵活性**: 可以根据需要跳过某些步骤
 5. **可扩展**: 易于添加新的部署步骤
-6. **完整性**: 包含原通用工作流的所有功能
+6. **完整性**: 包含核心功能和可选增强功能
 7. **可靠性**: 包含重试机制和错误处理
+8. **运维友好**: 提供完整的运维监控功能
 
 ## 故障排除
 
@@ -553,7 +627,7 @@ curl -I https://your-domain.com/
 1. 查看各个工作流的执行日志
 2. 检查 `deployment-summary` 步骤的输出
 3. 验证服务器连接和权限
-4. 使用 `test-website.yml` 进行诊断
+4. 使用 `diagnose.yml` 进行诊断
 5. 检查Nginx错误日志
 6. 查看服务器临时目录和部署目录
 
@@ -566,18 +640,12 @@ curl -I https://your-domain.com/
 | `project` | string | ✅ | 项目名称 |
 | `source_repo` | string | ✅ | 源仓库 (格式: owner/repo) |
 | `run_id` | string | ✅ | 构建运行ID |
+| `deploy_secrets` | string | ✅ | 部署密钥 (JSON格式) |
 | `deploy_type` | choice | ✅ | 部署类型 (static/backend) |
 | `nginx_config` | string | ❌ | Nginx配置 |
 | `test_url` | string | ❌ | 测试URL |
 | `start_cmd` | string | ❌ | 启动命令（后端项目） |
-| `domain` | string | ❌ | 域名 |
-| `apps_root` | string | ❌ | 应用目录路径 |
-| `static_root` | string | ❌ | 静态文件目录路径 |
-| `backup_root` | string | ❌ | 备份根目录 |
-| `run_user` | string | ❌ | 运行用户 |
-| `nginx_conf_dir` | string | ❌ | Nginx配置目录 |
-| `backend_port` | string | ❌ | 后端服务端口 |
-| `service_name` | string | ❌ | 服务名称 |
+| `skip_init` | boolean | ❌ | 跳过服务器初始化 |
 
 ## 示例项目
 
@@ -615,12 +683,17 @@ MIT License
 | `project` | string | ✅ | 项目名称 |
 | `source_repo` | string | ✅ | 源仓库 (格式: owner/repo) |
 | `run_id` | string | ✅ | 构建运行ID |
-| `server_host` | string | ✅ | 服务器地址 |
-| `server_user` | string | ✅ | 服务器用户名 |
-| `server_key` | string | ✅ | 服务器SSH私钥 |
-| `server_port` | string | ✅ | 服务器SSH端口 |
-| `deploy_center_pat` | string | ✅ | GitHub Token (用于下载构建产物) |
+| `deploy_secrets` | string | ✅ | 部署密钥 (JSON格式) |
 | `deploy_type` | string | ❌ | 部署类型 (static/backend，默认: static) |
 | `nginx_config` | string | ❌ | Nginx配置 |
 | `test_url` | string | ❌ | 测试URL |
 | `start_cmd` | string | ❌ | 启动命令（后端项目） |
+| `skip_init` | boolean | ❌ | 跳过服务器初始化 |
+
+### 工作流分类总结
+
+- **🎯 核心部署工作流 (8个)**：MVP必需，覆盖完整部署流程
+- **🔧 配置和测试工作流 (1个)**：MVP重要，质量保证
+- **🛡️ 运维监控工作流 (9个)**：可选增强，提供运维支持
+
+这种设计既保证了核心功能的完整性，又为未来的扩展提供了灵活性。
