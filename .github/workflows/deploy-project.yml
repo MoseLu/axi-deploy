@@ -1,7 +1,5 @@
 name: Deploy Project
 
-description: "部署项目到服务器，包含备份和回滚机制"
-
 on:
   workflow_call:
     inputs:

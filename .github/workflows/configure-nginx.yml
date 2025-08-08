@@ -1,7 +1,5 @@
 name: Configure Nginx
 
-description: "配置Nginx，包含配置生成和验证"
-
 on:
   workflow_call:
     inputs:

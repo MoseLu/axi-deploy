@@ -1,0 +1,114 @@
+name: Backup Deployment
+
+description: "备份现有部署 - 在部署新版本前备份现有部署"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      deploy_type:
+        required: true
+        type: string
+        description: "部署类型 (backend/static)"
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+      apps_root:
+        required: false
+        type: string
+        description: "应用目录路径"
+        default: "/srv/apps"
+      static_root:
+        required: false
+        type: string
+        description: "静态文件目录路径"
+        default: "/srv/static"
+      backup_root:
+        required: false
+        type: string
+        description: "备份根目录"
+        default: "/srv/backups"
+    outputs:
+      backup_success:
+        description: "备份是否成功"
+        value: ${{ jobs.backup.outputs.backup_success }}
+      backup_path:
+        description: "备份路径"
+        value: ${{ jobs.backup.outputs.backup_path }}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    outputs:
+      backup_success: ${{ steps.set-outputs.outputs.backup_success }}
+      backup_path: ${{ steps.set-outputs.outputs.backup_path }}
+    
+    steps:
+      - name: 备份现有部署
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "📋 备份现有部署..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            DEPLOY_PATH="/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/$PROJECT"
+            
+            # 创建项目专用备份目录
+            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/apps"
+            else
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 备份现有部署目录（如果存在）
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "📋 备份现有部署目录: $DEPLOY_PATH"
+              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
+              echo "✅ 现有部署目录已备份到: $BACKUP_NAME"
+              
+              # 清理旧的备份文件，只保留最近2个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +3)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近2个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 部署目录不存在，无需备份: $DEPLOY_PATH"
+            fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "backup_success=true" >> $GITHUB_OUTPUT
+          echo "backup_path=${{ inputs.backup_root || '/srv/backups' }}/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}" >> $GITHUB_OUTPUT
+          echo "✅ 备份完成"

@@ -1,4 +1,6 @@
-name: Download Artifact
+name: Download and Validate Artifact
+
+description: "下载并验证构建产物 - 从源仓库下载构建产物并验证完整性"
 
 on:
   workflow_call:
@@ -22,26 +24,50 @@ on:
     outputs:
       artifact_path:
         description: "构建产物路径"
-        value: ${{ jobs.download.outputs.artifact_path }}
+        value: ${{ jobs.download-validate.outputs.artifact_path }}
       artifact_size:
         description: "构建产物大小"
-        value: ${{ jobs.download.outputs.artifact_size }}
+        value: ${{ jobs.download-validate.outputs.artifact_size }}
+      artifact_name:
+        description: "构建产物名称"
+        value: ${{ jobs.download-validate.outputs.artifact_name }}
 
 jobs:
-  download:
+  download-validate:
     runs-on: ubuntu-latest
     outputs:
       artifact_path: ${{ steps.set-outputs.outputs.artifact_path }}
       artifact_size: ${{ steps.set-outputs.outputs.artifact_size }}
+      artifact_name: ${{ steps.set-project-info.outputs.artifact_name }}
     
     steps:
+      - name: 设置项目信息
+        id: set-project-info
+        run: |
+          echo "🔧 设置项目信息..."
+          
+          # 从输入参数获取项目信息
+          PROJECT="${{ inputs.project }}"
+          SOURCE_REPO="${{ inputs.source_repo }}"
+          RUN_ID="${{ inputs.run_id }}"
+          echo "📋 从workflow_dispatch输入获取项目信息:"
+          echo "  项目名称: $PROJECT"
+          echo "  源仓库: $SOURCE_REPO"
+          echo "  运行ID: $RUN_ID"
+          
+          # 根据项目名称确定artifact名称
+          ARTIFACT_NAME="dist-$PROJECT"
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          
+          echo "✅ 项目信息设置完成"
+
       - name: 检出代码
         uses: actions/checkout@v4
 
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
-          name: dist-${{ inputs.project }}
+          name: ${{ steps.set-project-info.outputs.artifact_name }}
           path: ./
           github-token: ${{ inputs.github_token }}
           repository: ${{ inputs.source_repo }}

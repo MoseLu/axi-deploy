@@ -1,0 +1,240 @@
+name: Server Initialization
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        required: false
+        type: string
+        description: "域名"
+        default: "redamancy.com.cn"
+      run_user:
+        required: false
+        type: string
+        description: "运行用户"
+        default: "deploy"
+      apps_root:
+        required: false
+        type: string
+        description: "应用目录"
+        default: "/srv/apps"
+      static_root:
+        required: false
+        type: string
+        description: "静态目录"
+        default: "/srv/static"
+      nginx_conf_dir:
+        required: false
+        type: string
+        description: "Nginx配置目录"
+        default: "/www/server/nginx/conf/conf.d/redamancy"
+      cert_src:
+        required: false
+        type: string
+        description: "证书源目录"
+        default: "/www/server/panel/vhost/cert/redamancy.com.cn"
+      cert_dst:
+        required: false
+        type: string
+        description: "证书目标目录"
+        default: "/www/server/nginx/ssl/redamancy"
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+    outputs:
+      init_success:
+        description: "初始化是否成功"
+        value: ${{ jobs.init.outputs.init_success }}
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      init_success: ${{ steps.set-outputs.outputs.init_success }}
+    
+    steps:
+      - name: 服务器初始化
+        id: server-init
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🚀 开始服务器初始化..."
+            
+            # 获取输入参数
+            DOMAIN="${{ inputs.domain }}"
+            RUN_USER="${{ inputs.run_user }}"
+            APPS_ROOT="${{ inputs.apps_root }}"
+            STATIC_ROOT="${{ inputs.static_root }}"
+            NGINX_CONF_DIR="${{ inputs.nginx_conf_dir }}"
+            CERT_SRC="${{ inputs.cert_src }}"
+            CERT_DST="${{ inputs.cert_dst }}"
+            
+            echo "📋 初始化配置:"
+            echo "- 域名: $DOMAIN"
+            echo "- 运行用户: $RUN_USER"
+            echo "- 应用目录: $APPS_ROOT"
+            echo "- 静态目录: $STATIC_ROOT"
+            echo "- Nginx配置: $NGINX_CONF_DIR"
+            echo "- 证书源: $CERT_SRC"
+            echo "- 证书目标: $CERT_DST"
+            
+            # 0. 前置检查
+            echo "🔍 前置检查..."
+            if ! command -v nginx &> /dev/null; then
+              echo "❌ Nginx未安装，无法继续初始化"
+              exit 1
+            fi
+            echo "✅ Nginx已安装: $(nginx -v)"
+            
+            # 1. 创建业务运行用户（灾后自愈）
+            echo "👤 检查业务运行用户..."
+            if ! id "$RUN_USER" &>/dev/null; then
+              echo "🆕 创建用户 $RUN_USER..."
+              sudo useradd -m -s /bin/bash $RUN_USER
+              echo "✅ 用户 $RUN_USER 创建完成"
+            else
+              echo "✅ 用户 $RUN_USER 已存在"
+            fi
+            
+            # 2. 创建所需目录（灾后自愈）
+            echo "📁 检查并创建目录..."
+            sudo mkdir -p $APPS_ROOT $STATIC_ROOT $NGINX_CONF_DIR $CERT_DST
+            sudo chown $RUN_USER:$RUN_USER $APPS_ROOT $STATIC_ROOT
+            sudo chmod 755 $NGINX_CONF_DIR $CERT_DST
+            echo "✅ 目录结构检查完成"
+            
+            # 3. 软链宝塔证书（健康巡检）
+            echo "🔗 检查证书软链..."
+            if [ ! -d "$CERT_SRC" ]; then
+              echo "❌ 证书源目录不存在: $CERT_SRC"
+              echo "请确保宝塔面板已为域名 $DOMAIN 配置SSL证书"
+              exit 1
+            fi
+            
+            # 检查并重新创建软链
+            if [ -f "$CERT_SRC/fullchain.pem" ]; then
+              sudo ln -sf $CERT_SRC/fullchain.pem $CERT_DST/fullchain.pem
+              echo "✅ 软链 fullchain.pem 完成"
+            else
+              echo "❌ 证书文件不存在: $CERT_SRC/fullchain.pem"
+              exit 1
+            fi
+            
+            if [ -f "$CERT_SRC/privkey.pem" ]; then
+              sudo ln -sf $CERT_SRC/privkey.pem $CERT_DST/privkey.pem
+              echo "✅ 软链 privkey.pem 完成"
+            else
+              echo "❌ 私钥文件不存在: $CERT_SRC/privkey.pem"
+              exit 1
+            fi
+            
+            # 4. 写入/更新主配置（配置变更）
+            echo "📝 更新主配置文件..."
+            MAIN_CONF="$NGINX_CONF_DIR/00-main.conf"
+            
+            # 创建主配置文件备份目录
+            MAIN_BACKUP_DIR="$NGINX_CONF_DIR/backups/main"
+            echo "📁 创建主配置文件备份目录: $MAIN_BACKUP_DIR"
+            sudo mkdir -p "$MAIN_BACKUP_DIR"
+            sudo chmod 755 "$MAIN_BACKUP_DIR"
+            
+            # 备份现有主配置文件（如果存在）
+            if [ -f "$MAIN_CONF" ]; then
+              echo "📋 备份现有主配置文件: $MAIN_CONF"
+              MAIN_BACKUP_FILE="$MAIN_BACKUP_DIR/00-main.conf.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp "$MAIN_CONF" "$MAIN_BACKUP_FILE"
+              echo "✅ 主配置文件已备份到: $MAIN_BACKUP_FILE"
+            else
+              echo "📋 主配置文件不存在，将创建新文件"
+            fi
+            
+            # 检查是否需要重新生成配置
+            if [ ! -f "$MAIN_CONF" ] || [ "$(grep -c 'location ~ \^/\(?!docs|api|health|uploads|static|\$\)' $MAIN_CONF 2>/dev/null || echo 0)" -gt 0 ]; then
+              echo "🔄 重新生成主配置文件..."
+              sudo tee $MAIN_CONF <<'EOF'
+            server {
+                listen 443 ssl;
+                server_name redamancy.com.cn;
+                http2 on;
+            
+                ssl_certificate     /www/server/nginx/ssl/redamancy/fullchain.pem;
+                ssl_certificate_key /www/server/nginx/ssl/redamancy/privkey.pem;
+            
+                client_max_body_size 100m;
+            
+                # 这里自动加载 route-*.conf（项目路由）——主配置永远不用再改
+                include /www/server/nginx/conf/conf.d/redamancy/route-*.conf;
+            }
+            
+            server {
+                listen 80;
+                server_name redamancy.com.cn;
+                
+                # HTTP到HTTPS重定向
+                return 301 https://$host$request_uri;
+            }
+            EOF
+              echo "✅ 主配置文件已更新"
+            else
+              echo "✅ 主配置文件无需更新"
+            fi
+            
+            # 5. 检查并重载Nginx（健康巡检）
+            echo "🔄 检查Nginx配置..."
+            if sudo nginx -t; then
+              echo "✅ Nginx配置语法检查通过"
+            else
+              echo "❌ Nginx配置语法错误"
+              echo "配置错误详情:"
+              sudo nginx -t 2>&1
+              exit 1
+            fi
+            
+            echo "🔄 尝试重载Nginx..."
+            if pgrep nginx > /dev/null; then
+              echo "✅ Nginx进程正在运行，尝试重载..."
+              if sudo systemctl reload nginx; then
+                echo "✅ Nginx热加载完成"
+              else
+                echo "❌ Nginx重载失败，尝试重启..."
+                if sudo systemctl restart nginx; then
+                  echo "✅ Nginx重启成功"
+                else
+                  echo "❌ Nginx重启失败"
+                  exit 1
+                fi
+              fi
+            else
+              echo "⚠️  Nginx进程未运行，尝试启动..."
+              if sudo systemctl start nginx; then
+                echo "✅ Nginx启动成功"
+              else
+                echo "❌ Nginx启动失败"
+                exit 1
+              fi
+            fi
+            
+            echo "✅ 服务器初始化完成！"
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "init_success=true" >> $GITHUB_OUTPUT
+          echo "✅ 服务器初始化完成"

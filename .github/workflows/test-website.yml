@@ -1,7 +1,5 @@
 name: Test Website
 
-description: "测试网站可访问性和配置验证"
-
 on:
   workflow_call:
     inputs:

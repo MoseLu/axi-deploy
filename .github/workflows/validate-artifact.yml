@@ -1,4 +1,6 @@
-name: Download Artifact
+name: Validate Artifact
+
+description: "验证构建产物 - 检查下载的构建产物是否完整和有效"
 
 on:
   workflow_call:
@@ -7,46 +9,27 @@ on:
         required: true
         type: string
         description: "项目名称"
-      source_repo:
-        required: true
+      artifact_path:
+        required: false
         type: string
-        description: "源仓库 (owner/repo)"
-      run_id:
-        required: true
-        type: string
-        description: "构建运行ID"
-      github_token:
-        required: true
-        type: string
-        description: "GitHub Token"
+        description: "构建产物路径"
+        default: ""
     outputs:
       artifact_path:
-        description: "构建产物路径"
-        value: ${{ jobs.download.outputs.artifact_path }}
+        description: "验证后的构建产物路径"
+        value: ${{ jobs.validate.outputs.artifact_path }}
       artifact_size:
         description: "构建产物大小"
-        value: ${{ jobs.download.outputs.artifact_size }}
+        value: ${{ jobs.validate.outputs.artifact_size }}
 
 jobs:
-  download:
+  validate:
     runs-on: ubuntu-latest
     outputs:
       artifact_path: ${{ steps.set-outputs.outputs.artifact_path }}
       artifact_size: ${{ steps.set-outputs.outputs.artifact_size }}
     
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 下载构建产物
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ inputs.project }}
-          path: ./
-          github-token: ${{ inputs.github_token }}
-          repository: ${{ inputs.source_repo }}
-          run-id: ${{ inputs.run_id }}
-
       - name: 检查下载结果
         run: |
           echo "🔍 检查下载结果..."

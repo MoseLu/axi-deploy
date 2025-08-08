@@ -1,7 +1,5 @@
 name: Start Service
 
-description: "执行启动命令（后端项目）"
-
 on:
   workflow_call:
     inputs:
