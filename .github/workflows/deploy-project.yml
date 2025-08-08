@@ -242,6 +242,35 @@ jobs:
             exit 1
           fi
 
+      - name: 调试SSH参数
+        run: |
+          echo "🔍 调试SSH连接参数..."
+          echo "服务器主机: '${{ inputs.server_host }}'"
+          echo "服务器用户: '${{ inputs.server_user }}'"
+          echo "服务器端口: '${{ inputs.server_port }}'"
+          echo "SSH密钥长度: $(echo '${{ inputs.server_key }}' | wc -c)"
+          echo "SSH密钥是否为空: $([ -z '${{ inputs.server_key }}' ] && echo '是' || echo '否')"
+          
+          # 验证必需参数
+          if [ -z "${{ inputs.server_host }}" ]; then
+            echo "🚨 服务器主机地址为空"
+            exit 1
+          fi
+          if [ -z "${{ inputs.server_user }}" ]; then
+            echo "🚨 服务器用户名为空"
+            exit 1
+          fi
+          if [ -z "${{ inputs.server_port }}" ]; then
+            echo "🚨 服务器端口为空"
+            exit 1
+          fi
+          if [ -z "${{ inputs.server_key }}" ]; then
+            echo "🚨 SSH密钥为空"
+            exit 1
+          fi
+          
+          echo "✅ SSH参数验证通过"
+
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
         with:
