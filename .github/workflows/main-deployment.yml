@@ -96,12 +96,14 @@ jobs:
             exit 1
           fi
           
-          # 设置输出
-          echo "server_host=$SERVER_HOST" >> $GITHUB_OUTPUT
-          echo "server_user=$SERVER_USER" >> $GITHUB_OUTPUT
-          echo "server_key=$SERVER_KEY" >> $GITHUB_OUTPUT
-          echo "server_port=$SERVER_PORT" >> $GITHUB_OUTPUT
-          echo "deploy_center_pat=$DEPLOY_CENTER_PAT" >> $GITHUB_OUTPUT
+          # 设置输出 - 使用printf避免特殊字符问题
+          printf "server_host=%s\n" "$SERVER_HOST" >> $GITHUB_OUTPUT
+          printf "server_user=%s\n" "$SERVER_USER" >> $GITHUB_OUTPUT
+          printf "server_port=%s\n" "$SERVER_PORT" >> $GITHUB_OUTPUT
+          printf "deploy_center_pat=%s\n" "$DEPLOY_CENTER_PAT" >> $GITHUB_OUTPUT
+          
+          # 对于包含特殊字符的SERVER_KEY，直接存储原始值
+          printf "server_key=%s\n" "$SERVER_KEY" >> $GITHUB_OUTPUT
           
           echo "✅ 部署密钥解析完成"
           echo "- 主机: $SERVER_HOST"
@@ -463,7 +465,8 @@ jobs:
           echo "✅ 部署完成"
 
   configure-nginx:
-    needs: deploy-project
+    needs: [deploy-project]
+    if: ${{ inputs.nginx_config != '' }}
     uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       project: ${{ inputs.project }}
