@@ -357,7 +357,7 @@ jobs:
 
   # 步骤7: 测试网站（可选）
   test-website:
-    needs: [parse-secrets, deploy-project, configure-nginx, start-service]
+    needs: [parse-secrets, deploy-project, start-service]
     if: ${{ inputs.test_url != '' }}
     uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
@@ -368,6 +368,9 @@ jobs:
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      apps_root: "/srv/apps"
+      static_root: "/srv/static"
+      nginx_conf_dir: "/www/server/nginx/conf/conf.d/redamancy"
 
   # 步骤8: 部署完成总结
   deployment-summary:
