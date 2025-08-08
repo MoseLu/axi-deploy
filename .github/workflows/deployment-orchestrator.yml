@@ -104,7 +104,7 @@ on:
 
 jobs:
   download-artifact:
-    uses: ./.github/workflows/download-artifact.yml
+    uses: MoseLu/axi-deploy/.github/workflows/download-artifact.yml@master
     with:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
@@ -113,7 +113,7 @@ jobs:
 
   upload-files:
     needs: download-artifact
-    uses: ./.github/workflows/upload-files.yml
+    uses: MoseLu/axi-deploy/.github/workflows/upload-files.yml@master
     with:
       project: ${{ inputs.project }}
       server_host: ${{ inputs.server_host }}
@@ -125,7 +125,7 @@ jobs:
 
   deploy-project:
     needs: upload-files
-    uses: ./.github/workflows/deploy-project.yml
+    uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
     with:
       project: ${{ inputs.project }}
       deploy_type: ${{ inputs.deploy_type }}
@@ -141,7 +141,7 @@ jobs:
   configure-nginx:
     needs: deploy-project
     if: ${{ inputs.nginx_config != '' }}
-    uses: ./.github/workflows/configure-nginx.yml
+    uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       project: ${{ inputs.project }}
       nginx_config: ${{ inputs.nginx_config }}
@@ -155,11 +155,12 @@ jobs:
       static_root: ${{ inputs.static_root }}
       backend_port: ${{ inputs.backend_port }}
       service_name: ${{ inputs.service_name }}
+      deploy_type: ${{ inputs.deploy_type }}
 
   start-service:
     needs: [deploy-project, configure-nginx]
     if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
-    uses: ./.github/workflows/start-service.yml
+    uses: MoseLu/axi-deploy/.github/workflows/start-service.yml@master
     with:
       project: ${{ inputs.project }}
       start_cmd: ${{ inputs.start_cmd }}
@@ -173,7 +174,7 @@ jobs:
   test-website:
     needs: [deploy-project, configure-nginx, start-service]
     if: ${{ inputs.test_url != '' }}
-    uses: ./.github/workflows/test-website.yml
+    uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
       project: ${{ inputs.project }}
       test_url: ${{ inputs.test_url }}
