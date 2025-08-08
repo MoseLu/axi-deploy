@@ -130,6 +130,29 @@ jobs:
           echo "🔍 所有文件和目录:"
           find . -type f -maxdepth 2
           find . -type d -maxdepth 2
+          
+          # 如果下载失败，提供详细的调试信息
+          if [ "${{ steps.download-artifact.outcome }}" == "failure" ]; then
+            echo ""
+            echo "🚨 下载失败，详细调试信息:"
+            echo "- 项目名称: ${{ inputs.project }}"
+            echo "- 源仓库: ${{ inputs.source_repo }}"
+            echo "- 运行ID: ${{ inputs.run_id }}"
+            echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
+            echo "- GitHub Token: ${{ inputs.deploy_center_pat != '' && '已提供' || '未提供' }}"
+            echo ""
+            echo "🔧 可能的原因:"
+            echo "1. 构建产物名称不匹配"
+            echo "2. 构建产物已过期"
+            echo "3. GitHub Token权限不足"
+            echo "4. 源仓库或运行ID错误"
+            echo ""
+            echo "🔍 建议检查:"
+            echo "1. 访问 https://github.com/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}"
+            echo "2. 查看构建产物列表"
+            echo "3. 确认构建产物名称"
+            exit 1
+          fi
 
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3

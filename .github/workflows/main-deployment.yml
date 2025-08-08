@@ -94,6 +94,15 @@ jobs:
           echo "API响应:"
           echo "$RESPONSE" | head -20
           
+          # 检查API响应是否包含错误
+          if echo "$RESPONSE" | grep -q '"message"'; then
+            echo "❌ API调用失败:"
+            echo "$RESPONSE" | jq -r '.message' 2>/dev/null || echo "$RESPONSE"
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "info=API调用失败" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
           # 检查是否包含目标构建产物
           if echo "$RESPONSE" | grep -q "dist-${{ inputs.project }}"; then
             echo "✅ 找到构建产物: dist-${{ inputs.project }}"
@@ -102,7 +111,7 @@ jobs:
           else
             echo "❌ 未找到构建产物: dist-${{ inputs.project }}"
             echo "🔍 可用的构建产物:"
-            echo "$RESPONSE" | grep -o '"name":"[^"]*"' | head -10
+            echo "$RESPONSE" | jq -r '.artifacts[].name' 2>/dev/null || echo "$RESPONSE" | grep -o '"name":"[^"]*"' | head -10
             echo "available=false" >> $GITHUB_OUTPUT
             echo "info=构建产物不可用" >> $GITHUB_OUTPUT
             echo ""
