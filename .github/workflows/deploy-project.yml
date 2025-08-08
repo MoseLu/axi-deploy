@@ -71,6 +71,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      packages: read
     outputs:
       deploy_success: ${{ steps.set-outputs.outputs.deploy_success }}
       deploy_path: ${{ steps.set-outputs.outputs.deploy_path }}
@@ -153,9 +157,9 @@ jobs:
             USER_LOGIN=$(echo "$RESPONSE" | jq -r '.login // empty' 2>/dev/null)
             echo "✅ Token有效，用户: $USER_LOGIN"
           else
-            echo "❌ Token无效或权限不足"
+            echo "⚠️ Token权限测试失败，但继续尝试下载构建产物"
             echo "API响应: $RESPONSE"
-            exit 1
+            echo "🔍 这可能是正常的，因为内置Token可能无法访问用户信息，但仍可以下载构建产物"
           fi
           
           # 测试对目标仓库的访问权限
@@ -166,12 +170,12 @@ jobs:
             REPO_NAME=$(echo "$REPO_RESPONSE" | jq -r '.name // empty' 2>/dev/null)
             echo "✅ 可以访问仓库: $REPO_NAME"
           else
-            echo "❌ 无法访问仓库: ${{ inputs.source_repo }}"
+            echo "⚠️ 仓库访问测试失败，但继续尝试下载构建产物"
             echo "API响应: $REPO_RESPONSE"
-            exit 1
+            echo "🔍 这可能是正常的，因为内置Token可能无法访问某些仓库信息，但仍可以下载构建产物"
           fi
           
-          echo "✅ Token权限测试通过"
+          echo "✅ Token权限测试完成，继续下载构建产物"
 
       - name: 下载构建产物
         uses: actions/download-artifact@v4

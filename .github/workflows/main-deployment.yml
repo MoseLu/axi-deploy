@@ -51,6 +51,10 @@ jobs:
   # 步骤1: 验证构建产物可用性
   validate-artifact:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      packages: read
     outputs:
       artifact_available: ${{ steps.check-artifact.outputs.available }}
       artifact_info: ${{ steps.check-artifact.outputs.info }}
@@ -201,6 +205,10 @@ jobs:
   parse-secrets:
     needs: [validate-artifact]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      packages: read
     outputs:
       server_host: ${{ steps.parse-secrets.outputs.server_host }}
       server_port: ${{ steps.parse-secrets.outputs.server_port }}
