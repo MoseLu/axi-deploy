@@ -86,9 +86,16 @@ jobs:
           script: |
             echo "🌐 测试网站可访问性..."
             echo "测试URL: ${{ inputs.test_url }}"
+            echo "部署类型: ${{ inputs.deploy_type }}"
             
-            # 等待一段时间让服务完全启动
-            sleep 10
+            # 根据部署类型调整等待时间
+            if [ "${{ inputs.deploy_type }}" = "backend" ]; then
+              echo "📋 后端项目，等待服务启动..."
+              sleep 15
+            else
+              echo "📋 静态项目，等待nginx配置生效..."
+              sleep 10
+            fi
             
             # 从test_url中提取域名和路径
             TEST_URL="${{ inputs.test_url }}"
@@ -127,12 +134,21 @@ jobs:
                 echo "🚨 网站测试失败 - HTTPS返回状态码: $HTTPS_STATUS"
                 echo "🚨 工作流错误：网站未返回200状态码，直接退出工作流"
                 echo "可能的原因:"
-                echo "1. 域名解析问题"
-                echo "2. 服务器防火墙设置"
-                echo "3. Nginx配置问题"
-                echo "4. SSL证书问题"
-                echo "5. 后端服务未启动"
-                echo "6. 项目部署失败"
+                if [ "${{ inputs.deploy_type }}" = "backend" ]; then
+                  echo "1. 域名解析问题"
+                  echo "2. 服务器防火墙设置"
+                  echo "3. Nginx配置问题"
+                  echo "4. SSL证书问题"
+                  echo "5. 后端服务未启动"
+                  echo "6. 项目部署失败"
+                else
+                  echo "1. 域名解析问题"
+                  echo "2. 服务器防火墙设置"
+                  echo "3. Nginx配置问题"
+                  echo "4. SSL证书问题"
+                  echo "5. 静态文件部署失败"
+                  echo "6. 项目部署失败"
+                fi
                 
                 # 尝试获取更多调试信息
                 echo "🔍 调试信息:"
