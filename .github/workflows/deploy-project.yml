@@ -92,6 +92,20 @@ jobs:
           
           echo "✅ 输入参数验证通过"
 
+      - name: 调试运行ID
+        run: |
+          echo "🔍 调试运行ID..."
+          echo "接收到的运行ID: '${{ inputs.run_id }}'"
+          echo "运行ID长度: ${#{{ inputs.run_id }}}"
+          echo "运行ID是否为空: ${{ inputs.run_id == '' && '是' || '否' }}"
+          
+          if [ -z "${{ inputs.run_id }}" ]; then
+            echo "🚨 运行ID为空，这可能是问题所在"
+            exit 1
+          fi
+          
+          echo "✅ 运行ID验证通过"
+
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
