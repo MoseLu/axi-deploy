@@ -38,7 +38,7 @@ on:
         required: false
         type: string
       deploy_secrets:
-        description: '部署密钥 (JSON格式: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})'
+        description: '部署密钥 (JSON格式或base64编码的JSON: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})'
         required: true
         type: string
 
@@ -60,6 +60,12 @@ jobs:
         run: |
           echo "🔍 解析部署密钥..."
           DEPLOY_SECRETS='${{ inputs.deploy_secrets }}'
+          
+          # 检查是否为base64编码
+          if echo "$DEPLOY_SECRETS" | grep -q '^[A-Za-z0-9+/]*=*$'; then
+            echo "📦 检测到base64编码的部署密钥，正在解码..."
+            DEPLOY_SECRETS=$(echo "$DEPLOY_SECRETS" | base64 -d)
+          fi
           
           # 使用jq解析JSON配置
           SERVER_HOST=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_HOST')
