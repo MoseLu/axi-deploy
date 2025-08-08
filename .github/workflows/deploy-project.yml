@@ -102,6 +102,46 @@ jobs:
           run-id: ${{ inputs.run_id }}
         continue-on-error: true
 
+      - name: 检查下载状态
+        run: |
+          echo "🔍 检查下载状态..."
+          if [ ${{ steps.download-artifact.outcome }} == 'failure' ]; then
+            echo "❌ 构建产物下载失败"
+            echo "🔍 错误详情:"
+            echo "- 项目名称: ${{ inputs.project }}"
+            echo "- 源仓库: ${{ inputs.source_repo }}"
+            echo "- 运行ID: ${{ inputs.run_id }}"
+            echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
+            echo "- GitHub Token: ${{ inputs.deploy_center_pat != '' && '已提供' || '未提供' }}"
+            echo ""
+            echo "🚨 可能的原因:"
+            echo "1. 构建产物已过期 (retention-days)"
+            echo "2. 构建产物名称不匹配"
+            echo "3. 源仓库或运行ID错误"
+            echo "4. GitHub Token权限不足"
+            echo "5. 构建产物上传失败"
+            echo ""
+            echo "🔧 解决方案:"
+            echo "1. 重新触发源仓库的构建工作流"
+            echo "2. 检查构建产物名称是否为 'dist-${{ inputs.project }}'"
+            echo "3. 验证GitHub Token权限"
+            echo "4. 检查源仓库的构建日志"
+            echo "5. 确认构建是否成功完成"
+            echo ""
+            echo "📋 立即解决方案:"
+            echo "1. 访问源仓库: https://github.com/${{ inputs.source_repo }}"
+            echo "2. 手动触发构建工作流"
+            echo "3. 等待构建完成后重新触发部署"
+            echo ""
+            echo "🔍 调试信息:"
+            echo "- 当前时间: $(date)"
+            echo "- 构建产物保留期限: 1天"
+            echo "- 建议检查源仓库最近的构建记录"
+            exit 1
+          else
+            echo "✅ 构建产物下载成功"
+          fi
+
       - name: 检查下载结果
         run: |
           echo "🔍 检查下载结果..."
