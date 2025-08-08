@@ -259,7 +259,7 @@ jobs:
             exit 1
           fi
           
-          # 设置输出 - 对于包含换行符的SERVER_KEY，使用多行输出语法
+          # 设置输出 - 使用多行输出语法确保包含换行符的密钥正确传递
           echo "server_host=$SERVER_HOST" >> $GITHUB_OUTPUT
           echo "server_port=$SERVER_PORT" >> $GITHUB_OUTPUT
           echo "server_user=$SERVER_USER" >> $GITHUB_OUTPUT
