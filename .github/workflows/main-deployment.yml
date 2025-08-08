@@ -152,6 +152,14 @@ jobs:
             unzip -q "./dist-${{ inputs.project }}.zip"
             echo "📁 解压后内容:"
             ls -la ./
+          elif [ -f "./index.html" ]; then
+            echo "✅ 找到构建产物（直接在当前目录）"
+            echo "📁 构建产物内容:"
+            ls -la ./
+            echo "📊 文件数量:"
+            find . -type f -maxdepth 1 | wc -l
+            echo "📁 前10个文件:"
+            find . -type f -maxdepth 1 | head -10
           else
             echo "❌ 未找到构建产物"
             echo "🔍 所有文件:"
@@ -182,10 +190,19 @@ jobs:
           elif [ -d "./.vitepress/dist" ]; then
             ARTIFACT_DIR="./.vitepress/dist"
             echo "📁 找到 .vitepress/dist 目录"
-          else
+          elif [ -f "./index.html" ]; then
             # 构建产物直接在当前目录
             ARTIFACT_DIR="."
             echo "📁 构建产物直接在当前目录"
+          else
+            echo "❌ 未找到构建产物目录"
+            echo "🔍 当前目录内容:"
+            ls -la ./
+            echo "🔍 所有子目录:"
+            find . -type d -maxdepth 2
+            echo "🔍 所有文件:"
+            find . -type f -maxdepth 2
+            exit 1
           fi
           
           echo "📁 构建产物目录: $ARTIFACT_DIR"
@@ -243,10 +260,19 @@ jobs:
           elif [ -d "./docs/.vitepress/dist" ]; then
             ARTIFACT_PATH="./docs/.vitepress/dist"
             echo "📁 找到 docs/.vitepress/dist 目录"
-          else
+          elif [ -f "./index.html" ]; then
             # 构建产物直接在当前目录
             ARTIFACT_PATH="."
             echo "📁 构建产物直接在当前目录"
+          else
+            echo "❌ 未找到构建产物路径"
+            echo "🔍 当前目录内容:"
+            ls -la ./
+            echo "🔍 所有子目录:"
+            find . -type d -maxdepth 2
+            echo "🔍 所有文件:"
+            find . -type f -maxdepth 2
+            exit 1
           fi
           
           echo "📁 最终构建产物路径: $ARTIFACT_PATH"
