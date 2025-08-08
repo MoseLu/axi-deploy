@@ -91,6 +91,21 @@ jobs:
           RUNS_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs?status=completed&conclusion=success&per_page=5" 2>/dev/null || echo "API调用失败")
           
+          echo "🔍 API响应调试信息:"
+          echo "响应长度: $(echo "$RUNS_RESPONSE" | wc -c)"
+          echo "响应前200字符:"
+          echo "$RUNS_RESPONSE" | head -c 200
+          echo ""
+          
+          # 检查API响应是否包含错误
+          if echo "$RUNS_RESPONSE" | grep -q '"message"'; then
+            echo "❌ API调用失败:"
+            echo "$RUNS_RESPONSE" | jq -r '.message' 2>/dev/null || echo "$RUNS_RESPONSE"
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "info=API调用失败" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
           echo "📊 最近的成功构建:"
           echo "$RUNS_RESPONSE" | jq -r '.workflow_runs[] | "ID: \(.id), 状态: \(.status), 结论: \(.conclusion), 时间: \(.created_at)"' 2>/dev/null || echo "无法解析构建记录"
           
@@ -99,6 +114,22 @@ jobs:
           
           if [ "$LATEST_RUN_ID" = "null" ] || [ -z "$LATEST_RUN_ID" ]; then
             echo "❌ 未找到成功的构建记录"
+            echo "🔍 调试信息:"
+            echo "- Token长度: $(echo "$GITHUB_TOKEN" | wc -c)"
+            echo "- Token前10字符: ${GITHUB_TOKEN:0:10}..."
+            echo "- 源仓库: ${{ inputs.source_repo }}"
+            echo "- API URL: https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs?status=completed&conclusion=success&per_page=5"
+            echo ""
+            echo "🔧 可能的原因:"
+            echo "1. GitHub Token权限不足"
+            echo "2. 源仓库没有成功的构建记录"
+            echo "3. API调用失败"
+            echo "4. 网络连接问题"
+            echo ""
+            echo "🔍 建议检查:"
+            echo "1. 访问 https://github.com/${{ inputs.source_repo }}/actions"
+            echo "2. 确认有成功的构建记录"
+            echo "3. 检查Token权限"
             echo "available=false" >> $GITHUB_OUTPUT
             echo "info=未找到成功的构建记录" >> $GITHUB_OUTPUT
             exit 1
