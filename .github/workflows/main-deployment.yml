@@ -62,7 +62,7 @@ jobs:
           DEPLOY_SECRETS='${{ inputs.deploy_secrets }}'
           
           # 检查是否为base64编码
-          if echo "$DEPLOY_SECRETS" | grep -q '^[A-Za-z0-9+/]*=*$'; then
+          if echo "$DEPLOY_SECRETS" | base64 -d &>/dev/null; then
             echo "📦 检测到base64编码的部署密钥，正在解码..."
             DEPLOY_SECRETS=$(echo "$DEPLOY_SECRETS" | base64 -d)
           fi
@@ -102,8 +102,12 @@ jobs:
           printf "server_port=%s\n" "$SERVER_PORT" >> $GITHUB_OUTPUT
           printf "deploy_center_pat=%s\n" "$DEPLOY_CENTER_PAT" >> $GITHUB_OUTPUT
           
-          # 对于包含特殊字符的SERVER_KEY，直接存储原始值
-          printf "server_key=%s\n" "$SERVER_KEY" >> $GITHUB_OUTPUT
+          # 对于包含换行符的SERVER_KEY，使用多行输出语法
+          {
+            echo 'server_key<<EOF' >> $GITHUB_OUTPUT
+            echo "$SERVER_KEY" >> $GITHUB_OUTPUT
+            echo 'EOF' >> $GITHUB_OUTPUT
+          }
           
           echo "✅ 部署密钥解析完成"
           echo "- 主机: $SERVER_HOST"
