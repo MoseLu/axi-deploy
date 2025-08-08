@@ -102,92 +102,34 @@ jobs:
           run-id: ${{ inputs.run_id }}
         continue-on-error: true
 
-      - name: 检查下载状态
+      - name: 调试下载结果
         run: |
-          echo "🔍 检查下载状态..."
-          if [ ${{ steps.download-artifact.outcome }} == 'failure' ]; then
-            echo "❌ 构建产物下载失败"
-            echo "🔍 错误详情:"
-            echo "- 项目名称: ${{ inputs.project }}"
-            echo "- 源仓库: ${{ inputs.source_repo }}"
-            echo "- 运行ID: ${{ inputs.run_id }}"
-            echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
-            echo "- GitHub Token: ${{ inputs.deploy_center_pat != '' && '已提供' || '未提供' }}"
-            echo ""
-            echo "🚨 可能的原因:"
-            echo "1. 构建产物已过期 (retention-days)"
-            echo "2. 构建产物名称不匹配"
-            echo "3. 源仓库或运行ID错误"
-            echo "4. GitHub Token权限不足"
-            echo "5. 构建产物上传失败"
-            echo ""
-            echo "🔧 解决方案:"
-            echo "1. 重新触发源仓库的构建工作流"
-            echo "2. 检查构建产物名称是否为 'dist-${{ inputs.project }}'"
-            echo "3. 验证GitHub Token权限"
-            echo "4. 检查源仓库的构建日志"
-            echo "5. 确认构建是否成功完成"
-            echo ""
-            echo "📋 立即解决方案:"
-            echo "1. 访问源仓库: https://github.com/${{ inputs.source_repo }}"
-            echo "2. 手动触发构建工作流"
-            echo "3. 等待构建完成后重新触发部署"
-            echo ""
-            echo "🔍 调试信息:"
-            echo "- 当前时间: $(date)"
-            echo "- 构建产物保留期限: 1天"
-            echo "- 建议检查源仓库最近的构建记录"
-            exit 1
-          else
-            echo "✅ 构建产物下载成功"
-          fi
-
-      - name: 检查下载结果
-        run: |
-          echo "🔍 检查下载结果..."
+          echo "🔍 调试下载结果..."
+          echo "下载步骤退出码: ${{ steps.download-artifact.outcome }}"
           echo "当前目录: $(pwd)"
           echo "当前目录内容:"
           ls -la ./
-          
-          # 检查是否有构建产物文件
+          echo ""
+          echo "🔍 检查构建产物目录..."
           if [ -d "./dist-${{ inputs.project }}" ]; then
-            echo "✅ dist-${{ inputs.project }} 目录存在"
-            echo "dist-${{ inputs.project }} 目录内容:"
-            ls -la "./dist-${{ inputs.project }}/"
-            echo "📊 文件数量:"
-            find "./dist-${{ inputs.project }}" -type f | wc -l
-            echo "📁 前10个文件:"
-            find "./dist-${{ inputs.project }}" -type f | head -10
-          elif [ -f "./dist-${{ inputs.project }}.zip" ]; then
-            echo "✅ 找到构建产物压缩包"
-            echo "📦 压缩包大小:"
-            ls -lh "./dist-${{ inputs.project }}.zip"
-            echo "🔧 解压构建产物..."
-            unzip -q "./dist-${{ inputs.project }}.zip"
-            echo "📁 解压后内容:"
-            ls -la ./
-          elif [ -f "./index.html" ]; then
-            echo "✅ 找到构建产物（直接在当前目录）"
+            echo "✅ 找到构建产物目录"
             echo "📁 构建产物内容:"
-            ls -la ./
-            echo "📊 文件数量:"
-            find . -type f -maxdepth 1 | wc -l
-            echo "📁 前10个文件:"
-            find . -type f -maxdepth 1 | head -10
+            ls -la "./dist-${{ inputs.project }}/"
           else
-            echo "❌ 未找到构建产物"
-            echo "🔍 调试信息:"
-            echo "- 项目名称: ${{ inputs.project }}"
-            echo "- 源仓库: ${{ inputs.source_repo }}"
-            echo "- 运行ID: ${{ inputs.run_id }}"
-            echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
-            echo "🔍 所有文件:"
-            find . -type f -maxdepth 1
-            echo "🔍 所有目录:"
-            find . -type d -maxdepth 2
-            echo "🚨 工作流错误：未找到构建产物，终止部署"
-            exit 1
+            echo "❌ 构建产物目录不存在"
           fi
+          
+          if [ -f "./dist-${{ inputs.project }}.zip" ]; then
+            echo "✅ 找到构建产物压缩包"
+            ls -lh "./dist-${{ inputs.project }}.zip"
+          else
+            echo "❌ 构建产物压缩包不存在"
+          fi
+          
+          echo ""
+          echo "🔍 所有文件和目录:"
+          find . -type f -maxdepth 2
+          find . -type d -maxdepth 2
 
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
