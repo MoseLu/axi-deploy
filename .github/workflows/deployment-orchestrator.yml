@@ -97,6 +97,10 @@ on:
         required: false
         type: string
         description: "服务器端口"
+      deploy_center_pat:
+        required: true
+        type: string
+        description: "GitHub Token (用于下载构建产物)"
 
 jobs:
   download-artifact:
@@ -105,7 +109,7 @@ jobs:
       project: ${{ inputs.project }}
       source_repo: ${{ inputs.source_repo }}
       run_id: ${{ inputs.run_id }}
-      github_token: ${{ inputs.github_token }}
+      github_token: ${{ inputs.deploy_center_pat }}
 
   upload-files:
     needs: download-artifact

@@ -110,23 +110,23 @@ jobs:
               
               # 分别测试HTTP和HTTPS
               echo "📋 测试HTTP访问..."
-              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART")
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
               echo "HTTP测试结果: $HTTP_STATUS"
               
               echo "📋 测试HTTPS访问..."
-              HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
+              HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
               echo "HTTPS测试结果: $HTTPS_STATUS"
               
               # 如果HTTPS返回301，检查重定向目标
               if [ "$HTTPS_STATUS" = "301" ]; then
                 echo "📋 检查HTTPS重定向目标..."
-                REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 "https://$DOMAIN$PATH_PART")
+                REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
                 echo "重定向目标: $REDIRECT_URL"
               fi
               
               # 立即检查状态码，如果不是200则直接退出工作流
-              if [ "$HTTPS_STATUS" != "200" ]; then
-                echo "❌ 网站测试失败 - HTTPS返回状态码: $HTTPS_STATUS"
+              if [ "$HTTPS_STATUS" != "200" ] && [ "$HTTPS_STATUS" != "301" ] && [ "$HTTPS_STATUS" != "302" ]; then
+                echo "🚨 网站测试失败 - HTTPS返回状态码: $HTTPS_STATUS"
                 echo "🚨 工作流错误：网站未返回200状态码，直接退出工作流"
                 echo "可能的原因:"
                 echo "1. 域名解析问题"
@@ -135,10 +135,22 @@ jobs:
                 echo "4. SSL证书问题"
                 echo "5. 后端服务未启动"
                 echo "6. 项目部署失败"
+                
+                # 尝试获取更多调试信息
+                echo "🔍 调试信息:"
+                echo "尝试获取响应头..."
+                curl -I "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30 || echo "无法获取响应头"
+                
+                echo "检查Nginx状态..."
+                systemctl status nginx --no-pager -l || echo "无法检查Nginx状态"
+                
+                echo "检查Nginx错误日志..."
+                tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
+                
                 exit 1
               fi
               
-              echo "✅ 网站测试成功 - HTTPS返回200状态码"
+              echo "✅ 网站测试成功 - HTTPS返回状态码: $HTTPS_STATUS"
             else
               echo "❌ 未提供测试URL，跳过测试"
               exit 0

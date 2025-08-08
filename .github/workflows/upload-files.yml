@@ -60,7 +60,7 @@ jobs:
           echo "- 产物路径: ${{ inputs.artifact_path }}"
           
           if [ ! -d "${{ inputs.artifact_path }}" ]; then
-            echo "❌ 构建产物路径不存在: ${{ inputs.artifact_path }}"
+            echo "🚨 构建产物路径不存在: ${{ inputs.artifact_path }}"
             exit 1
           fi
           
@@ -70,7 +70,15 @@ jobs:
           ls -la "${{ inputs.artifact_path }}/"
           
           echo "📊 文件统计:"
-          find "${{ inputs.artifact_path }}" -type f | wc -l
+          FILE_COUNT=$(find "${{ inputs.artifact_path }}" -type f | wc -l)
+          echo "文件数量: $FILE_COUNT"
+          
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "🚨 构建产物目录为空，终止上传"
+            exit 1
+          fi
+          
+          echo "✅ 构建产物验证通过，文件数量: $FILE_COUNT"
 
       - name: 创建临时目录
         uses: appleboy/ssh-action@v1.0.3
@@ -83,6 +91,14 @@ jobs:
             echo "📁 创建临时目录..."
             
             TEMP_DIR="/tmp/${{ inputs.project }}"
+            
+            # 清理旧的临时目录
+            if [ -d "$TEMP_DIR" ]; then
+              echo "🧹 清理旧的临时目录: $TEMP_DIR"
+              sudo rm -rf "$TEMP_DIR"
+            fi
+            
+            # 创建新的临时目录
             sudo mkdir -p $TEMP_DIR
             sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $TEMP_DIR
             
@@ -111,26 +127,41 @@ jobs:
             echo "🔍 验证上传文件..."
             TEMP_DIR="/tmp/${{ inputs.project }}"
             
-            if [ -d "$TEMP_DIR" ]; then
-              echo "✅ 临时目录存在: $TEMP_DIR"
-              echo "📁 临时目录内容:"
-              ls -la $TEMP_DIR/
-              
-              # 检查文件数量
-              FILE_COUNT=$(find $TEMP_DIR -type f | wc -l)
-              echo "📊 文件数量: $FILE_COUNT"
-              
-              if [ "$FILE_COUNT" -gt 0 ]; then
-                echo "✅ 文件上传验证通过"
-              else
-                echo "❌ 临时目录为空"
-                exit 1
-              fi
-            else
-              echo "❌ 临时目录不存在: $TEMP_DIR"
+            if [ ! -d "$TEMP_DIR" ]; then
+              echo "🚨 临时目录不存在: $TEMP_DIR"
               echo "📁 /tmp 目录内容:"
               ls -la /tmp/
               exit 1
+            fi
+            
+            echo "✅ 临时目录存在: $TEMP_DIR"
+            echo "📁 临时目录内容:"
+            ls -la $TEMP_DIR/
+            
+            # 检查文件数量
+            FILE_COUNT=$(find $TEMP_DIR -type f | wc -l)
+            echo "📊 文件数量: $FILE_COUNT"
+            
+            if [ "$FILE_COUNT" -eq 0 ]; then
+              echo "🚨 临时目录为空，上传失败"
+              echo "🔍 调试信息:"
+              echo "临时目录: $TEMP_DIR"
+              echo "目录是否存在: $(test -d "$TEMP_DIR" && echo '是' || echo '否')"
+              echo "目录权限: $(ls -ld "$TEMP_DIR" 2>/dev/null || echo '无法获取权限')"
+              echo "目录内容:"
+              ls -la "$TEMP_DIR/" || echo "无法列出目录内容"
+              exit 1
+            fi
+            
+            echo "✅ 文件上传验证通过，文件数量: $FILE_COUNT"
+            
+            # 检查关键文件
+            if [ -f "$TEMP_DIR/index.html" ]; then
+              echo "✅ 找到 index.html 文件"
+            else
+              echo "⚠️ 未找到 index.html 文件"
+              echo "📁 上传的文件列表:"
+              find "$TEMP_DIR" -type f | head -10
             fi
 
       - name: 设置输出

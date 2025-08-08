@@ -102,6 +102,14 @@ jobs:
             NGINX_CONF_DIR="${{ inputs.nginx_conf_dir || '/www/server/nginx/conf/conf.d/redamancy' }}"
             PROJECT="${{ inputs.project }}"
             
+            # 验证Nginx配置目录是否存在
+            if [ ! -d "$NGINX_CONF_DIR" ]; then
+              echo "🚨 Nginx配置目录不存在: $NGINX_CONF_DIR"
+              exit 1
+            fi
+            
+            echo "✅ Nginx配置目录存在: $NGINX_CONF_DIR"
+            
             # 生成项目路由配置
             ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
             
@@ -313,11 +321,27 @@ jobs:
 
             fi
             
+            # 验证配置文件是否成功写入
+            if [ ! -f "$ROUTE_CONF" ]; then
+              echo "🚨 配置文件写入失败: $ROUTE_CONF"
+              exit 1
+            fi
+            
+            # 检查配置文件内容
+            if [ ! -s "$ROUTE_CONF" ]; then
+              echo "🚨 配置文件为空: $ROUTE_CONF"
+              exit 1
+            fi
+            
+            echo "✅ 配置文件已成功写入: $ROUTE_CONF"
+            echo "📋 配置文件内容:"
+            cat "$ROUTE_CONF"
+            
             # 检查Nginx配置语法
             if sudo nginx -t; then
               echo "✅ Nginx配置语法检查通过"
             else
-              echo "❌ Nginx配置语法错误"
+              echo "🚨 Nginx配置语法错误"
               echo "📋 生成的配置文件内容:"
               cat $ROUTE_CONF
               echo "📋 Nginx 错误日志:"
@@ -341,9 +365,18 @@ jobs:
             if sudo systemctl reload nginx; then
               echo "✅ Nginx配置重载完成"
             else
-              echo "❌ Nginx重载失败"
+              echo "🚨 Nginx重载失败"
               echo "📋 Nginx 错误日志:"
               sudo tail -n 20 /var/log/nginx/error.log
+              exit 1
+            fi
+            
+            # 验证Nginx服务状态
+            if sudo systemctl is-active --quiet nginx; then
+              echo "✅ Nginx服务正在运行"
+            else
+              echo "🚨 Nginx服务未运行"
+              sudo systemctl status nginx
               exit 1
             fi
             

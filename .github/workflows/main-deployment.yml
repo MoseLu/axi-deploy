@@ -49,6 +49,10 @@ on:
         description: '服务器端口'
         required: true
         type: string
+      deploy_center_pat:
+        description: 'GitHub Token (必需，用于下载构建产物)'
+        required: true
+        type: string
 
 jobs:
   download-artifact:
@@ -69,7 +73,7 @@ jobs:
           path: ./
           run-id: ${{ inputs.run_id }}
           repository: ${{ inputs.source_repo }}
-          github-token: ${{ secrets.DEPLOY_CENTER_PAT }}
+          github-token: ${{ inputs.deploy_center_pat }}
 
       - name: 检查下载结果
         run: |
@@ -102,55 +106,13 @@ jobs:
             find . -type f -maxdepth 1
             echo "🔍 所有目录:"
             find . -type d -maxdepth 2
+            echo "🚨 工作流错误：未找到构建产物，终止部署"
+            exit 1
           fi
 
-      - name: 手动检查构建产物
+      - name: 验证构建产物完整性
         run: |
-          echo "🔍 手动检查构建产物..."
-          echo "项目名称: ${{ inputs.project }}"
-          echo "源仓库: ${{ inputs.source_repo }}"
-          echo "运行ID: ${{ inputs.run_id }}"
-          
-          # 检查 token 权限
-          echo "🔍 检查 token 权限..."
-          curl -H "Authorization: token ${{ secrets.DEPLOY_CENTER_PAT }}" \
-               "https://api.github.com/user" | jq '.login'
-          
-          # 尝试使用 curl 检查构建产物是否存在
-          echo "🔍 检查 GitHub API..."
-          curl -H "Authorization: token ${{ secrets.DEPLOY_CENTER_PAT }}" \
-               "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}/artifacts" \
-               | jq '.artifacts[] | select(.name == "dist-${{ inputs.project }}")'
-
-      - name: 调试下载结果
-        run: |
-          echo "🔍 调试下载结果..."
-          echo "项目名称: ${{ inputs.project }}"
-          echo "源仓库: ${{ inputs.source_repo }}"
-          echo "运行ID: ${{ inputs.run_id }}"
-          echo "当前目录: $(pwd)"
-          echo "当前目录内容:"
-          ls -la ./
-          echo "artifacts 目录是否存在:"
-          if [ -d "./artifacts" ]; then
-            echo "✅ artifacts 目录存在"
-            echo "artifacts 目录内容:"
-            ls -la ./artifacts/
-            echo "artifacts 子目录:"
-            find ./artifacts -type d -maxdepth 3
-            echo "artifacts 文件:"
-            find ./artifacts -type f -maxdepth 3 | head -20
-          else
-            echo "❌ artifacts 目录不存在"
-          fi
-          echo "所有子目录:"
-          find . -type d -maxdepth 3
-          echo "所有文件:"
-          find . -type f -maxdepth 3 | head -20
-
-      - name: 验证构建产物
-        run: |
-          echo "🔍 验证构建产物..."
+          echo "🔍 验证构建产物完整性..."
           
           # 等待一下确保文件完全下载
           sleep 2
@@ -191,7 +153,22 @@ jobs:
             find . -type d -maxdepth 2
             echo "所有文件:"
             find . -type f -maxdepth 2
+            echo "🚨 工作流错误：构建产物解压后为空，立即终止部署"
+            echo "可能的原因:"
+            echo "1. 构建产物下载失败"
+            echo "2. 构建产物解压失败"
+            echo "3. 构建产物本身为空"
+            echo "4. 文件权限问题"
             exit 1
+          fi
+          
+          # 检查关键文件是否存在
+          if [ -f "$ARTIFACT_DIR/index.html" ]; then
+            echo "✅ 找到 index.html 文件"
+          else
+            echo "⚠️ 未找到 index.html 文件"
+            echo "📁 构建产物中的文件:"
+            find "$ARTIFACT_DIR" -type f | head -20
           fi
           
           echo "✅ 构建产物验证通过"
@@ -224,10 +201,18 @@ jobs:
           echo "📁 构建产物内容:"
           ls -la "$ARTIFACT_PATH/"
           
+          # 最终验证：确保构建产物不为空
+          FINAL_FILE_COUNT=$(find "$ARTIFACT_PATH" -type f | wc -l)
+          if [ "$FINAL_FILE_COUNT" -eq 0 ]; then
+            echo "🚨 最终验证失败：构建产物为空"
+            exit 1
+          fi
+          
           echo "artifact_path=$ARTIFACT_PATH" >> $GITHUB_OUTPUT
           echo "artifact_size=$(du -sb $ARTIFACT_PATH | cut -f1)" >> $GITHUB_OUTPUT
           echo "✅ 输出已设置"
           echo "构建产物路径: $ARTIFACT_PATH"
+          echo "构建产物大小: $(du -sh $ARTIFACT_PATH | cut -f1)"
 
   deploy-project:
     needs: download-artifact
@@ -237,67 +222,36 @@ jobs:
       deploy_path: ${{ steps.set-outputs.outputs.deploy_path }}
     
     steps:
-      - name: 调试构建产物路径
+      - name: 验证构建产物路径
         run: |
-          echo "🔍 调试构建产物路径..."
+          echo "🔍 验证构建产物路径..."
           echo "当前工作目录: $(pwd)"
           echo "构建产物路径: ${{ needs.download-artifact.outputs.artifact_path }}"
           echo "构建产物大小: ${{ needs.download-artifact.outputs.artifact_size }}"
           
-          echo "📁 当前目录内容:"
-          ls -la ./
-          
-          echo "📁 构建产物目录内容:"
-          if [ -d "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
-            ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
-            echo "📊 文件统计:"
-            find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l
-            echo "📁 前10个文件:"
-            find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | head -10
-          else
-            echo "❌ 构建产物目录不存在: ${{ needs.download-artifact.outputs.artifact_path }}"
-          fi
-          
-          echo "🔍 检查所有可能的构建产物目录:"
-          for dir in ./dist* ./docs* ./*; do
-            if [ -d "$dir" ]; then
-              echo "📁 发现目录: $dir"
-              ls -la "$dir/" | head -5
-            fi
-          done
-          
-          echo "🔍 检查构建产物路径:"
-          echo "构建产物路径: ${{ needs.download-artifact.outputs.artifact_path }}"
-          
-          if [ -d "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
-            echo "✅ 构建产物路径存在"
-            ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
-          else
-            echo "❌ 构建产物路径不存在"
-          fi
-
-      - name: 验证部署源文件
-        run: |
-          echo "🔍 验证部署源文件..."
-          echo "构建产物路径: ${{ needs.download-artifact.outputs.artifact_path }}"
-          echo "构建产物大小: ${{ needs.download-artifact.outputs.artifact_size }}"
-          
-          if [ -d "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
-            echo "✅ 构建产物目录存在"
-            echo "📁 构建产物内容:"
-            ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
-            echo "📊 文件数量:"
-            find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l
-            echo "📁 前10个文件:"
-            find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | head -10
-          else
-            echo "❌ 构建产物目录不存在: ${{ needs.download-artifact.outputs.artifact_path }}"
-            echo "🔍 当前目录内容:"
-            ls -la ./
-            echo "🔍 所有子目录:"
-            find . -type d -maxdepth 3
+          if [ -z "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
+            echo "🚨 构建产物路径为空，终止部署"
             exit 1
           fi
+          
+          if [ ! -d "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
+            echo "🚨 构建产物目录不存在: ${{ needs.download-artifact.outputs.artifact_path }}"
+            exit 1
+          fi
+          
+          echo "📁 构建产物目录内容:"
+          ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
+          
+          # 验证文件数量
+          FILE_COUNT=$(find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l)
+          echo "📊 文件数量: $FILE_COUNT"
+          
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "🚨 构建产物目录为空，终止部署"
+            exit 1
+          fi
+          
+          echo "✅ 构建产物验证通过"
 
       - name: 直接部署到目标目录
         uses: appleboy/scp-action@v0.1.7
@@ -309,6 +263,56 @@ jobs:
           source: "${{ needs.download-artifact.outputs.artifact_path }}"
           target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
           strip_components: 0
+
+      - name: 验证部署结果
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔍 验证部署结果..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            DEPLOY_PATH="/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/$PROJECT"
+            
+            echo "📁 检查部署目录: $DEPLOY_PATH"
+            
+            if [ ! -d "$DEPLOY_PATH" ]; then
+              echo "🚨 部署目录不存在: $DEPLOY_PATH"
+              exit 1
+            fi
+            
+            echo "📁 部署目录内容:"
+            ls -la "$DEPLOY_PATH/"
+            
+            # 检查文件数量
+            FILE_COUNT=$(find "$DEPLOY_PATH" -type f | wc -l)
+            echo "📊 文件数量: $FILE_COUNT"
+            
+            if [ "$FILE_COUNT" -eq 0 ]; then
+              echo "🚨 部署目录为空，部署失败"
+              echo "🔍 调试信息:"
+              echo "部署路径: $DEPLOY_PATH"
+              echo "目录是否存在: $(test -d "$DEPLOY_PATH" && echo '是' || echo '否')"
+              echo "目录权限: $(ls -ld "$DEPLOY_PATH" 2>/dev/null || echo '无法获取权限')"
+              exit 1
+            fi
+            
+            # 检查是否有 index.html 文件
+            if [ -f "$DEPLOY_PATH/index.html" ]; then
+              echo "✅ 找到 index.html 文件"
+              echo "📄 index.html 内容预览:"
+              head -10 "$DEPLOY_PATH/index.html"
+            else
+              echo "⚠️ 未找到 index.html 文件"
+              echo "🔍 检查所有文件:"
+              find "$DEPLOY_PATH" -type f | head -10
+            fi
+            
+            echo "✅ 部署验证通过"
 
       - name: 整理部署目录结构
         uses: appleboy/ssh-action@v1.0.3
@@ -392,6 +396,15 @@ jobs:
             echo "📁 最终部署目录内容:"
             ls -la "$DEPLOY_PATH/"
             
+            # 最终验证：确保整理后的目录不为空
+            FINAL_FILE_COUNT=$(find "$DEPLOY_PATH" -type f | wc -l)
+            if [ "$FINAL_FILE_COUNT" -eq 0 ]; then
+              echo "🚨 整理后部署目录为空，部署失败"
+              exit 1
+            fi
+            
+            echo "✅ 目录整理完成，文件数量: $FINAL_FILE_COUNT"
+            
             # 设置正确的权限
             sudo chown -R deploy:deploy "$DEPLOY_PATH"
             sudo chmod -R 755 "$DEPLOY_PATH"
@@ -439,6 +452,21 @@ jobs:
             
             # 切换到项目目录
             cd "$APPS_ROOT/$PROJECT"
+            
+            # 验证项目目录是否存在
+            if [ ! -d "$APPS_ROOT/$PROJECT" ]; then
+              echo "🚨 项目目录不存在: $APPS_ROOT/$PROJECT"
+              exit 1
+            fi
+            
+            # 验证项目目录不为空
+            FILE_COUNT=$(find "$APPS_ROOT/$PROJECT" -type f | wc -l)
+            if [ "$FILE_COUNT" -eq 0 ]; then
+              echo "🚨 项目目录为空: $APPS_ROOT/$PROJECT"
+              exit 1
+            fi
+            
+            echo "✅ 项目目录验证通过，文件数量: $FILE_COUNT"
             
             # 执行启动命令
             echo "📋 执行启动命令: $START_CMD"

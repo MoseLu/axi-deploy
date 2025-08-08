@@ -154,7 +154,7 @@ jobs:
             
             # 检查临时目录是否存在
             if [ ! -d "$TEMP_DIR" ]; then
-              echo "❌ 临时目录不存在: $TEMP_DIR"
+              echo "🚨 临时目录不存在: $TEMP_DIR"
               echo "📁 /tmp 目录内容:"
               ls -la /tmp/
               exit 1
@@ -162,31 +162,75 @@ jobs:
             
             # 检查临时目录是否有文件
             if [ ! "$(ls -A $TEMP_DIR)" ]; then
-              echo "❌ 临时目录为空: $TEMP_DIR"
+              echo "🚨 临时目录为空: $TEMP_DIR"
+              echo "🔍 调试信息:"
+              echo "临时目录: $TEMP_DIR"
+              echo "目录是否存在: $(test -d "$TEMP_DIR" && echo '是' || echo '否')"
+              echo "目录权限: $(ls -ld "$TEMP_DIR" 2>/dev/null || echo '无法获取权限')"
               exit 1
             fi
             
             echo "📁 临时目录内容:"
             ls -la $TEMP_DIR/
             
+            # 统计文件数量
+            FILE_COUNT=$(find "$TEMP_DIR" -type f | wc -l)
+            echo "📊 临时目录文件数量: $FILE_COUNT"
+            
+            if [ "$FILE_COUNT" -eq 0 ]; then
+              echo "🚨 临时目录中没有文件，部署失败"
+              exit 1
+            fi
+            
             # 部署文件
             echo "📤 开始部署文件..."
             sudo cp -r $TEMP_DIR/* $DEPLOY_PATH/
+            
+            # 验证部署结果
+            echo "🔍 验证部署结果..."
+            if [ ! -d "$DEPLOY_PATH" ]; then
+              echo "🚨 部署目录不存在: $DEPLOY_PATH"
+              exit 1
+            fi
+            
+            DEPLOYED_FILE_COUNT=$(find "$DEPLOY_PATH" -type f | wc -l)
+            echo "📊 部署后文件数量: $DEPLOYED_FILE_COUNT"
+            
+            if [ "$DEPLOYED_FILE_COUNT" -eq 0 ]; then
+              echo "🚨 部署目录为空，部署失败"
+              echo "🔍 调试信息:"
+              echo "部署路径: $DEPLOY_PATH"
+              echo "目录是否存在: $(test -d "$DEPLOY_PATH" && echo '是' || echo '否')"
+              echo "目录权限: $(ls -ld "$DEPLOY_PATH" 2>/dev/null || echo '无法获取权限')"
+              echo "目录内容:"
+              ls -la "$DEPLOY_PATH/" || echo "无法列出目录内容"
+              exit 1
+            fi
+            
+            # 检查关键文件
+            if [ -f "$DEPLOY_PATH/index.html" ]; then
+              echo "✅ 找到 index.html 文件"
+            else
+              echo "⚠️ 未找到 index.html 文件"
+              echo "📁 部署的文件列表:"
+              find "$DEPLOY_PATH" -type f | head -10
+            fi
             
             # 设置正确的文件权限
             sudo chown -R deploy:deploy $DEPLOY_PATH
             sudo chmod -R 755 $DEPLOY_PATH
             
-            echo "✅ 文件部署完成"
+            echo "✅ 文件部署完成，文件数量: $DEPLOYED_FILE_COUNT"
             
-            # 验证部署结果
-            echo "🔍 验证部署结果..."
+            # 最终验证
+            echo "🔍 最终验证部署结果..."
             if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
               echo "✅ 部署验证通过"
               echo "📁 部署目录内容:"
               ls -la $DEPLOY_PATH/
+              echo "📊 最终文件数量: $DEPLOYED_FILE_COUNT"
             else
-              echo "❌ 部署验证失败"
+              echo "🚨 部署验证失败"
               exit 1
             fi
             

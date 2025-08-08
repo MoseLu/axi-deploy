@@ -56,7 +56,9 @@ jobs:
           echo "🔍 验证构建产物..."
           
           if [ ! -d "./dist" ]; then
-            echo "❌ 构建产物目录不存在"
+            echo "🚨 构建产物目录不存在"
+            echo "🔍 当前目录内容:"
+            ls -la ./
             exit 1
           fi
           
@@ -65,9 +67,26 @@ jobs:
           
           # 检查是否有文件
           FILE_COUNT=$(find ./dist -type f | wc -l)
+          echo "📊 文件数量: $FILE_COUNT"
+          
           if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "❌ 构建产物目录为空"
+            echo "🚨 构建产物目录为空"
+            echo "🔍 调试信息:"
+            echo "构建产物目录: ./dist"
+            echo "目录是否存在: $(test -d "./dist" && echo '是' || echo '否')"
+            echo "目录权限: $(ls -ld "./dist" 2>/dev/null || echo '无法获取权限')"
+            echo "目录内容:"
+            ls -la "./dist/" || echo "无法列出目录内容"
             exit 1
+          fi
+          
+          # 检查关键文件
+          if [ -f "./dist/index.html" ]; then
+            echo "✅ 找到 index.html 文件"
+          else
+            echo "⚠️ 未找到 index.html 文件"
+            echo "📁 构建产物中的文件:"
+            find "./dist" -type f | head -10
           fi
           
           echo "✅ 构建产物验证通过"

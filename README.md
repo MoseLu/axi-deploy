@@ -352,9 +352,17 @@ await github.rest.repos.createDispatchEvent({
   repo: 'axi-deploy',
   event_type: 'deploy',
   client_payload: {
+    // 必需参数
     project: 'my-project',
     source_repo: 'owner/repo',
     run_id: '1234567890',
+    server_host: 'your-server.com',
+    server_user: 'deploy',
+    server_key: 'your-ssh-private-key',
+    server_port: '22',
+    deploy_center_pat: 'your-github-token',
+    
+    // 可选参数
     deploy_type: 'static',
     nginx_config: 'server { ... }',
     test_url: 'https://example.com/',
@@ -362,6 +370,23 @@ await github.rest.repos.createDispatchEvent({
   }
 });
 ```
+
+**支持的参数说明：**
+
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| `project` | string | ✅ | 项目名称 |
+| `source_repo` | string | ✅ | 源仓库 (格式: owner/repo) |
+| `run_id` | string | ✅ | 构建运行ID |
+| `server_host` | string | ✅ | 服务器地址 |
+| `server_user` | string | ✅ | 服务器用户名 |
+| `server_key` | string | ✅ | 服务器SSH私钥 |
+| `server_port` | string | ✅ | 服务器SSH端口 |
+| `deploy_type` | string | ❌ | 部署类型 (static/backend，默认: static) |
+| `nginx_config` | string | ❌ | Nginx配置 |
+| `test_url` | string | ❌ | 测试URL |
+| `start_cmd` | string | ❌ | 启动命令（后端项目） |
+| `deploy_center_pat` | string | ❌ | GitHub Token (用于下载构建产物) |
 
 ## 部署流程
 
@@ -569,3 +594,33 @@ curl -I https://your-domain.com/
 ## 许可证
 
 MIT License
+
+## 重要说明
+
+### 可复用工作流的 Secrets 限制
+
+**⚠️ 重要限制**：可复用工作流（reusable workflows）无法直接访问调用者仓库的 secrets。这是 GitHub Actions 的安全限制。
+
+**解决方案**：
+1. **通过输入参数传递**：所有必需的 secrets 必须通过 `inputs` 参数传递
+2. **业务仓库配置**：业务仓库需要在触发部署时提供所有必需的参数
+3. **参数验证**：工作流会验证所有必需参数是否已提供
+
+### 必需的参数
+
+当从业务仓库触发部署时，必须提供以下参数：
+
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| `project` | string | ✅ | 项目名称 |
+| `source_repo` | string | ✅ | 源仓库 (格式: owner/repo) |
+| `run_id` | string | ✅ | 构建运行ID |
+| `server_host` | string | ✅ | 服务器地址 |
+| `server_user` | string | ✅ | 服务器用户名 |
+| `server_key` | string | ✅ | 服务器SSH私钥 |
+| `server_port` | string | ✅ | 服务器SSH端口 |
+| `deploy_center_pat` | string | ✅ | GitHub Token (用于下载构建产物) |
+| `deploy_type` | string | ❌ | 部署类型 (static/backend，默认: static) |
+| `nginx_config` | string | ❌ | Nginx配置 |
+| `test_url` | string | ❌ | 测试URL |
+| `start_cmd` | string | ❌ | 启动命令（后端项目） |
