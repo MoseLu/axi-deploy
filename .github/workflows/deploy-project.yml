@@ -112,13 +112,53 @@ jobs:
           echo "构建产物名称: dist-${{ inputs.project }}"
           echo "源仓库: ${{ inputs.source_repo }}"
           echo "运行ID: ${{ inputs.run_id }}"
-          if [ -n "${{ inputs.deploy_center_pat }}" ]; then
+          echo "🔍 Token调试信息:"
+          echo "Token长度: $(echo '${{ inputs.deploy_center_pat }}' | wc -c)"
+          echo "Token是否为空: ${{ inputs.deploy_center_pat == '' && '是' || '否' }}"
+          echo "Token是否为null: ${{ inputs.deploy_center_pat == 'null' && '是' || '否' }}"
+          
+          if [ -n "${{ inputs.deploy_center_pat }}" ] && [ "${{ inputs.deploy_center_pat }}" != "null" ]; then
             echo "GitHub Token: 已提供"
             TOKEN="${{ inputs.deploy_center_pat }}"
             echo "Token 前10个字符: ${TOKEN:0:10}..."
           else
             echo "GitHub Token: 未提供"
             echo "Token 前10个字符: 未提供"
+            echo "🔍 Token原始值: '${{ inputs.deploy_center_pat }}'"
+          fi
+
+      - name: 测试PAT权限
+        run: |
+          echo "🔍 测试PAT权限..."
+          
+          if [ -n "${{ inputs.deploy_center_pat }}" ] && [ "${{ inputs.deploy_center_pat }}" != "null" ]; then
+            echo "✅ PAT已提供，测试权限..."
+            
+            # 测试PAT是否有效
+            RESPONSE=$(curl -s -H "Authorization: token ${{ inputs.deploy_center_pat }}" \
+              "https://api.github.com/user" 2>/dev/null || echo "API调用失败")
+            
+            if echo "$RESPONSE" | grep -q '"login"'; then
+              USER_LOGIN=$(echo "$RESPONSE" | jq -r '.login // empty' 2>/dev/null)
+              echo "✅ PAT有效，用户: $USER_LOGIN"
+            else
+              echo "❌ PAT无效或权限不足"
+              echo "API响应: $RESPONSE"
+            fi
+            
+            # 测试对目标仓库的访问权限
+            REPO_RESPONSE=$(curl -s -H "Authorization: token ${{ inputs.deploy_center_pat }}" \
+              "https://api.github.com/repos/${{ inputs.source_repo }}" 2>/dev/null || echo "API调用失败")
+            
+            if echo "$REPO_RESPONSE" | grep -q '"name"'; then
+              REPO_NAME=$(echo "$REPO_RESPONSE" | jq -r '.name // empty' 2>/dev/null)
+              echo "✅ 可以访问仓库: $REPO_NAME"
+            else
+              echo "❌ 无法访问仓库: ${{ inputs.source_repo }}"
+              echo "API响应: $REPO_RESPONSE"
+            fi
+          else
+            echo "❌ PAT未提供"
           fi
 
       - name: 下载构建产物
