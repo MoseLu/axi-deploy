@@ -155,40 +155,19 @@ jobs:
   deployment-summary:
     needs: [parse-secrets, server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website-static, test-website-backend]
     if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: 部署完成总结
-        run: |
-          echo "🎉 部署流程完成"
-          echo "=========================================="
-          echo "📋 部署信息:"
-          echo "- 项目: ${{ inputs.project }}"
-          echo "- 部署类型: ${{ inputs.deploy_type }}"
-          echo "- 源仓库: ${{ inputs.source_repo }}"
-          echo "- 构建ID: ${{ inputs.run_id }}"
-          echo ""
-          echo "📊 执行状态:"
-          echo "- 解析密钥: ${{ needs.parse-secrets.result }}"
-          echo "- 服务器初始化: ${{ needs.server-init.result || 'skipped' }}"
-          echo "- 验证构建产物: ${{ needs.validate-artifact.result }}"
-          echo "- 部署项目: ${{ needs.deploy-project.result }}"
-          echo "- 配置Nginx: ${{ needs.configure-nginx.result || 'skipped' }}"
-          echo "- 启动服务: ${{ needs.start-service.result || 'skipped' }}"
-          echo "- 测试网站(静态): ${{ needs.test-website-static.result || 'skipped' }}"
-          echo "- 测试网站(后端): ${{ needs.test-website-backend.result || 'skipped' }}"
-          echo ""
-          echo "🔗 访问信息:"
-          echo "- 域名: redamancy.com.cn"
-          if [ "${{ needs.deploy-project.outputs.deploy_path }}" != "" ]; then
-            echo "- 项目路径: ${{ needs.deploy-project.outputs.deploy_path }}"
-          fi
-          if [ "${{ inputs.test_url }}" != "" ]; then
-            echo "- 测试URL: ${{ inputs.test_url }}"
-          fi
-          echo ""
-          echo "📝 部署完成通知:"
-          echo "✅ 项目 ${{ inputs.project }} 已成功部署到服务器"
-          if [ "${{ inputs.test_url }}" != "" ]; then
-            echo "🌐 可通过 ${{ inputs.test_url }} 访问"
-          fi
-          echo "=========================================="
+    uses: MoseLu/axi-deploy/.github/workflows/deployment-summary.yml@master
+    with:
+      project: ${{ inputs.project }}
+      deploy_type: ${{ inputs.deploy_type }}
+      source_repo: ${{ inputs.source_repo }}
+      run_id: ${{ inputs.run_id }}
+      test_url: ${{ inputs.test_url }}
+      deploy_path: ${{ needs.deploy-project.outputs.deploy_path || '' }}
+      parse_secrets_result: ${{ needs.parse-secrets.result }}
+      server_init_result: ${{ needs.server-init.result || '' }}
+      validate_artifact_result: ${{ needs.validate-artifact.result }}
+      deploy_project_result: ${{ needs.deploy-project.result }}
+      configure_nginx_result: ${{ needs.configure-nginx.result || '' }}
+      start_service_result: ${{ needs.start-service.result || '' }}
+      test_website_static_result: ${{ needs.test-website-static.result || '' }}
+      test_website_backend_result: ${{ needs.test-website-backend.result || '' }}
