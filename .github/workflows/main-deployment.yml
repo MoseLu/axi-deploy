@@ -263,7 +263,13 @@ jobs:
           echo "server_host=$SERVER_HOST" >> $GITHUB_OUTPUT
           echo "server_port=$SERVER_PORT" >> $GITHUB_OUTPUT
           echo "server_user=$SERVER_USER" >> $GITHUB_OUTPUT
-          echo "deploy_center_pat=$DEPLOY_CENTER_PAT" >> $GITHUB_OUTPUT
+          
+          # 使用多行输出语法确保PAT正确传递
+          {
+            echo 'deploy_center_pat<<EOF' >> $GITHUB_OUTPUT
+            echo "$DEPLOY_CENTER_PAT" >> $GITHUB_OUTPUT
+            echo 'EOF' >> $GITHUB_OUTPUT
+          }
           
           # 对于包含换行符的SERVER_KEY，使用多行输出语法
           {
