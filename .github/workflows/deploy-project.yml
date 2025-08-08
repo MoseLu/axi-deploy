@@ -106,6 +106,15 @@ jobs:
           
           echo "✅ 运行ID验证通过"
 
+      - name: 调试下载参数
+        run: |
+          echo "🔍 调试下载参数..."
+          echo "构建产物名称: dist-${{ inputs.project }}"
+          echo "源仓库: ${{ inputs.source_repo }}"
+          echo "运行ID: ${{ inputs.run_id }}"
+          echo "GitHub Token: ${{ inputs.deploy_center_pat != '' && '已提供' || '未提供' }}"
+          echo "Token 前10个字符: ${#{{ inputs.deploy_center_pat }}:0:10}..."
+
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
@@ -160,11 +169,13 @@ jobs:
             echo "2. 构建产物已过期"
             echo "3. GitHub Token权限不足"
             echo "4. 源仓库或运行ID错误"
+            echo "5. 跨仓库访问限制"
             echo ""
             echo "🔍 建议检查:"
             echo "1. 访问 https://github.com/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}"
             echo "2. 查看构建产物列表"
             echo "3. 确认构建产物名称"
+            echo "4. 检查Token权限"
             exit 1
           fi
 
