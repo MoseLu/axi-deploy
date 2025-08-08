@@ -1,0 +1,315 @@
+name: Rollback
+
+description: "回滚工作流 - 快速回滚到之前的部署版本"
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+      deploy_type:
+        description: '部署类型'
+        required: true
+        default: 'static'
+        type: choice
+        options:
+          - static
+          - backend
+      backup_version:
+        description: '回滚版本 (格式: YYYYMMDD_HHMMSS 或 latest)'
+        required: false
+        default: 'latest'
+        type: string
+      server_host:
+        description: '服务器地址'
+        required: false
+        type: string
+      server_user:
+        description: '服务器用户'
+        required: false
+        type: string
+      server_key:
+        description: '服务器密钥'
+        required: false
+        type: string
+      server_port:
+        description: '服务器端口'
+        required: false
+        default: '22'
+        type: string
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 解析服务器配置
+        id: parse-config
+        run: |
+          echo "🔍 解析服务器配置..."
+          
+          # 从输入参数或环境变量获取配置
+          SERVER_HOST="${{ inputs.server_host || secrets.SERVER_HOST }}"
+          SERVER_USER="${{ inputs.server_user || secrets.SERVER_USER }}"
+          SERVER_KEY="${{ inputs.server_key || secrets.SERVER_KEY }}"
+          SERVER_PORT="${{ inputs.server_port || secrets.SERVER_PORT || '22' }}"
+          
+          if [ -z "$SERVER_HOST" ] || [ -z "$SERVER_USER" ] || [ -z "$SERVER_KEY" ]; then
+            echo "🚨 缺少服务器配置信息"
+            exit 1
+          fi
+          
+          echo "✅ 服务器配置解析完成"
+
+      - name: 检查可用备份
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🔍 检查可用备份..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            
+            # 确定备份目录
+            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
+              BACKUP_ROOT="/srv/backups/apps"
+            else
+              BACKUP_ROOT="/srv/backups/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            
+            echo "📁 备份目录: $PROJECT_BACKUP_DIR"
+            
+            if [ ! -d "$PROJECT_BACKUP_DIR" ]; then
+              echo "❌ 备份目录不存在: $PROJECT_BACKUP_DIR"
+              exit 1
+            fi
+            
+            # 列出可用备份
+            echo "📋 可用备份列表:"
+            if [ -d "$PROJECT_BACKUP_DIR" ]; then
+              BACKUP_LIST=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | head -10)
+              if [ -n "$BACKUP_LIST" ]; then
+                echo "$BACKUP_LIST" | while read -r backup; do
+                  BACKUP_NAME=$(basename "$backup")
+                  BACKUP_TIME=$(stat -c %y "$backup" | cut -d' ' -f1,2)
+                  BACKUP_SIZE=$(du -sh "$backup" | cut -f1)
+                  echo "  📦 $BACKUP_NAME ($BACKUP_TIME, $BACKUP_SIZE)"
+                done
+              else
+                echo "  ⚠️ 没有找到备份文件"
+                exit 1
+              fi
+            else
+              echo "  ❌ 备份目录不存在"
+              exit 1
+            fi
+
+      - name: 执行回滚
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🔄 执行回滚..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            BACKUP_VERSION="${{ inputs.backup_version }}"
+            
+            # 确定路径
+            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
+              DEPLOY_PATH="/srv/apps/$PROJECT"
+              BACKUP_ROOT="/srv/backups/apps"
+            else
+              DEPLOY_PATH="/srv/static/$PROJECT"
+              BACKUP_ROOT="/srv/backups/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            
+            echo "📁 部署路径: $DEPLOY_PATH"
+            echo "📁 备份目录: $PROJECT_BACKUP_DIR"
+            echo "🔄 回滚版本: $BACKUP_VERSION"
+            
+            # 确定要回滚的备份
+            if [ "$BACKUP_VERSION" = "latest" ]; then
+              # 获取最新的备份
+              LATEST_BACKUP=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | head -1)
+              if [ -z "$LATEST_BACKUP" ]; then
+                echo "❌ 没有找到可用的备份"
+                exit 1
+              fi
+              TARGET_BACKUP="$LATEST_BACKUP"
+            else
+              # 查找指定版本的备份
+              TARGET_BACKUP="$PROJECT_BACKUP_DIR/$PROJECT.backup.$BACKUP_VERSION"
+              if [ ! -d "$TARGET_BACKUP" ]; then
+                echo "❌ 指定的备份版本不存在: $TARGET_BACKUP"
+                echo "📋 可用备份:"
+                ls -la "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null || echo "没有找到备份"
+                exit 1
+              fi
+            fi
+            
+            echo "🎯 目标备份: $TARGET_BACKUP"
+            
+            # 验证备份内容
+            if [ ! -d "$TARGET_BACKUP" ]; then
+              echo "❌ 备份目录不存在: $TARGET_BACKUP"
+              exit 1
+            fi
+            
+            BACKUP_FILE_COUNT=$(find "$TARGET_BACKUP" -type f | wc -l)
+            if [ "$BACKUP_FILE_COUNT" -eq 0 ]; then
+              echo "❌ 备份目录为空: $TARGET_BACKUP"
+              exit 1
+            fi
+            
+            echo "✅ 备份验证通过，包含 $BACKUP_FILE_COUNT 个文件"
+            
+            # 创建当前部署的备份（以防回滚失败）
+            echo "📋 备份当前部署..."
+            CURRENT_BACKUP="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S).pre_rollback"
+            if [ -d "$DEPLOY_PATH" ]; then
+              sudo cp -r "$DEPLOY_PATH" "$CURRENT_BACKUP"
+              echo "✅ 当前部署已备份到: $CURRENT_BACKUP"
+            else
+              echo "⚠️ 当前部署目录不存在，跳过备份"
+            fi
+            
+            # 停止相关服务（如果是后端项目）
+            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
+              echo "🛑 停止后端服务..."
+              if systemctl is-active --quiet star-cloud.service; then
+                sudo systemctl stop star-cloud.service
+                echo "✅ 后端服务已停止"
+              else
+                echo "⚠️ 后端服务未运行"
+              fi
+            fi
+            
+            # 删除当前部署
+            echo "🗑️ 删除当前部署..."
+            if [ -d "$DEPLOY_PATH" ]; then
+              sudo rm -rf "$DEPLOY_PATH"
+              echo "✅ 当前部署已删除"
+            else
+              echo "⚠️ 当前部署目录不存在"
+            fi
+            
+            # 恢复备份
+            echo "🔄 恢复备份..."
+            sudo cp -r "$TARGET_BACKUP" "$DEPLOY_PATH"
+            sudo chown -R deploy:deploy "$DEPLOY_PATH"
+            echo "✅ 备份已恢复到: $DEPLOY_PATH"
+            
+            # 验证恢复结果
+            echo "🔍 验证恢复结果..."
+            if [ -d "$DEPLOY_PATH" ]; then
+              RESTORED_FILE_COUNT=$(find "$DEPLOY_PATH" -type f | wc -l)
+              echo "✅ 恢复完成，包含 $RESTORED_FILE_COUNT 个文件"
+              
+              # 显示恢复的文件
+              echo "📁 恢复的文件:"
+              ls -la "$DEPLOY_PATH/" | head -10
+            else
+              echo "❌ 恢复失败，部署目录不存在"
+              exit 1
+            fi
+            
+            # 重启相关服务（如果是后端项目）
+            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
+              echo "🚀 重启后端服务..."
+              sudo systemctl daemon-reload
+              sudo systemctl start star-cloud.service
+              
+              # 等待服务启动
+              sleep 5
+              
+              # 检查服务状态
+              if systemctl is-active --quiet star-cloud.service; then
+                echo "✅ 后端服务启动成功"
+              else
+                echo "❌ 后端服务启动失败"
+                systemctl status star-cloud.service --no-pager -l
+              fi
+            fi
+            
+            echo "✅ 回滚完成！"
+
+      - name: 验证回滚结果
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🔍 验证回滚结果..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_TYPE="${{ inputs.deploy_type }}"
+            
+            # 确定路径
+            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
+              DEPLOY_PATH="/srv/apps/$PROJECT"
+            else
+              DEPLOY_PATH="/srv/static/$PROJECT"
+            fi
+            
+            echo "📁 验证部署路径: $DEPLOY_PATH"
+            
+            # 检查部署目录
+            if [ -d "$DEPLOY_PATH" ]; then
+              FILE_COUNT=$(find "$DEPLOY_PATH" -type f | wc -l)
+              echo "✅ 部署目录存在，包含 $FILE_COUNT 个文件"
+              
+              # 检查关键文件
+              if [ -f "$DEPLOY_PATH/index.html" ]; then
+                echo "✅ index.html 文件存在"
+              else
+                echo "⚠️ index.html 文件不存在"
+              fi
+            else
+              echo "❌ 部署目录不存在"
+              exit 1
+            fi
+            
+            # 检查服务状态（如果是后端项目）
+            if [[ "$DEPLOY_TYPE" == "backend" ]]; then
+              if systemctl is-active --quiet star-cloud.service; then
+                echo "✅ 后端服务正常运行"
+              else
+                echo "❌ 后端服务异常"
+                systemctl status star-cloud.service --no-pager -l
+              fi
+            fi
+            
+            echo "✅ 回滚验证完成"
+
+  notify-rollback:
+    needs: rollback
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 回滚通知
+        run: |
+          echo "📢 回滚通知"
+          echo "============"
+          echo "回滚时间: $(date)"
+          echo "项目名称: ${{ inputs.project }}"
+          echo "部署类型: ${{ inputs.deploy_type }}"
+          echo "回滚版本: ${{ inputs.backup_version }}"
+          
+          if [ "${{ needs.rollback.result }}" = "success" ]; then
+            echo "✅ 回滚成功"
+          else
+            echo "❌ 回滚失败"
+          fi

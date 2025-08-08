@@ -1,0 +1,290 @@
+name: Health Check
+
+description: "健康检查工作流 - 定期检查服务器和部署状态"
+
+on:
+  schedule:
+    # 每天凌晨2点执行健康检查
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      check_type:
+        description: '检查类型'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - server
+          - services
+          - nginx
+          - deployments
+      server_host:
+        description: '服务器地址'
+        required: false
+        type: string
+      server_user:
+        description: '服务器用户'
+        required: false
+        type: string
+      server_key:
+        description: '服务器密钥'
+        required: false
+        type: string
+      server_port:
+        description: '服务器端口'
+        required: false
+        default: '22'
+        type: string
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 解析服务器配置
+        id: parse-config
+        run: |
+          echo "🔍 解析服务器配置..."
+          
+          # 从输入参数或环境变量获取配置
+          SERVER_HOST="${{ inputs.server_host || secrets.SERVER_HOST }}"
+          SERVER_USER="${{ inputs.server_user || secrets.SERVER_USER }}"
+          SERVER_KEY="${{ inputs.server_key || secrets.SERVER_KEY }}"
+          SERVER_PORT="${{ inputs.server_port || secrets.SERVER_PORT || '22' }}"
+          
+          if [ -z "$SERVER_HOST" ] || [ -z "$SERVER_USER" ] || [ -z "$SERVER_KEY" ]; then
+            echo "🚨 缺少服务器配置信息"
+            exit 1
+          fi
+          
+          echo "✅ 服务器配置解析完成"
+          echo "📋 服务器信息:"
+          echo "- 主机: $SERVER_HOST"
+          echo "- 用户: $SERVER_USER"
+          echo "- 端口: $SERVER_PORT"
+
+      - name: 服务器基础检查
+        if: ${{ inputs.check_type == 'all' || inputs.check_type == 'server' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🔍 服务器基础检查..."
+            
+            # 1. 系统信息检查
+            echo "📊 系统信息:"
+            echo "- 操作系统: $(uname -a)"
+            echo "- 内核版本: $(uname -r)"
+            echo "- 系统负载: $(uptime)"
+            echo "- 内存使用: $(free -h)"
+            echo "- 磁盘使用: $(df -h /)"
+            
+            # 2. 网络连接检查
+            echo "🌐 网络连接检查:"
+            if ping -c 1 8.8.8.8 > /dev/null 2>&1; then
+              echo "✅ 外网连接正常"
+            else
+              echo "❌ 外网连接异常"
+            fi
+            
+            # 3. 关键服务检查
+            echo "🔧 关键服务检查:"
+            
+            # 检查SSH服务
+            if systemctl is-active --quiet sshd; then
+              echo "✅ SSH服务正常运行"
+            else
+              echo "❌ SSH服务异常"
+            fi
+            
+            # 检查Nginx服务
+            if systemctl is-active --quiet nginx; then
+              echo "✅ Nginx服务正常运行"
+            else
+              echo "❌ Nginx服务异常"
+            fi
+            
+            # 4. 磁盘空间检查
+            echo "💾 磁盘空间检查:"
+            DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+            if [ "$DISK_USAGE" -gt 90 ]; then
+              echo "🚨 磁盘使用率过高: ${DISK_USAGE}%"
+            elif [ "$DISK_USAGE" -gt 80 ]; then
+              echo "⚠️ 磁盘使用率较高: ${DISK_USAGE}%"
+            else
+              echo "✅ 磁盘使用率正常: ${DISK_USAGE}%"
+            fi
+            
+            # 5. 内存使用检查
+            echo "🧠 内存使用检查:"
+            MEMORY_USAGE=$(free | awk 'NR==2{printf "%.2f", $3*100/$2}')
+            if (( $(echo "$MEMORY_USAGE > 90" | bc -l) )); then
+              echo "🚨 内存使用率过高: ${MEMORY_USAGE}%"
+            elif (( $(echo "$MEMORY_USAGE > 80" | bc -l) )); then
+              echo "⚠️ 内存使用率较高: ${MEMORY_USAGE}%"
+            else
+              echo "✅ 内存使用率正常: ${MEMORY_USAGE}%"
+            fi
+
+      - name: Nginx服务检查
+        if: ${{ inputs.check_type == 'all' || inputs.check_type == 'nginx' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🔍 Nginx服务检查..."
+            
+            # 1. Nginx进程检查
+            echo "📊 Nginx进程检查:"
+            if pgrep nginx > /dev/null; then
+              echo "✅ Nginx进程正在运行"
+              NGINX_PIDS=$(pgrep nginx)
+              echo "Nginx进程ID: $NGINX_PIDS"
+            else
+              echo "❌ Nginx进程未运行"
+            fi
+            
+            # 2. Nginx配置检查
+            echo "📋 Nginx配置检查:"
+            if nginx -t > /dev/null 2>&1; then
+              echo "✅ Nginx配置语法正确"
+            else
+              echo "❌ Nginx配置语法错误"
+              nginx -t
+            fi
+            
+            # 3. Nginx端口检查
+            echo "🔌 Nginx端口检查:"
+            if netstat -tlnp | grep -q ":80 "; then
+              echo "✅ HTTP端口(80)正常监听"
+            else
+              echo "❌ HTTP端口(80)未监听"
+            fi
+            
+            if netstat -tlnp | grep -q ":443 "; then
+              echo "✅ HTTPS端口(443)正常监听"
+            else
+              echo "❌ HTTPS端口(443)未监听"
+            fi
+            
+            # 4. Nginx错误日志检查
+            echo "📝 Nginx错误日志检查:"
+            if [ -f "/var/log/nginx/error.log" ]; then
+              ERROR_COUNT=$(tail -n 100 /var/log/nginx/error.log | grep -c "error\|ERROR")
+              if [ "$ERROR_COUNT" -gt 0 ]; then
+                echo "⚠️ 发现 $ERROR_COUNT 个错误日志条目"
+                echo "最近错误日志:"
+                tail -n 5 /var/log/nginx/error.log
+              else
+                echo "✅ 无错误日志"
+              fi
+            else
+              echo "⚠️ 错误日志文件不存在"
+            fi
+
+      - name: 部署状态检查
+        if: ${{ inputs.check_type == 'all' || inputs.check_type == 'deployments' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🔍 部署状态检查..."
+            
+            # 1. 检查部署目录
+            echo "📁 部署目录检查:"
+            
+            # 检查静态项目
+            STATIC_ROOT="/srv/static"
+            if [ -d "$STATIC_ROOT" ]; then
+              echo "📂 静态项目目录: $STATIC_ROOT"
+              for project in "$STATIC_ROOT"/*; do
+                if [ -d "$project" ]; then
+                  PROJECT_NAME=$(basename "$project")
+                  FILE_COUNT=$(find "$project" -type f | wc -l)
+                  if [ "$FILE_COUNT" -gt 0 ]; then
+                    echo "  ✅ $PROJECT_NAME: $FILE_COUNT 个文件"
+                  else
+                    echo "  ⚠️ $PROJECT_NAME: 目录为空"
+                  fi
+                fi
+              done
+            else
+              echo "⚠️ 静态项目目录不存在: $STATIC_ROOT"
+            fi
+            
+            # 检查后端项目
+            APPS_ROOT="/srv/apps"
+            if [ -d "$APPS_ROOT" ]; then
+              echo "📂 后端项目目录: $APPS_ROOT"
+              for project in "$APPS_ROOT"/*; do
+                if [ -d "$project" ]; then
+                  PROJECT_NAME=$(basename "$project")
+                  FILE_COUNT=$(find "$project" -type f | wc -l)
+                  if [ "$FILE_COUNT" -gt 0 ]; then
+                    echo "  ✅ $PROJECT_NAME: $FILE_COUNT 个文件"
+                  else
+                    echo "  ⚠️ $PROJECT_NAME: 目录为空"
+                  fi
+                fi
+              done
+            else
+              echo "⚠️ 后端项目目录不存在: $APPS_ROOT"
+            fi
+            
+            # 2. 检查服务状态
+            echo "🔧 服务状态检查:"
+            
+            # 检查star-cloud服务
+            if systemctl is-active --quiet star-cloud.service; then
+              echo "✅ star-cloud服务正常运行"
+            else
+              echo "❌ star-cloud服务异常"
+              systemctl status star-cloud.service --no-pager -l
+            fi
+            
+            # 3. 检查端口监听
+            echo "🔌 端口监听检查:"
+            
+            # 检查后端服务端口
+            if netstat -tlnp | grep -q ":8080 "; then
+              echo "✅ 后端服务端口(8080)正常监听"
+            else
+              echo "❌ 后端服务端口(8080)未监听"
+            fi
+
+      - name: 生成健康检查报告
+        run: |
+          echo "📊 健康检查报告"
+          echo "=================="
+          echo "检查时间: $(date)"
+          echo "检查类型: ${{ inputs.check_type || 'all' }}"
+          echo "检查结果: 完成"
+          echo ""
+          echo "✅ 健康检查已完成，请查看上述日志了解详细信息"
+
+  notify-health-status:
+    needs: health-check
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 健康检查通知
+        run: |
+          echo "📢 健康检查通知"
+          echo "=================="
+          echo "检查时间: $(date)"
+          echo "检查类型: ${{ inputs.check_type || 'all' }}"
+          
+          if [ "${{ needs.health-check.result }}" = "success" ]; then
+            echo "✅ 健康检查通过"
+          else
+            echo "❌ 健康检查失败"
+          fi

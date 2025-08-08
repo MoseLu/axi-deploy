@@ -1,0 +1,303 @@
+name: Cleanup
+
+description: "清理工作流 - 清理旧的备份和日志文件"
+
+on:
+  schedule:
+    # 每周日凌晨3点执行清理
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      cleanup_type:
+        description: '清理类型'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - backups
+          - logs
+          - temp
+      retention_days:
+        description: '保留天数'
+        required: false
+        default: '30'
+        type: string
+      server_host:
+        description: '服务器地址'
+        required: false
+        type: string
+      server_user:
+        description: '服务器用户'
+        required: false
+        type: string
+      server_key:
+        description: '服务器密钥'
+        required: false
+        type: string
+      server_port:
+        description: '服务器端口'
+        required: false
+        default: '22'
+        type: string
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 解析服务器配置
+        id: parse-config
+        run: |
+          echo "🔍 解析服务器配置..."
+          
+          # 从输入参数或环境变量获取配置
+          SERVER_HOST="${{ inputs.server_host || secrets.SERVER_HOST }}"
+          SERVER_USER="${{ inputs.server_user || secrets.SERVER_USER }}"
+          SERVER_KEY="${{ inputs.server_key || secrets.SERVER_KEY }}"
+          SERVER_PORT="${{ inputs.server_port || secrets.SERVER_PORT || '22' }}"
+          
+          if [ -z "$SERVER_HOST" ] || [ -z "$SERVER_USER" ] || [ -z "$SERVER_KEY" ]; then
+            echo "🚨 缺少服务器配置信息"
+            exit 1
+          fi
+          
+          echo "✅ 服务器配置解析完成"
+
+      - name: 清理旧备份
+        if: ${{ inputs.cleanup_type == 'all' || inputs.cleanup_type == 'backups' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🧹 清理旧备份..."
+            
+            RETENTION_DAYS="${{ inputs.retention_days || '30' }}"
+            CUTOFF_DATE=$(date -d "$RETENTION_DAYS days ago" +%Y%m%d)
+            
+            echo "📅 保留天数: $RETENTION_DAYS"
+            echo "📅 截止日期: $CUTOFF_DATE"
+            
+            # 清理应用备份
+            APPS_BACKUP_DIR="/srv/backups/apps"
+            if [ -d "$APPS_BACKUP_DIR" ]; then
+              echo "📁 清理应用备份目录: $APPS_BACKUP_DIR"
+              
+              # 查找需要清理的备份
+              OLD_BACKUPS=$(find "$APPS_BACKUP_DIR" -type d -name "*.backup.*" -printf "%T@ %p\n" | sort -n | while read timestamp path; do
+                BACKUP_DATE=$(echo "$path" | grep -o '[0-9]\{8\}' | head -1)
+                if [ -n "$BACKUP_DATE" ] && [ "$BACKUP_DATE" -lt "$CUTOFF_DATE" ]; then
+                  echo "$path"
+                fi
+              done)
+              
+              if [ -n "$OLD_BACKUPS" ]; then
+                echo "🗑️ 删除旧的应用备份:"
+                echo "$OLD_BACKUPS" | while read -r backup; do
+                  BACKUP_SIZE=$(du -sh "$backup" | cut -f1)
+                  echo "  📦 $(basename "$backup") ($BACKUP_SIZE)"
+                  sudo rm -rf "$backup"
+                done
+                echo "✅ 应用备份清理完成"
+              else
+                echo "📋 没有需要清理的应用备份"
+              fi
+            else
+              echo "⚠️ 应用备份目录不存在: $APPS_BACKUP_DIR"
+            fi
+            
+            # 清理静态文件备份
+            STATIC_BACKUP_DIR="/srv/backups/static"
+            if [ -d "$STATIC_BACKUP_DIR" ]; then
+              echo "📁 清理静态文件备份目录: $STATIC_BACKUP_DIR"
+              
+              # 查找需要清理的备份
+              OLD_BACKUPS=$(find "$STATIC_BACKUP_DIR" -type d -name "*.backup.*" -printf "%T@ %p\n" | sort -n | while read timestamp path; do
+                BACKUP_DATE=$(echo "$path" | grep -o '[0-9]\{8\}' | head -1)
+                if [ -n "$BACKUP_DATE" ] && [ "$BACKUP_DATE" -lt "$CUTOFF_DATE" ]; then
+                  echo "$path"
+                fi
+              done)
+              
+              if [ -n "$OLD_BACKUPS" ]; then
+                echo "🗑️ 删除旧的静态文件备份:"
+                echo "$OLD_BACKUPS" | while read -r backup; do
+                  BACKUP_SIZE=$(du -sh "$backup" | cut -f1)
+                  echo "  📦 $(basename "$backup") ($BACKUP_SIZE)"
+                  sudo rm -rf "$backup"
+                done
+                echo "✅ 静态文件备份清理完成"
+              else
+                echo "📋 没有需要清理的静态文件备份"
+              fi
+            else
+              echo "⚠️ 静态文件备份目录不存在: $STATIC_BACKUP_DIR"
+            fi
+            
+            # 清理Nginx配置备份
+            NGINX_BACKUP_DIR="/www/server/nginx/conf/conf.d/redamancy/backups"
+            if [ -d "$NGINX_BACKUP_DIR" ]; then
+              echo "📁 清理Nginx配置备份目录: $NGINX_BACKUP_DIR"
+              
+              # 查找需要清理的备份
+              OLD_BACKUPS=$(find "$NGINX_BACKUP_DIR" -type f -name "*.backup.*" -printf "%T@ %p\n" | sort -n | while read timestamp path; do
+                BACKUP_DATE=$(echo "$path" | grep -o '[0-9]\{8\}' | head -1)
+                if [ -n "$BACKUP_DATE" ] && [ "$BACKUP_DATE" -lt "$CUTOFF_DATE" ]; then
+                  echo "$path"
+                fi
+              done)
+              
+              if [ -n "$OLD_BACKUPS" ]; then
+                echo "🗑️ 删除旧的Nginx配置备份:"
+                echo "$OLD_BACKUPS" | while read -r backup; do
+                  BACKUP_SIZE=$(du -sh "$backup" | cut -f1)
+                  echo "  📦 $(basename "$backup") ($BACKUP_SIZE)"
+                  sudo rm -f "$backup"
+                done
+                echo "✅ Nginx配置备份清理完成"
+              else
+                echo "📋 没有需要清理的Nginx配置备份"
+              fi
+            else
+              echo "⚠️ Nginx配置备份目录不存在: $NGINX_BACKUP_DIR"
+            fi
+
+      - name: 清理日志文件
+        if: ${{ inputs.cleanup_type == 'all' || inputs.cleanup_type == 'logs' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🧹 清理日志文件..."
+            
+            RETENTION_DAYS="${{ inputs.retention_days || '30' }}"
+            
+            echo "📅 保留天数: $RETENTION_DAYS"
+            
+            # 清理Nginx日志
+            NGINX_LOG_DIR="/var/log/nginx"
+            if [ -d "$NGINX_LOG_DIR" ]; then
+              echo "📁 清理Nginx日志目录: $NGINX_LOG_DIR"
+              
+              # 查找需要清理的日志文件
+              OLD_LOGS=$(find "$NGINX_LOG_DIR" -type f -name "*.log.*" -mtime +$RETENTION_DAYS)
+              
+              if [ -n "$OLD_LOGS" ]; then
+                echo "🗑️ 删除旧的Nginx日志文件:"
+                echo "$OLD_LOGS" | while read -r log; do
+                  LOG_SIZE=$(du -sh "$log" | cut -f1)
+                  echo "  📄 $(basename "$log") ($LOG_SIZE)"
+                  sudo rm -f "$log"
+                done
+                echo "✅ Nginx日志清理完成"
+              else
+                echo "📋 没有需要清理的Nginx日志文件"
+              fi
+            else
+              echo "⚠️ Nginx日志目录不存在: $NGINX_LOG_DIR"
+            fi
+            
+            # 清理系统日志
+            SYSTEM_LOG_DIR="/var/log"
+            if [ -d "$SYSTEM_LOG_DIR" ]; then
+              echo "📁 清理系统日志目录: $SYSTEM_LOG_DIR"
+              
+              # 查找需要清理的日志文件
+              OLD_LOGS=$(find "$SYSTEM_LOG_DIR" -type f \( -name "*.log.*" -o -name "*.gz" \) -mtime +$RETENTION_DAYS | grep -E "(nginx|apache|system)" | head -20)
+              
+              if [ -n "$OLD_LOGS" ]; then
+                echo "🗑️ 删除旧的系统日志文件:"
+                echo "$OLD_LOGS" | while read -r log; do
+                  LOG_SIZE=$(du -sh "$log" | cut -f1)
+                  echo "  📄 $(basename "$log") ($LOG_SIZE)"
+                  sudo rm -f "$log"
+                done
+                echo "✅ 系统日志清理完成"
+              else
+                echo "📋 没有需要清理的系统日志文件"
+              fi
+            else
+              echo "⚠️ 系统日志目录不存在: $SYSTEM_LOG_DIR"
+            fi
+
+      - name: 清理临时文件
+        if: ${{ inputs.cleanup_type == 'all' || inputs.cleanup_type == 'temp' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
+            echo "🧹 清理临时文件..."
+            
+            # 清理/tmp目录
+            echo "📁 清理/tmp目录..."
+            TEMP_FILES=$(find /tmp -type f -mtime +7 -not -path "/tmp/systemd-*" | head -50)
+            
+            if [ -n "$TEMP_FILES" ]; then
+              echo "🗑️ 删除旧的临时文件:"
+              echo "$TEMP_FILES" | while read -r file; do
+                if [ -f "$file" ]; then
+                  FILE_SIZE=$(du -sh "$file" | cut -f1)
+                  echo "  📄 $(basename "$file") ($FILE_SIZE)"
+                  sudo rm -f "$file"
+                fi
+              done
+              echo "✅ 临时文件清理完成"
+            else
+              echo "📋 没有需要清理的临时文件"
+            fi
+            
+            # 清理部署相关的临时目录
+            echo "📁 清理部署临时目录..."
+            DEPLOY_TEMP_DIRS=$(find /tmp -type d -name "*deploy*" -mtime +1 2>/dev/null)
+            
+            if [ -n "$DEPLOY_TEMP_DIRS" ]; then
+              echo "🗑️ 删除部署临时目录:"
+              echo "$DEPLOY_TEMP_DIRS" | while read -r dir; do
+                if [ -d "$dir" ]; then
+                  DIR_SIZE=$(du -sh "$dir" | cut -f1)
+                  echo "  📁 $(basename "$dir") ($DIR_SIZE)"
+                  sudo rm -rf "$dir"
+                fi
+              done
+              echo "✅ 部署临时目录清理完成"
+            else
+              echo "📋 没有需要清理的部署临时目录"
+            fi
+
+      - name: 生成清理报告
+        run: |
+          echo "📊 清理报告"
+          echo "============"
+          echo "清理时间: $(date)"
+          echo "清理类型: ${{ inputs.cleanup_type || 'all' }}"
+          echo "保留天数: ${{ inputs.retention_days || '30' }}"
+          echo "清理结果: 完成"
+          echo ""
+          echo "✅ 清理工作已完成，请查看上述日志了解详细信息"
+
+  notify-cleanup:
+    needs: cleanup
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 清理通知
+        run: |
+          echo "📢 清理通知"
+          echo "============"
+          echo "清理时间: $(date)"
+          echo "清理类型: ${{ inputs.cleanup_type || 'all' }}"
+          echo "保留天数: ${{ inputs.retention_days || '30' }}"
+          
+          if [ "${{ needs.cleanup.result }}" = "success" ]; then
+            echo "✅ 清理成功"
+          else
+            echo "❌ 清理失败"
+          fi
