@@ -355,10 +355,10 @@ jobs:
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
 
-  # 步骤7: 测试网站（可选）
-  test-website:
-    needs: [parse-secrets, deploy-project, configure-nginx, start-service]
-    if: ${{ inputs.test_url != '' }}
+  # 步骤7: 测试网站 - 静态项目（可选）
+  test-website-static:
+    needs: [parse-secrets, deploy-project, configure-nginx]
+    if: ${{ inputs.test_url != '' && inputs.deploy_type == 'static' }}
     uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
       project: ${{ inputs.project }}
@@ -372,9 +372,26 @@ jobs:
       static_root: "/srv/static"
       nginx_conf_dir: "/www/server/nginx/conf/conf.d/redamancy"
 
-  # 步骤8: 部署完成总结
+  # 步骤8: 测试网站 - 后端项目（可选）
+  test-website-backend:
+    needs: [parse-secrets, deploy-project, configure-nginx, start-service]
+    if: ${{ inputs.test_url != '' && inputs.deploy_type == 'backend' }}
+    uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
+    with:
+      project: ${{ inputs.project }}
+      test_url: ${{ inputs.test_url }}
+      deploy_type: ${{ inputs.deploy_type }}
+      server_host: ${{ needs.parse-secrets.outputs.server_host }}
+      server_user: ${{ needs.parse-secrets.outputs.server_user }}
+      server_key: ${{ needs.parse-secrets.outputs.server_key }}
+      server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      apps_root: "/srv/apps"
+      static_root: "/srv/static"
+      nginx_conf_dir: "/www/server/nginx/conf/conf.d/redamancy"
+
+  # 步骤9: 部署完成总结
   deployment-summary:
-    needs: [parse-secrets, server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website]
+    needs: [parse-secrets, server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website-static, test-website-backend]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -395,7 +412,8 @@ jobs:
           echo "- 部署项目: ${{ needs.deploy-project.result }}"
           echo "- 配置Nginx: ${{ needs.configure-nginx.result || 'skipped' }}"
           echo "- 启动服务: ${{ needs.start-service.result || 'skipped' }}"
-          echo "- 测试网站: ${{ needs.test-website.result || 'skipped' }}"
+          echo "- 测试网站(静态): ${{ needs.test-website-static.result || 'skipped' }}"
+          echo "- 测试网站(后端): ${{ needs.test-website-backend.result || 'skipped' }}"
           echo ""
           echo "🔗 访问信息:"
           echo "- 域名: redamancy.com.cn"
