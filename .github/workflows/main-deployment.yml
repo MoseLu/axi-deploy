@@ -300,6 +300,14 @@ jobs:
           echo "- PAT是否为空: $([ -z "$DEPLOY_CENTER_PAT" ] && echo '是' || echo '否')"
           echo "- PAT是否为null: $([ "$DEPLOY_CENTER_PAT" = "null" ] && echo '是' || echo '否')"
           echo "- PAT前10个字符: ${DEPLOY_CENTER_PAT:0:10}..."
+          
+          # 调试输出设置
+          echo "🔍 调试输出设置:"
+          echo "- server_host: $SERVER_HOST"
+          echo "- server_port: $SERVER_PORT"
+          echo "- server_user: $SERVER_USER"
+          echo "- server_key长度: $(echo "$SERVER_KEY" | wc -c)"
+          echo "- deploy_center_pat长度: $(echo "$DEPLOY_CENTER_PAT" | wc -c)"
 
   # 步骤3: 服务器初始化（可选，使用可复用工作流）
   server-init:
