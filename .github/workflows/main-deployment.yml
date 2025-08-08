@@ -358,7 +358,7 @@ jobs:
   # 步骤7: 测试网站（可选）
   test-website:
     needs: [parse-secrets, deploy-project, start-service]
-    if: ${{ inputs.test_url != '' }}
+    if: ${{ inputs.test_url != '' && inputs.test_url != 'null' }}
     uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
       project: ${{ inputs.project }}
