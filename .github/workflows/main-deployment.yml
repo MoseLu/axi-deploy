@@ -3,6 +3,12 @@ name: Main Deployment
 description: "主部署工作流 - 整个部署流程的入口点"
 
 on:
+  # 监听源仓库的构建工作流完成
+  workflow_run:
+    workflows: ["Build & Deploy AXI Docs"]   # 源工作流名字
+    types:
+      - completed
+  # 保留手动触发功能
   workflow_dispatch:
     inputs:
       project:
@@ -45,9 +51,15 @@ on:
 jobs:
   download-artifact:
     runs-on: ubuntu-latest
+    # 只在workflow_run触发且源工作流成功时运行
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     outputs:
       artifact_path: ${{ steps.set-outputs.outputs.artifact_path }}
       artifact_size: ${{ steps.set-outputs.outputs.artifact_size }}
+      artifact_name: ${{ steps.set-project-info.outputs.artifact_name }}
+      project: ${{ steps.set-project-info.outputs.project }}
+      source_repo: ${{ steps.set-project-info.outputs.source_repo }}
+      run_id: ${{ steps.set-project-info.outputs.run_id }}
       server_host: ${{ steps.parse-secrets.outputs.server_host }}
       server_user: ${{ steps.parse-secrets.outputs.server_user }}
       server_key: ${{ steps.parse-secrets.outputs.server_key }}
@@ -59,7 +71,15 @@ jobs:
         id: parse-secrets
         run: |
           echo "🔍 解析部署密钥..."
-          DEPLOY_SECRETS='${{ inputs.deploy_secrets }}'
+          
+          # 根据触发方式获取部署密钥
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # workflow_run触发时，从环境变量获取
+            DEPLOY_SECRETS='${{ secrets.DEPLOY_SECRETS }}'
+          else
+            # workflow_dispatch触发时，从输入参数获取
+            DEPLOY_SECRETS='${{ inputs.deploy_secrets }}'
+          fi
           
           # 检查是否为base64编码
           if echo "$DEPLOY_SECRETS" | base64 -d &>/dev/null; then
@@ -98,33 +118,73 @@ jobs:
           
           # 设置输出 - 使用printf避免特殊字符问题
           printf "server_host=%s\n" "$SERVER_HOST" >> $GITHUB_OUTPUT
-          printf "server_user=%s\n" "$SERVER_USER" >> $GITHUB_OUTPUT
           printf "server_port=%s\n" "$SERVER_PORT" >> $GITHUB_OUTPUT
+          printf "server_user=%s\n" "$SERVER_USER" >> $GITHUB_OUTPUT
+          printf "server_key=%s\n" "$SERVER_KEY" >> $GITHUB_OUTPUT
           printf "deploy_center_pat=%s\n" "$DEPLOY_CENTER_PAT" >> $GITHUB_OUTPUT
           
-          # 对于包含换行符的SERVER_KEY，使用多行输出语法
-          {
-            echo 'server_key<<EOF' >> $GITHUB_OUTPUT
-            echo "$SERVER_KEY" >> $GITHUB_OUTPUT
-            echo 'EOF' >> $GITHUB_OUTPUT
-          }
-          
           echo "✅ 部署密钥解析完成"
+          echo "📋 服务器信息:"
           echo "- 主机: $SERVER_HOST"
           echo "- 端口: $SERVER_PORT"
           echo "- 用户: $SERVER_USER"
 
+      - name: 设置项目信息
+        id: set-project-info
+        run: |
+          echo "🔧 设置项目信息..."
+          
+          # 根据触发方式获取项目信息
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # workflow_run触发时，从事件中获取
+            PROJECT="${{ github.event.workflow_run.repository.name }}"
+            SOURCE_REPO="${{ github.event.workflow_run.repository.full_name }}"
+            RUN_ID="${{ github.event.workflow_run.id }}"
+            echo "📋 从workflow_run事件获取项目信息:"
+            echo "  项目名称: $PROJECT"
+            echo "  源仓库: $SOURCE_REPO"
+            echo "  运行ID: $RUN_ID"
+          else
+            # workflow_dispatch触发时，从输入参数获取
+            PROJECT="${{ inputs.project }}"
+            SOURCE_REPO="${{ inputs.source_repo }}"
+            RUN_ID="${{ inputs.run_id }}"
+            echo "📋 从workflow_dispatch输入获取项目信息:"
+            echo "  项目名称: $PROJECT"
+            echo "  源仓库: $SOURCE_REPO"
+            echo "  运行ID: $RUN_ID"
+          fi
+          
+          # 设置输出变量
+          echo "project=$PROJECT" >> $GITHUB_OUTPUT
+          echo "source_repo=$SOURCE_REPO" >> $GITHUB_OUTPUT
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          
+          # 根据项目名称确定artifact名称
+          ARTIFACT_NAME="dist-$PROJECT"
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          
+          echo "✅ 项目信息设置完成"
+
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 下载构建产物
-        id: download
+      - name: 下载构建产物 (workflow_run)
+        if: github.event_name == 'workflow_run'
         uses: actions/download-artifact@v4
         with:
-          name: dist-${{ inputs.project }}
+          name: ${{ steps.set-project-info.outputs.artifact_name }}
           path: ./
-          run-id: ${{ inputs.run_id }}
-          repository: ${{ inputs.source_repo }}
+          github-token: ${{ steps.parse-secrets.outputs.deploy_center_pat }}
+          repository: ${{ github.event.workflow_run.repository.full_name }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: 下载构建产物 (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.set-project-info.outputs.artifact_name }}
+          path: ./
           github-token: ${{ steps.parse-secrets.outputs.deploy_center_pat }}
 
       - name: 检查下载结果
@@ -136,20 +196,20 @@ jobs:
           ls -la ./
           
           # 检查是否有构建产物文件
-          if [ -d "./dist-${{ inputs.project }}" ]; then
-            echo "✅ dist-${{ inputs.project }} 目录存在"
-            echo "dist-${{ inputs.project }} 目录内容:"
-            ls -la "./dist-${{ inputs.project }}/"
+          if [ -d "./dist-${{ steps.set-project-info.outputs.project }}" ]; then
+            echo "✅ dist-${{ steps.set-project-info.outputs.project }} 目录存在"
+            echo "dist-${{ steps.set-project-info.outputs.project }} 目录内容:"
+            ls -la "./dist-${{ steps.set-project-info.outputs.project }}/"
             echo "📊 文件数量:"
-            find "./dist-${{ inputs.project }}" -type f | wc -l
+            find "./dist-${{ steps.set-project-info.outputs.project }}" -type f | wc -l
             echo "📁 前10个文件:"
-            find "./dist-${{ inputs.project }}" -type f | head -10
-          elif [ -f "./dist-${{ inputs.project }}.zip" ]; then
+            find "./dist-${{ steps.set-project-info.outputs.project }}" -type f | head -10
+          elif [ -f "./dist-${{ steps.set-project-info.outputs.project }}.zip" ]; then
             echo "✅ 找到构建产物压缩包"
             echo "📦 压缩包大小:"
-            ls -lh "./dist-${{ inputs.project }}.zip"
+            ls -lh "./dist-${{ steps.set-project-info.outputs.project }}.zip"
             echo "🔧 解压构建产物..."
-            unzip -q "./dist-${{ inputs.project }}.zip"
+            unzip -q "./dist-${{ steps.set-project-info.outputs.project }}.zip"
             echo "📁 解压后内容:"
             ls -la ./
           elif [ -f "./index.html" ]; then
@@ -178,9 +238,9 @@ jobs:
           sleep 2
           
           # 检查可能的构建产物目录
-          if [ -d "./dist-${{ inputs.project }}" ]; then
-            ARTIFACT_DIR="./dist-${{ inputs.project }}"
-            echo "📁 找到 dist-${{ inputs.project }} 目录"
+          if [ -d "./dist-${{ steps.set-project-info.outputs.project }}" ]; then
+            ARTIFACT_DIR="./dist-${{ steps.set-project-info.outputs.project }}"
+            echo "📁 找到 dist-${{ steps.set-project-info.outputs.project }} 目录"
           elif [ -d "./dist" ]; then
             ARTIFACT_DIR="./dist"
             echo "📁 找到 dist 目录"
@@ -251,9 +311,9 @@ jobs:
           ls -la ./
           
           # 确定构建产物路径
-          if [ -d "./dist-${{ inputs.project }}" ]; then
-            ARTIFACT_PATH="./dist-${{ inputs.project }}"
-            echo "📁 找到 dist-${{ inputs.project }} 目录"
+          if [ -d "./dist-${{ steps.set-project-info.outputs.project }}" ]; then
+            ARTIFACT_PATH="./dist-${{ steps.set-project-info.outputs.project }}"
+            echo "📁 找到 dist-${{ steps.set-project-info.outputs.project }} 目录"
           elif [ -d "./dist" ]; then
             ARTIFACT_PATH="./dist"
             echo "📁 找到 dist 目录"
@@ -303,10 +363,8 @@ jobs:
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
-          name: dist-${{ inputs.project }}
+          name: ${{ needs.download-artifact.outputs.artifact_name }}
           path: ./
-          run-id: ${{ inputs.run_id }}
-          repository: ${{ inputs.source_repo }}
           github-token: ${{ needs.download-artifact.outputs.deploy_center_pat }}
 
       - name: 验证构建产物路径
@@ -318,9 +376,9 @@ jobs:
           echo "构建产物大小: ${{ needs.download-artifact.outputs.artifact_size }}"
           
           # 确定构建产物路径
-          if [ -d "./dist-${{ inputs.project }}" ]; then
-            ARTIFACT_PATH="./dist-${{ inputs.project }}"
-            echo "📁 找到 dist-${{ inputs.project }} 目录"
+          if [ -d "./dist-${{ needs.download-artifact.outputs.project }}" ]; then
+            ARTIFACT_PATH="./dist-${{ needs.download-artifact.outputs.project }}"
+            echo "📁 找到 dist-${{ needs.download-artifact.outputs.project }} 目录"
           elif [ -d "./dist" ]; then
             ARTIFACT_PATH="./dist"
             echo "📁 找到 dist 目录"
@@ -378,7 +436,7 @@ jobs:
           key:      ${{ needs.download-artifact.outputs.server_key }}
           port:     ${{ needs.download-artifact.outputs.server_port }}
           source:   "${{ needs.download-artifact.outputs.artifact_path }}"
-          target:   "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
+          target:   "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ needs.download-artifact.outputs.project }}"
           strip_components: 0
 
       - name: 验证部署结果
@@ -391,7 +449,7 @@ jobs:
           script: |
             echo "🔍 验证部署结果..."
             
-            PROJECT="${{ inputs.project }}"
+            PROJECT="${{ needs.download-artifact.outputs.project }}"
             DEPLOY_TYPE="${{ inputs.deploy_type }}"
             DEPLOY_PATH="/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/$PROJECT"
             
@@ -441,7 +499,7 @@ jobs:
           script: |
             echo "📁 整理部署目录结构..."
             
-            PROJECT="${{ inputs.project }}"
+            PROJECT="${{ needs.download-artifact.outputs.project }}"
             DEPLOY_TYPE="${{ inputs.deploy_type }}"
             DEPLOY_PATH="/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/$PROJECT"
             
@@ -530,7 +588,7 @@ jobs:
         id: set-outputs
         run: |
           echo "deploy_success=true" >> $GITHUB_OUTPUT
-          echo "deploy_path=/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}" >> $GITHUB_OUTPUT
+          echo "deploy_path=/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ needs.download-artifact.outputs.project }}" >> $GITHUB_OUTPUT
           echo "✅ 部署完成"
 
   configure-nginx:
@@ -538,7 +596,7 @@ jobs:
     if: ${{ inputs.nginx_config != '' }}
     uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
-      project: ${{ inputs.project }}
+      project: ${{ needs.download-artifact.outputs.project }}
       server_host: ${{ needs.download-artifact.outputs.server_host }}
       server_user: ${{ needs.download-artifact.outputs.server_user }}
       server_key: ${{ needs.download-artifact.outputs.server_key }}
@@ -564,7 +622,7 @@ jobs:
           script: |
             echo "🚀 启动服务..."
             
-            PROJECT="${{ inputs.project }}"
+            PROJECT="${{ needs.download-artifact.outputs.project }}"
             START_CMD="${{ inputs.start_cmd }}"
             APPS_ROOT="/srv/apps"
             
@@ -650,10 +708,10 @@ jobs:
           echo "🎉 部署流程完成"
           echo "=========================================="
           echo "📋 部署信息:"
-          echo "- 项目: ${{ inputs.project }}"
+          echo "- 项目: ${{ needs.download-artifact.outputs.project }}"
           echo "- 部署类型: ${{ inputs.deploy_type }}"
-          echo "- 源仓库: ${{ inputs.source_repo }}"
-          echo "- 构建ID: ${{ inputs.run_id }}"
+          echo "- 源仓库: ${{ needs.download-artifact.outputs.source_repo }}"
+          echo "- 构建ID: ${{ needs.download-artifact.outputs.run_id }}"
           echo ""
           echo "📊 执行状态:"
           echo "- 下载构建产物: ${{ needs.download-artifact.result }}"
@@ -670,7 +728,7 @@ jobs:
           fi
           echo ""
           echo "📝 部署完成通知:"
-          echo "✅ 项目 ${{ inputs.project }} 已成功部署到服务器"
+          echo "✅ 项目 ${{ needs.download-artifact.outputs.project }} 已成功部署到服务器"
           if [ "${{ inputs.test_url }}" != "" ]; then
             echo "🌐 可通过 ${{ inputs.test_url }} 访问"
           fi
