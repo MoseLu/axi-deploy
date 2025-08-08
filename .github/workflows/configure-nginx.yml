@@ -137,13 +137,13 @@ jobs:
               sudo rm -f "$ROUTE_CONF"
               echo "✅ 旧路由配置文件已备份到: $BACKUP_FILE"
               
-              # 清理旧的备份文件，只保留最近2个
+              # 清理旧的备份文件，只保留最近5个
               echo "🧹 清理旧的备份文件..."
-              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/route-$PROJECT.conf.backup.* 2>/dev/null | tail -n +3)
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/route-$PROJECT.conf.backup.* 2>/dev/null | tail -n +6)
               if [ -n "$BACKUP_FILES" ]; then
                 echo "🗑️ 删除旧的备份文件:"
                 echo "$BACKUP_FILES" | xargs -r sudo rm -f
-                echo "✅ 旧备份文件已清理，保留最近2个备份"
+                echo "✅ 旧备份文件已清理，保留最近5个备份"
               else
                 echo "📋 没有需要清理的旧备份文件"
               fi
