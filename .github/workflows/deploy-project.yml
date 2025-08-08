@@ -37,9 +37,9 @@ on:
         type: string
         description: "服务器端口"
       deploy_center_pat:
-        required: true
+        required: false
         type: string
-        description: "GitHub Token用于下载构建产物"
+        description: "GitHub Token用于下载构建产物（可选，默认使用GITHUB_TOKEN）"
       apps_root:
         required: false
         type: string
@@ -112,68 +112,73 @@ jobs:
           echo "构建产物名称: dist-${{ inputs.project }}"
           echo "源仓库: ${{ inputs.source_repo }}"
           echo "运行ID: ${{ inputs.run_id }}"
-          echo "🔍 Token调试信息:"
-          echo "Token长度: $(echo '${{ inputs.deploy_center_pat }}' | wc -c)"
-          echo "Token是否为空: ${{ inputs.deploy_center_pat == '' && '是' || '否' }}"
-          echo "Token是否为null: ${{ inputs.deploy_center_pat == 'null' && '是' || '否' }}"
-          echo "Token原始值: '${{ inputs.deploy_center_pat }}'"
-          if [ -n "${{ inputs.deploy_center_pat }}" ]; then
-            TOKEN="${{ inputs.deploy_center_pat }}"
-            echo "Token前20个字符: '${TOKEN:0:20}'"
+          
+          # 确定使用的Token
+          if [ -n "${{ inputs.deploy_center_pat }}" ] && [ "${{ inputs.deploy_center_pat }}" != "null" ]; then
+            USED_TOKEN="${{ inputs.deploy_center_pat }}"
+            TOKEN_SOURCE="外部提供的PAT"
           else
-            echo "Token前20个字符: 未提供"
+            USED_TOKEN="${{ github.token }}"
+            TOKEN_SOURCE="内置GITHUB_TOKEN"
           fi
           
-          if [ -n "${{ inputs.deploy_center_pat }}" ] && [ "${{ inputs.deploy_center_pat }}" != "null" ]; then
-            echo "GitHub Token: 已提供"
-            TOKEN="${{ inputs.deploy_center_pat }}"
-            echo "Token 前10个字符: ${TOKEN:0:10}..."
-          else
-            echo "GitHub Token: 未提供"
-            echo "Token 前10个字符: 未提供"
-            echo "🔍 Token原始值: '${{ inputs.deploy_center_pat }}'"
-          fi
+          echo "🔍 Token调试信息:"
+          echo "Token来源: $TOKEN_SOURCE"
+          echo "Token长度: $(echo '$USED_TOKEN' | wc -c)"
+          echo "Token是否为空: $([ -z "$USED_TOKEN" ] && echo '是' || echo '否')"
+          echo "Token前10个字符: ${USED_TOKEN:0:10}..."
+          
+          echo "✅ 将使用Token: $TOKEN_SOURCE"
 
       - name: 测试PAT权限
         run: |
-          echo "🔍 测试PAT权限..."
+          echo "🔍 测试Token权限..."
           
+          # 确定使用的Token
           if [ -n "${{ inputs.deploy_center_pat }}" ] && [ "${{ inputs.deploy_center_pat }}" != "null" ]; then
-            echo "✅ PAT已提供，测试权限..."
-            
-            # 测试PAT是否有效
-            RESPONSE=$(curl -s -H "Authorization: token ${{ inputs.deploy_center_pat }}" \
-              "https://api.github.com/user" 2>/dev/null || echo "API调用失败")
-            
-            if echo "$RESPONSE" | grep -q '"login"'; then
-              USER_LOGIN=$(echo "$RESPONSE" | jq -r '.login // empty' 2>/dev/null)
-              echo "✅ PAT有效，用户: $USER_LOGIN"
-            else
-              echo "❌ PAT无效或权限不足"
-              echo "API响应: $RESPONSE"
-            fi
-            
-            # 测试对目标仓库的访问权限
-            REPO_RESPONSE=$(curl -s -H "Authorization: token ${{ inputs.deploy_center_pat }}" \
-              "https://api.github.com/repos/${{ inputs.source_repo }}" 2>/dev/null || echo "API调用失败")
-            
-            if echo "$REPO_RESPONSE" | grep -q '"name"'; then
-              REPO_NAME=$(echo "$REPO_RESPONSE" | jq -r '.name // empty' 2>/dev/null)
-              echo "✅ 可以访问仓库: $REPO_NAME"
-            else
-              echo "❌ 无法访问仓库: ${{ inputs.source_repo }}"
-              echo "API响应: $REPO_RESPONSE"
-            fi
+            USED_TOKEN="${{ inputs.deploy_center_pat }}"
+            TOKEN_SOURCE="外部提供的PAT"
           else
-            echo "❌ PAT未提供"
+            USED_TOKEN="${{ github.token }}"
+            TOKEN_SOURCE="内置GITHUB_TOKEN"
           fi
+          
+          echo "🔍 使用Token来源: $TOKEN_SOURCE"
+          
+          # 测试Token是否有效
+          RESPONSE=$(curl -s -H "Authorization: token $USED_TOKEN" \
+            "https://api.github.com/user" 2>/dev/null || echo "API调用失败")
+          
+          if echo "$RESPONSE" | grep -q '"login"'; then
+            USER_LOGIN=$(echo "$RESPONSE" | jq -r '.login // empty' 2>/dev/null)
+            echo "✅ Token有效，用户: $USER_LOGIN"
+          else
+            echo "❌ Token无效或权限不足"
+            echo "API响应: $RESPONSE"
+            exit 1
+          fi
+          
+          # 测试对目标仓库的访问权限
+          REPO_RESPONSE=$(curl -s -H "Authorization: token $USED_TOKEN" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}" 2>/dev/null || echo "API调用失败")
+          
+          if echo "$REPO_RESPONSE" | grep -q '"name"'; then
+            REPO_NAME=$(echo "$REPO_RESPONSE" | jq -r '.name // empty' 2>/dev/null)
+            echo "✅ 可以访问仓库: $REPO_NAME"
+          else
+            echo "❌ 无法访问仓库: ${{ inputs.source_repo }}"
+            echo "API响应: $REPO_RESPONSE"
+            exit 1
+          fi
+          
+          echo "✅ Token权限测试通过"
 
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
           name: dist-${{ inputs.project }}
           path: ./
-          github-token: ${{ inputs.deploy_center_pat }}
+          github-token: ${{ inputs.deploy_center_pat || github.token }}
           repository: ${{ inputs.source_repo }}
           run-id: ${{ inputs.run_id }}
 
@@ -222,12 +227,14 @@ jobs:
             echo "3. GitHub Token权限不足"
             echo "4. 源仓库或运行ID错误"
             echo "5. 跨仓库访问限制"
+            echo "6. 仓库权限设置问题"
             echo ""
             echo "🔍 建议检查:"
             echo "1. 访问 https://github.com/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}"
             echo "2. 查看构建产物列表"
             echo "3. 确认构建产物名称"
             echo "4. 检查Token权限"
+            echo "5. 确认仓库访问权限"
             exit 1
           fi
 

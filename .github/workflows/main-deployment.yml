@@ -38,7 +38,7 @@ on:
         required: false
         type: string
       deploy_secrets:
-        description: '部署密钥 (JSON格式或base64编码的JSON: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})'
+        description: '部署密钥 (JSON格式或base64编码的JSON: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})，DEPLOY_CENTER_PAT可选，默认使用内置Token'
         required: true
         type: string
       skip_init:
@@ -255,8 +255,8 @@ jobs:
             exit 1
           fi
           if [ "$DEPLOY_CENTER_PAT" = "null" ] || [ -z "$DEPLOY_CENTER_PAT" ]; then
-            echo "🚨 缺少必需的DEPLOY_CENTER_PAT参数"
-            exit 1
+            echo "📝 DEPLOY_CENTER_PAT参数未提供，将使用内置GITHUB_TOKEN"
+            DEPLOY_CENTER_PAT=""
           fi
           
           # 设置输出 - 使用多行输出语法确保包含换行符的密钥正确传递
@@ -313,7 +313,7 @@ jobs:
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
-      deploy_center_pat: ${{ needs.parse-secrets.outputs.deploy_center_pat }}
+      deploy_center_pat: ${{ needs.parse-secrets.outputs.deploy_center_pat || '' }}
 
   # 步骤5: 配置Nginx（可选）
   configure-nginx:
