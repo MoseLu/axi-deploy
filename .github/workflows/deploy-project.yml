@@ -385,8 +385,17 @@ jobs:
             find . -type f -maxdepth 2
             find . -type d -maxdepth 2
             
+            # 检查是否有压缩包
+            if [ -f "deployment.tar.gz" ]; then
+              echo "✅ 发现部署压缩包，正在解压..."
+              mkdir -p "./dist-${{ inputs.project }}"
+              tar -xzf deployment.tar.gz -C "./dist-${{ inputs.project }}"
+              echo "✅ 部署压缩包解压完成"
+              echo "📁 构建产物内容:"
+              ls -la "./dist-${{ inputs.project }}/"
+              echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
             # 检查当前目录是否包含构建产物文件
-            if [ -f "index.html" ] || [ -f "package.json" ] || [ -d "assets" ]; then
+            elif [ -f "index.html" ] || [ -f "package.json" ] || [ -d "assets" ]; then
               echo "✅ 发现构建产物文件在当前目录，创建标准目录结构..."
               mkdir -p "./dist-${{ inputs.project }}"
               # 移动所有文件到构建产物目录（除了隐藏文件）
@@ -398,6 +407,10 @@ jobs:
               echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
             else
               echo "❌ 构建产物下载失败，无法继续部署"
+              echo "🔍 期望的文件:"
+              echo "- ./dist-${{ inputs.project }}/ (目录)"
+              echo "- deployment.tar.gz (压缩包)"
+              echo "- index.html, package.json, assets/ (静态文件)"
               exit 1
             fi
           fi
