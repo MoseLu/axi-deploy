@@ -373,12 +373,12 @@ jobs:
       - name: 直接部署到目标目录
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ needs.download-artifact.outputs.server_host }}
+          host:     ${{ needs.download-artifact.outputs.server_host }}
           username: ${{ needs.download-artifact.outputs.server_user }}
-          key: ${{ needs.download-artifact.outputs.server_key }}
-          port: ${{ needs.download-artifact.outputs.server_port }}
-          source: "${{ steps.validate-artifact.outputs.artifact_path }}"
-          target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
+          key:      ${{ needs.download-artifact.outputs.server_key }}
+          port:     ${{ needs.download-artifact.outputs.server_port }}
+          source:   "${{ needs.download-artifact.outputs.artifact_path }}"
+          target:   "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
           strip_components: 0
 
       - name: 验证部署结果
