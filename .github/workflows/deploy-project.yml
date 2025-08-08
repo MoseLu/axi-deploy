@@ -89,24 +89,35 @@ jobs:
           echo "- 部署类型: ${{ inputs.deploy_type }}"
           echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
           
-          if [ "${{ inputs.deploy_type }}" != "backend" ] && [ "${{ inputs.deploy_type }}" != "static" ]; then
-            echo "❌ 无效的部署类型: ${{ inputs.deploy_type }}"
+          # 验证部署类型
+          DEPLOY_TYPE="${{ inputs.deploy_type }}"
+          if [ "$DEPLOY_TYPE" != "backend" ] && [ "$DEPLOY_TYPE" != "static" ]; then
+            echo "❌ 无效的部署类型: $DEPLOY_TYPE"
             exit 1
           fi
           
           # 验证服务器参数
-          if [ -z "${{ inputs.server_host }}" ]; then
+          SERVER_HOST="${{ inputs.server_host }}"
+          SERVER_USER="${{ inputs.server_user }}"
+          SERVER_PORT="${{ inputs.server_port }}"
+          
+          if [ -z "$SERVER_HOST" ]; then
             echo "❌ 服务器主机地址为空"
             exit 1
           fi
-          if [ -z "${{ inputs.server_user }}" ]; then
+          if [ -z "$SERVER_USER" ]; then
             echo "❌ 服务器用户名为空"
             exit 1
           fi
-          if [ -z "${{ inputs.server_port }}" ]; then
+          if [ -z "$SERVER_PORT" ]; then
             echo "❌ 服务器端口为空"
             exit 1
           fi
+          
+          echo "🔍 服务器参数验证:"
+          echo "- 主机: $SERVER_HOST"
+          echo "- 用户: $SERVER_USER"
+          echo "- 端口: $SERVER_PORT"
           
           echo "✅ 输入参数验证通过"
 
