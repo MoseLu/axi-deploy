@@ -46,6 +46,37 @@ jobs:
           github-token: ${{ inputs.github_token }}
           repository: ${{ inputs.source_repo }}
           run-id: ${{ inputs.run_id }}
+        continue-on-error: true
+
+      - name: 检查下载状态
+        run: |
+          echo "🔍 检查下载状态..."
+          if [ ${{ steps.download-artifact.outcome }} == 'failure' ]; then
+            echo "❌ 构建产物下载失败"
+            echo "🔍 错误详情:"
+            echo "- 项目名称: ${{ inputs.project }}"
+            echo "- 源仓库: ${{ inputs.source_repo }}"
+            echo "- 运行ID: ${{ inputs.run_id }}"
+            echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
+            echo "- GitHub Token: ${{ inputs.github_token != '' && '已提供' || '未提供' }}"
+            echo ""
+            echo "可能的原因:"
+            echo "1. 构建产物名称不匹配"
+            echo "2. 构建产物已过期 (retention-days)"
+            echo "3. 源仓库或运行ID错误"
+            echo "4. GitHub Token权限不足"
+            echo "5. 构建产物上传失败"
+            echo ""
+            echo "建议检查:"
+            echo "1. 确认源仓库的构建产物名称是否为 'dist-${{ inputs.project }}'"
+            echo "2. 检查构建产物的保留期限"
+            echo "3. 验证GitHub Token权限"
+            echo "4. 检查源仓库的构建日志"
+            echo "5. 确认源仓库的构建是否成功完成"
+            exit 1
+          else
+            echo "✅ 构建产物下载成功"
+          fi
 
       - name: 检查下载结果
         run: |
@@ -81,11 +112,29 @@ jobs:
             find . -type f -maxdepth 1 | head -10
           else
             echo "❌ 未找到构建产物"
+            echo "🔍 调试信息:"
+            echo "- 项目名称: ${{ inputs.project }}"
+            echo "- 源仓库: ${{ inputs.source_repo }}"
+            echo "- 运行ID: ${{ inputs.run_id }}"
+            echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
             echo "🔍 所有文件:"
             find . -type f -maxdepth 1
             echo "🔍 所有目录:"
             find . -type d -maxdepth 2
             echo "🚨 工作流错误：未找到构建产物，终止部署"
+            echo ""
+            echo "可能的原因:"
+            echo "1. 构建产物名称不匹配"
+            echo "2. 构建产物已过期 (retention-days)"
+            echo "3. 源仓库或运行ID错误"
+            echo "4. GitHub Token权限不足"
+            echo "5. 构建产物上传失败"
+            echo ""
+            echo "建议检查:"
+            echo "1. 确认源仓库的构建产物名称是否为 'dist-${{ inputs.project }}'"
+            echo "2. 检查构建产物的保留期限"
+            echo "3. 验证GitHub Token权限"
+            echo "4. 检查源仓库的构建日志"
             exit 1
           fi
 

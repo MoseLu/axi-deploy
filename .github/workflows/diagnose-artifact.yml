@@ -1,0 +1,131 @@
+name: Diagnose Artifact Download
+
+description: "诊断构建产物下载问题"
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+      source_repo:
+        description: '源仓库 (格式: owner/repo)'
+        required: true
+        type: string
+      run_id:
+        description: '构建运行ID'
+        required: true
+        type: string
+      github_token:
+        description: 'GitHub Token'
+        required: true
+        type: string
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 诊断构建产物下载问题
+        run: |
+          echo "🔍 诊断构建产物下载问题..."
+          echo "=========================================="
+          echo "📋 输入参数:"
+          echo "- 项目名称: ${{ inputs.project }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 运行ID: ${{ inputs.run_id }}"
+          echo "- GitHub Token: ${{ inputs.github_token != '' && '已提供' || '未提供' }}"
+          echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
+          echo ""
+          
+          # 解析源仓库信息
+          REPO_OWNER=$(echo "${{ inputs.source_repo }}" | cut -d'/' -f1)
+          REPO_NAME=$(echo "${{ inputs.source_repo }}" | cut -d'/' -f2)
+          
+          echo "📋 解析的仓库信息:"
+          echo "- 仓库所有者: $REPO_OWNER"
+          echo "- 仓库名称: $REPO_NAME"
+          echo ""
+          
+          # 检查GitHub Token权限
+          echo "🔍 检查GitHub Token权限..."
+          if [ -n "${{ inputs.github_token }}" ]; then
+            echo "✅ GitHub Token已提供"
+            # 这里可以添加Token权限验证
+          else
+            echo "❌ GitHub Token未提供"
+          fi
+          echo ""
+          
+          # 检查构建产物名称格式
+          echo "🔍 检查构建产物名称格式..."
+          EXPECTED_ARTIFACT="dist-${{ inputs.project }}"
+          echo "- 期望的构建产物名称: $EXPECTED_ARTIFACT"
+          echo ""
+          
+          # 提供常见问题的解决方案
+          echo "🔧 常见问题解决方案:"
+          echo ""
+          echo "1. 构建产物名称不匹配:"
+          echo "   - 检查源仓库的构建工作流中upload-artifact的name参数"
+          echo "   - 确保name参数为 'dist-${{ inputs.project }}'"
+          echo ""
+          echo "2. 构建产物已过期:"
+          echo "   - 检查源仓库构建工作流中的retention-days参数"
+          echo "   - 默认保留期为1天，建议设置为7天或更长"
+          echo ""
+          echo "3. 源仓库或运行ID错误:"
+          echo "   - 确认源仓库名称格式为 'owner/repo'"
+          echo "   - 确认运行ID是有效的数字"
+          echo "   - 检查源仓库的构建是否成功完成"
+          echo ""
+          echo "4. GitHub Token权限不足:"
+          echo "   - 确保Token有足够的权限访问源仓库"
+          echo "   - 检查Token是否已过期"
+          echo ""
+          echo "5. 构建产物上传失败:"
+          echo "   - 检查源仓库的构建日志"
+          echo "   - 确认构建产物目录存在且不为空"
+          echo ""
+          echo "=========================================="
+          echo "💡 建议操作:"
+          echo "1. 重新触发源仓库的构建"
+          echo "2. 检查源仓库的构建日志"
+          echo "3. 验证构建产物名称和路径"
+          echo "4. 确认GitHub Token权限"
+          echo "=========================================="
+
+      - name: 尝试下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ inputs.project }}
+          path: ./
+          github-token: ${{ inputs.github_token }}
+          repository: ${{ inputs.source_repo }}
+          run-id: ${{ inputs.run_id }}
+        continue-on-error: true
+
+      - name: 分析下载结果
+        run: |
+          echo "🔍 分析下载结果..."
+          if [ ${{ steps.download-artifact.outcome }} == 'success' ]; then
+            echo "✅ 构建产物下载成功"
+            echo "📁 下载的文件:"
+            ls -la ./
+            echo ""
+            echo "📊 文件统计:"
+            find . -type f | wc -l
+            echo ""
+            echo "📁 目录结构:"
+            find . -type d
+          else
+            echo "❌ 构建产物下载失败"
+            echo "🔍 当前目录内容:"
+            ls -la ./
+            echo ""
+            echo "💡 建议:"
+            echo "1. 检查构建产物是否已过期"
+            echo "2. 确认构建产物名称是否正确"
+            echo "3. 验证GitHub Token权限"
+            echo "4. 重新触发源仓库的构建"
+          fi
