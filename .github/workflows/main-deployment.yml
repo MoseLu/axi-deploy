@@ -300,28 +300,63 @@ jobs:
       deploy_path: ${{ steps.set-outputs.outputs.deploy_path }}
     
     steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ inputs.project }}
+          path: ./
+          run-id: ${{ inputs.run_id }}
+          repository: ${{ inputs.source_repo }}
+          github-token: ${{ needs.download-artifact.outputs.deploy_center_pat }}
+
       - name: 验证构建产物路径
+        id: validate-artifact
         run: |
           echo "🔍 验证构建产物路径..."
           echo "当前工作目录: $(pwd)"
           echo "构建产物路径: ${{ needs.download-artifact.outputs.artifact_path }}"
           echo "构建产物大小: ${{ needs.download-artifact.outputs.artifact_size }}"
           
-          if [ -z "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
+          # 确定构建产物路径
+          if [ -d "./dist-${{ inputs.project }}" ]; then
+            ARTIFACT_PATH="./dist-${{ inputs.project }}"
+            echo "📁 找到 dist-${{ inputs.project }} 目录"
+          elif [ -d "./dist" ]; then
+            ARTIFACT_PATH="./dist"
+            echo "📁 找到 dist 目录"
+          elif [ -d "./docs/.vitepress/dist" ]; then
+            ARTIFACT_PATH="./docs/.vitepress/dist"
+            echo "📁 找到 docs/.vitepress/dist 目录"
+          elif [ -f "./index.html" ]; then
+            # 构建产物直接在当前目录
+            ARTIFACT_PATH="."
+            echo "📁 构建产物直接在当前目录"
+          else
+            echo "❌ 未找到构建产物路径"
+            echo "🔍 当前目录内容:"
+            ls -la ./
+            echo "🔍 所有子目录:"
+            find . -type d -maxdepth 2
+            echo "🔍 所有文件:"
+            find . -type f -maxdepth 2
+            exit 1
+          fi
+          
+          if [ -z "$ARTIFACT_PATH" ]; then
             echo "🚨 构建产物路径为空，终止部署"
             exit 1
           fi
           
-          if [ ! -d "${{ needs.download-artifact.outputs.artifact_path }}" ]; then
-            echo "🚨 构建产物目录不存在: ${{ needs.download-artifact.outputs.artifact_path }}"
+          if [ ! -d "$ARTIFACT_PATH" ] && [ ! -f "$ARTIFACT_PATH/index.html" ]; then
+            echo "🚨 构建产物目录不存在: $ARTIFACT_PATH"
             exit 1
           fi
           
           echo "📁 构建产物目录内容:"
-          ls -la "${{ needs.download-artifact.outputs.artifact_path }}/"
+          ls -la "$ARTIFACT_PATH/"
           
           # 验证文件数量
-          FILE_COUNT=$(find "${{ needs.download-artifact.outputs.artifact_path }}" -type f | wc -l)
+          FILE_COUNT=$(find "$ARTIFACT_PATH" -type f | wc -l)
           echo "📊 文件数量: $FILE_COUNT"
           
           if [ "$FILE_COUNT" -eq 0 ]; then
@@ -330,6 +365,10 @@ jobs:
           fi
           
           echo "✅ 构建产物验证通过"
+          echo "📁 最终构建产物路径: $ARTIFACT_PATH"
+          
+          # 设置输出
+          echo "artifact_path=$ARTIFACT_PATH" >> $GITHUB_OUTPUT
 
       - name: 直接部署到目标目录
         uses: appleboy/scp-action@v0.1.7
@@ -338,7 +377,7 @@ jobs:
           username: ${{ needs.download-artifact.outputs.server_user }}
           key: ${{ needs.download-artifact.outputs.server_key }}
           port: ${{ needs.download-artifact.outputs.server_port }}
-          source: "${{ needs.download-artifact.outputs.artifact_path }}"
+          source: "${{ steps.validate-artifact.outputs.artifact_path }}"
           target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
           strip_components: 0
 
