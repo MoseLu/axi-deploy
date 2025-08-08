@@ -29,28 +29,16 @@ on:
         description: 'Nginx配置（可选）'
         required: false
         type: string
+      test_url:
+        description: '测试URL（可选）'
+        required: false
+        type: string
       start_cmd:
         description: '启动命令（后端项目）'
         required: false
         type: string
-      server_host:
-        description: '服务器地址'
-        required: true
-        type: string
-      server_user:
-        description: '服务器用户'
-        required: true
-        type: string
-      server_key:
-        description: '服务器密钥'
-        required: true
-        type: string
-      server_port:
-        description: '服务器端口'
-        required: true
-        type: string
-      deploy_center_pat:
-        description: 'GitHub Token (必需，用于下载构建产物)'
+      deploy_secrets:
+        description: '部署密钥 (JSON格式: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})'
         required: true
         type: string
 
@@ -60,8 +48,60 @@ jobs:
     outputs:
       artifact_path: ${{ steps.set-outputs.outputs.artifact_path }}
       artifact_size: ${{ steps.set-outputs.outputs.artifact_size }}
+      server_host: ${{ steps.parse-secrets.outputs.server_host }}
+      server_user: ${{ steps.parse-secrets.outputs.server_user }}
+      server_key: ${{ steps.parse-secrets.outputs.server_key }}
+      server_port: ${{ steps.parse-secrets.outputs.server_port }}
+      deploy_center_pat: ${{ steps.parse-secrets.outputs.deploy_center_pat }}
     
     steps:
+      - name: 解析部署密钥
+        id: parse-secrets
+        run: |
+          echo "🔍 解析部署密钥..."
+          DEPLOY_SECRETS='${{ inputs.deploy_secrets }}'
+          
+          # 使用jq解析JSON配置
+          SERVER_HOST=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_HOST')
+          SERVER_PORT=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_PORT')
+          SERVER_USER=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_USER')
+          SERVER_KEY=$(echo "$DEPLOY_SECRETS" | jq -r '.SERVER_KEY')
+          DEPLOY_CENTER_PAT=$(echo "$DEPLOY_SECRETS" | jq -r '.DEPLOY_CENTER_PAT')
+          
+          # 验证必需参数
+          if [ "$SERVER_HOST" = "null" ] || [ -z "$SERVER_HOST" ]; then
+            echo "🚨 缺少必需的SERVER_HOST参数"
+            exit 1
+          fi
+          if [ "$SERVER_PORT" = "null" ] || [ -z "$SERVER_PORT" ]; then
+            echo "🚨 缺少必需的SERVER_PORT参数"
+            exit 1
+          fi
+          if [ "$SERVER_USER" = "null" ] || [ -z "$SERVER_USER" ]; then
+            echo "🚨 缺少必需的SERVER_USER参数"
+            exit 1
+          fi
+          if [ "$SERVER_KEY" = "null" ] || [ -z "$SERVER_KEY" ]; then
+            echo "🚨 缺少必需的SERVER_KEY参数"
+            exit 1
+          fi
+          if [ "$DEPLOY_CENTER_PAT" = "null" ] || [ -z "$DEPLOY_CENTER_PAT" ]; then
+            echo "🚨 缺少必需的DEPLOY_CENTER_PAT参数"
+            exit 1
+          fi
+          
+          # 设置输出
+          echo "server_host=$SERVER_HOST" >> $GITHUB_OUTPUT
+          echo "server_user=$SERVER_USER" >> $GITHUB_OUTPUT
+          echo "server_key=$SERVER_KEY" >> $GITHUB_OUTPUT
+          echo "server_port=$SERVER_PORT" >> $GITHUB_OUTPUT
+          echo "deploy_center_pat=$DEPLOY_CENTER_PAT" >> $GITHUB_OUTPUT
+          
+          echo "✅ 部署密钥解析完成"
+          echo "- 主机: $SERVER_HOST"
+          echo "- 端口: $SERVER_PORT"
+          echo "- 用户: $SERVER_USER"
+
       - name: 检出代码
         uses: actions/checkout@v4
 
@@ -73,7 +113,7 @@ jobs:
           path: ./
           run-id: ${{ inputs.run_id }}
           repository: ${{ inputs.source_repo }}
-          github-token: ${{ inputs.deploy_center_pat }}
+          github-token: ${{ steps.parse-secrets.outputs.deploy_center_pat }}
 
       - name: 检查下载结果
         run: |
@@ -256,10 +296,10 @@ jobs:
       - name: 直接部署到目标目录
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
+          host: ${{ needs.download-artifact.outputs.server_host }}
+          username: ${{ needs.download-artifact.outputs.server_user }}
+          key: ${{ needs.download-artifact.outputs.server_key }}
+          port: ${{ needs.download-artifact.outputs.server_port }}
           source: "${{ needs.download-artifact.outputs.artifact_path }}"
           target: "/srv/${{ inputs.deploy_type == 'backend' && 'apps' || 'static' }}/${{ inputs.project }}"
           strip_components: 0
@@ -267,10 +307,10 @@ jobs:
       - name: 验证部署结果
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
+          host: ${{ needs.download-artifact.outputs.server_host }}
+          username: ${{ needs.download-artifact.outputs.server_user }}
+          key: ${{ needs.download-artifact.outputs.server_key }}
+          port: ${{ needs.download-artifact.outputs.server_port }}
           script: |
             echo "🔍 验证部署结果..."
             
@@ -317,10 +357,10 @@ jobs:
       - name: 整理部署目录结构
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
+          host: ${{ needs.download-artifact.outputs.server_host }}
+          username: ${{ needs.download-artifact.outputs.server_user }}
+          key: ${{ needs.download-artifact.outputs.server_key }}
+          port: ${{ needs.download-artifact.outputs.server_port }}
           script: |
             echo "📁 整理部署目录结构..."
             
@@ -421,12 +461,12 @@ jobs:
     uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       project: ${{ inputs.project }}
-      nginx_config: ${{ inputs.nginx_config }}
-      server_host: ${{ inputs.server_host }}
-      server_user: ${{ inputs.server_user }}
-      server_key: ${{ inputs.server_key }}
-      server_port: ${{ inputs.server_port }}
+      server_host: ${{ needs.download-artifact.outputs.server_host }}
+      server_user: ${{ needs.download-artifact.outputs.server_user }}
+      server_key: ${{ needs.download-artifact.outputs.server_key }}
+      server_port: ${{ needs.download-artifact.outputs.server_port }}
       deploy_type: ${{ inputs.deploy_type }}
+      nginx_config: ${{ inputs.nginx_config }}
 
   start-service:
     needs: [deploy-project]
@@ -439,10 +479,10 @@ jobs:
       - name: 启动服务
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
+          host: ${{ needs.download-artifact.outputs.server_host }}
+          username: ${{ needs.download-artifact.outputs.server_user }}
+          key: ${{ needs.download-artifact.outputs.server_key }}
+          port: ${{ needs.download-artifact.outputs.server_port }}
           script: |
             echo "🚀 启动服务..."
             
@@ -485,7 +525,7 @@ jobs:
 
   test-website:
     needs: [deploy-project, configure-nginx, start-service]
-    if: always()
+    if: ${{ inputs.test_url != '' }}
     runs-on: ubuntu-latest
     outputs:
       test_success: ${{ steps.set-outputs.outputs.test_success }}
@@ -494,12 +534,13 @@ jobs:
       - name: 测试网站可访问性
         run: |
           echo "🔍 测试网站可访问性..."
+          echo "测试URL: ${{ inputs.test_url }}"
           
           # 等待一段时间让服务完全启动
           sleep 10
           
           # 测试网站可访问性
-          HTTP_STATUS=$(curl -f -s -o /dev/null -w "%{http_code}" https://redamancy.com.cn/docs/ 2>/dev/null || echo "000")
+          HTTP_STATUS=$(curl -f -s -o /dev/null -w "%{http_code}" "${{ inputs.test_url }}" 2>/dev/null || echo "000")
           echo "📋 HTTP状态码: $HTTP_STATUS"
           
           if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "301" ] || [ "$HTTP_STATUS" = "302" ]; then
@@ -546,9 +587,13 @@ jobs:
           echo "🔗 访问信息:"
           echo "- 域名: redamancy.com.cn"
           echo "- 项目路径: ${{ needs.deploy-project.outputs.deploy_path }}"
-          echo "- 访问URL: https://redamancy.com.cn/docs/"
+          if [ "${{ inputs.test_url }}" != "" ]; then
+            echo "- 测试URL: ${{ inputs.test_url }}"
+          fi
           echo ""
           echo "📝 部署完成通知:"
           echo "✅ 项目 ${{ inputs.project }} 已成功部署到服务器"
-          echo "🌐 可通过 https://redamancy.com.cn/docs/ 访问"
+          if [ "${{ inputs.test_url }}" != "" ]; then
+            echo "🌐 可通过 ${{ inputs.test_url }} 访问"
+          fi
           echo "=========================================="

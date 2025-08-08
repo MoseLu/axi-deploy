@@ -28,34 +28,14 @@ jobs:
             exit 1
           fi
           
-          if [ -z "${{ github.event.client_payload.server_host }}" ]; then
-            echo "🚨 缺少必需参数: server_host"
-            exit 1
-          fi
-          
-          if [ -z "${{ github.event.client_payload.server_user }}" ]; then
-            echo "🚨 缺少必需参数: server_user"
-            exit 1
-          fi
-          
-          if [ -z "${{ github.event.client_payload.server_key }}" ]; then
-            echo "🚨 缺少必需参数: server_key"
-            exit 1
-          fi
-          
-          if [ -z "${{ github.event.client_payload.server_port }}" ]; then
-            echo "🚨 缺少必需参数: server_port"
-            exit 1
-          fi
-          
-          # 检查DEPLOY_CENTER_PAT参数（必需）
-          if [ -z "${{ github.event.client_payload.deploy_center_pat }}" ]; then
-            echo "🚨 缺少必需参数: deploy_center_pat"
+          # 检查DEPLOY_SECRETS参数（必需）
+          if [ -z "${{ github.event.client_payload.deploy_secrets }}" ]; then
+            echo "🚨 缺少必需参数: deploy_secrets"
             echo "⚠️ 可复用工作流无法访问调用者仓库的secrets，必须通过参数传递"
             exit 1
           fi
           
-          echo "✅ 检测到DEPLOY_CENTER_PAT参数"
+          echo "✅ 检测到DEPLOY_SECRETS参数"
           
           # 验证参数格式
           if [[ ! "${{ github.event.client_payload.source_repo }}" =~ ^[^/]+/[^/]+$ ]]; then
@@ -67,12 +47,6 @@ jobs:
           if [[ ! "${{ github.event.client_payload.run_id }}" =~ ^[0-9]+$ ]]; then
             echo "🚨 无效的run_id格式: ${{ github.event.client_payload.run_id }}"
             echo "run_id应为数字"
-            exit 1
-          fi
-          
-          if [[ ! "${{ github.event.client_payload.server_port }}" =~ ^[0-9]+$ ]]; then
-            echo "🚨 无效的server_port格式: ${{ github.event.client_payload.server_port }}"
-            echo "server_port应为数字"
             exit 1
           fi
           
@@ -90,12 +64,10 @@ jobs:
           echo "- 部署类型: $DEPLOY_TYPE"
           echo "- 源仓库: ${{ github.event.client_payload.source_repo }}"
           echo "- 构建ID: ${{ github.event.client_payload.run_id }}"
-          echo "- 服务器: ${{ github.event.client_payload.server_host }}:${{ github.event.client_payload.server_port }}"
-          echo "- 用户: ${{ github.event.client_payload.server_user }}"
-          if [ -n "${{ github.event.client_payload.deploy_center_pat }}" ]; then
-            echo "- DEPLOY_CENTER_PAT: 已提供"
+          if [ -n "${{ github.event.client_payload.deploy_secrets }}" ]; then
+            echo "- DEPLOY_SECRETS: 已提供"
           else
-            echo "- DEPLOY_CENTER_PAT: 使用默认配置"
+            echo "- DEPLOY_SECRETS: 使用默认配置"
           fi
 
       - name: 处理部署请求
@@ -132,14 +104,10 @@ jobs:
               const project = '${{ github.event.client_payload.project }}';
               const sourceRepo = '${{ github.event.client_payload.source_repo }}';
               const runId = '${{ github.event.client_payload.run_id }}';
-              const serverHost = '${{ github.event.client_payload.server_host }}';
-              const serverUser = '${{ github.event.client_payload.server_user }}';
-              const serverKey = '${{ github.event.client_payload.server_key }}';
-              const serverPort = '${{ github.event.client_payload.server_port }}';
-              const deployCenterPat = '${{ github.event.client_payload.deploy_center_pat }}';
+              const deploySecrets = '${{ github.event.client_payload.deploy_secrets }}';
               
-              if (!project || !sourceRepo || !runId || !serverHost || !serverUser || !serverKey || !serverPort || !deployCenterPat) {
-                throw new Error('缺少必需的部署参数，包括deploy_center_pat');
+              if (!project || !sourceRepo || !runId || !deploySecrets) {
+                throw new Error('缺少必需的部署参数，包括deploy_secrets');
               }
               
               // 构建输入参数
@@ -149,15 +117,12 @@ jobs:
                 run_id: runId,
                 deploy_type: '${{ github.event.client_payload.deploy_type || 'static' }}',
                 nginx_config: '${{ github.event.client_payload.nginx_config || '' }}',
+                test_url: '${{ github.event.client_payload.test_url || '' }}',
                 start_cmd: '${{ github.event.client_payload.start_cmd || '' }}',
-                server_host: serverHost,
-                server_user: serverUser,
-                server_key: serverKey,
-                server_port: serverPort,
-                deploy_center_pat: deployCenterPat
+                deploy_secrets: deploySecrets
               };
               
-              console.log('📋 使用业务仓库提供的DEPLOY_CENTER_PAT');
+              console.log('📋 使用业务仓库提供的DEPLOY_SECRETS');
               
               const { data: response } = await github.rest.actions.createWorkflowDispatch({
                 owner: 'MoseLu',
@@ -173,7 +138,7 @@ jobs:
               console.log('- 源仓库:', sourceRepo);
               console.log('- 构建ID:', runId);
               console.log('- 部署类型:', '${{ github.event.client_payload.deploy_type || 'static' }}');
-              console.log('- DEPLOY_CENTER_PAT: 已提供');
+              console.log('- DEPLOY_SECRETS: 已提供');
               
             } catch (error) {
               console.error('🚨 触发主部署工作流失败:', error.message);
