@@ -52,8 +52,11 @@ jobs:
   validate-artifact:
     uses: MoseLu/axi-deploy/.github/workflows/validate-artifact.yml@master
     with:
+      # 项目名称
       project: ${{ inputs.project }}
+      # 源仓库 (格式: owner/repo)
       source_repo: ${{ inputs.source_repo }}
+      # 部署密钥 (JSON格式或base64编码的JSON)
       deploy_secrets: ${{ inputs.deploy_secrets }}
 
   # 步骤2: 解析部署密钥
@@ -61,6 +64,7 @@ jobs:
     needs: [validate-artifact]
     uses: MoseLu/axi-deploy/.github/workflows/parse-secrets.yml@master
     with:
+      # 部署密钥 (JSON格式或base64编码的JSON)
       deploy_secrets: ${{ inputs.deploy_secrets }}
 
   # 步骤3: 服务器初始化（可选，使用可复用工作流）
@@ -69,6 +73,7 @@ jobs:
     if: ${{ inputs.skip_init != 'true' }}
     uses: MoseLu/axi-deploy/.github/workflows/server-init.yml@master
     with:
+      # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
@@ -79,14 +84,20 @@ jobs:
     needs: [parse-secrets, validate-artifact]
     uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
     with:
+      # 项目名称
       project: ${{ inputs.project }}
+      # 源仓库 (格式: owner/repo)
       source_repo: ${{ inputs.source_repo }}
+      # 构建运行ID
       run_id: ${{ needs.validate-artifact.outputs.run_id }}
+      # 部署类型 (backend/static)
       deploy_type: ${{ inputs.deploy_type }}
+      # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      # GitHub Token (可选)
       deploy_center_pat: ${{ needs.parse-secrets.outputs.deploy_center_pat || '' }}
 
   # 步骤5: 配置Nginx（可选）
@@ -95,12 +106,16 @@ jobs:
     if: ${{ inputs.nginx_config != '' }}
     uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
+      # 项目名称
       project: ${{ inputs.project }}
+      # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
+      # Nginx配置
       nginx_config: ${{ inputs.nginx_config }}
 
   # 步骤6: 启动服务（可选，仅后端项目）
@@ -109,9 +124,13 @@ jobs:
     if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
     uses: MoseLu/axi-deploy/.github/workflows/start-service.yml@master
     with:
+      # 项目名称
       project: ${{ inputs.project }}
+      # 启动命令
       start_cmd: ${{ inputs.start_cmd }}
+      # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
+      # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
@@ -123,13 +142,18 @@ jobs:
     if: ${{ inputs.test_url != '' && inputs.deploy_type == 'static' }}
     uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
+      # 项目名称
       project: ${{ inputs.project }}
+      # 测试URL
       test_url: ${{ inputs.test_url }}
+      # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
+      # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      # 部署路径配置
       apps_root: "/srv/apps"
       static_root: "/srv/static"
       nginx_conf_dir: "/www/server/nginx/conf/conf.d/redamancy"
@@ -140,13 +164,18 @@ jobs:
     if: ${{ inputs.test_url != '' && inputs.deploy_type == 'backend' }}
     uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
+      # 项目名称
       project: ${{ inputs.project }}
+      # 测试URL
       test_url: ${{ inputs.test_url }}
+      # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
+      # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      # 部署路径配置
       apps_root: "/srv/apps"
       static_root: "/srv/static"
       nginx_conf_dir: "/www/server/nginx/conf/conf.d/redamancy"
@@ -157,12 +186,16 @@ jobs:
     if: always()
     uses: MoseLu/axi-deploy/.github/workflows/deployment-summary.yml@master
     with:
+      # 项目信息
       project: ${{ inputs.project }}
       deploy_type: ${{ inputs.deploy_type }}
       source_repo: ${{ inputs.source_repo }}
       run_id: ${{ inputs.run_id }}
+      # 测试信息
       test_url: ${{ inputs.test_url }}
+      # 部署路径
       deploy_path: ${{ needs.deploy-project.outputs.deploy_path || '' }}
+      # 各步骤执行结果
       parse_secrets_result: ${{ needs.parse-secrets.result }}
       server_init_result: ${{ needs.server-init.result || '' }}
       validate_artifact_result: ${{ needs.validate-artifact.result }}
