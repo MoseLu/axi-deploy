@@ -54,6 +54,7 @@ on:
         required: true
         type: string
         description: "服务器端口"
+
     outputs:
       init_success:
         description: "初始化是否成功"
@@ -232,6 +233,8 @@ jobs:
             fi
             
             echo "✅ 服务器初始化完成！"
+
+
 
       - name: 设置输出
         id: set-outputs
