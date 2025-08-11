@@ -1,0 +1,17 @@
+name: Test Retry Center
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-retry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Test Retry Center
+        uses: ./.github/actions/retry-center@main
+        with:
+          step_name: "测试重试中心"
+          command: "echo '测试成功'"

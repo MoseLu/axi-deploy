@@ -75,7 +75,7 @@ jobs:
       - name: 执行启动命令并验证
         id: execute-start
         if: inputs.start_cmd != '' && inputs.deploy_type == 'backend'
-        uses: ./.github/actions/retry-center
+        uses: ./.github/actions/retry-center@main
         with:
           step_name: "启动服务"
           command: |
