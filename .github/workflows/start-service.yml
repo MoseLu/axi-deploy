@@ -155,122 +155,118 @@ jobs:
               echo '${{ inputs.server_key }}' > /tmp/ssh_key
               chmod 600 /tmp/ssh_key
               
-              # 创建启动脚本
-              cat > /tmp/start_service_script.sh << 'EOF'
-              #!/bin/bash
-              set -e
-              
-              echo '🚀 执行启动命令...'
-              echo '- 项目: ${{ inputs.project }}'
-              echo '- 启动命令: ${{ inputs.start_cmd }}'
-              
-              # 切换到项目目录
-              cd ${{ inputs.apps_root }}/${{ inputs.project }}
-              echo '📁 当前目录: \$(pwd)'
-              
-              # 验证项目目录是否存在
-              if [ ! -d '${{ inputs.apps_root }}/${{ inputs.project }}' ]; then
-                echo '🚨 项目目录不存在: ${{ inputs.apps_root }}/${{ inputs.project }}'
-                exit 1
-              fi
-              
-              # 验证项目目录不为空
-              FILE_COUNT=\$(find '${{ inputs.apps_root }}/${{ inputs.project }}' -type f | wc -l)
-              if [ \"\$FILE_COUNT\" -eq 0 ]; then
-                echo '🚨 项目目录为空: ${{ inputs.apps_root }}/${{ inputs.project }}'
-                exit 1
-              fi
-              
-              echo '✅ 项目目录验证通过，文件数量: \$FILE_COUNT'
-              
-              # 详细诊断信息（无论什么启动方式都显示）
-              echo '🔍 诊断信息:'
-              echo '- 当前目录: \$(pwd)'
-              echo '- 文件列表:'
-              ls -la
-              echo '- backend 目录内容:'
-              ls -la backend/ || echo 'backend 目录不存在'
-              echo '- 检查启动脚本:'
-              if [ -f 'backend/test-server.js' ]; then
-                echo '✅ backend/test-server.js 存在'
-                ls -la backend/test-server.js
-                echo '- 文件内容前10行:'
-                head -10 backend/test-server.js
-              else
-                echo '❌ backend/test-server.js 不存在'
-              fi
-              echo '- 检查依赖:'
-              if [ -d 'node_modules' ]; then
-                echo '✅ node_modules 存在'
-                ls -la node_modules/express/ || echo '❌ express 依赖不存在'
-              else
-                echo '❌ node_modules 不存在'
-              fi
-              echo '- 检查 ecosystem.config.js:'
-              if [ -f 'ecosystem.config.js' ]; then
-                cat ecosystem.config.js
-              else
-                echo '❌ ecosystem.config.js 不存在'
-              fi
-              echo '- 检查 PM2 是否安装:'
-              if command -v pm2 &> /dev/null; then
-                echo '✅ PM2 已安装: \$(pm2 --version)'
-              else
-                echo '❌ PM2 未安装'
-              fi
-              echo '- 检查端口占用:'
-              netstat -tlnp | grep :8081 || echo '端口8081未被占用'
-              
-              # 检查启动命令是否存在
-              START_CMD='${{ inputs.start_cmd }}'
-              CMD_NAME=\$(echo \"\$START_CMD\" | awk '{print \$1}')
-              
-              # 检查是否有 ecosystem.config.js 文件（PM2 项目）
-              if [ -f 'ecosystem.config.js' ]; then
-                echo '📋 发现 PM2 配置文件，使用 PM2 启动...'
+              # 直接通过SSH执行诊断和启动命令
+              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} '
+                set -e
                 
-                # 检查 PM2 是否安装
-                if ! command -v pm2 &> /dev/null; then
-                  echo '🚨 PM2 未安装，尝试安装...'
-                  npm install -g pm2 || echo 'PM2 安装失败'
+                echo \"🚀 执行启动命令...\"
+                echo \"- 项目: ${{ inputs.project }}\"
+                echo \"- 启动命令: ${{ inputs.start_cmd }}\"
+                
+                # 切换到项目目录
+                cd ${{ inputs.apps_root }}/${{ inputs.project }}
+                echo \"📁 当前目录: \$(pwd)\"
+                
+                # 验证项目目录是否存在
+                if [ ! -d \"${{ inputs.apps_root }}/${{ inputs.project }}\" ]; then
+                  echo \"🚨 项目目录不存在: ${{ inputs.apps_root }}/${{ inputs.project }}\"
+                  exit 1
                 fi
                 
-                # 停止现有进程（如果存在）
-                pm2 stop dashboard-backend 2>/dev/null || echo '没有现有进程需要停止'
-                pm2 delete dashboard-backend 2>/dev/null || echo '没有现有进程需要删除'
-                
-                # 使用 PM2 启动
-                echo '📋 使用 PM2 启动服务...'
-                pm2 start ecosystem.config.js
-                
-                # 检查启动结果
-                echo '📋 检查 PM2 状态...'
-                pm2 status
-                echo '📋 检查 PM2 日志...'
-                pm2 logs dashboard-backend --lines 10 --nostream || echo '无法获取日志'
-                
-                # 保存 PM2 配置
-                pm2 save
-                
-                echo '✅ PM2 启动命令执行完成'
-              else
-                # 传统启动方式
-                if ! command -v \"\$CMD_NAME\" &> /dev/null; then
-                  echo '⚠️ 启动命令不存在: \$CMD_NAME'
-                  echo '🔍 尝试查找可执行文件...'
-                  which \"\$CMD_NAME\" || echo '未找到可执行文件'
+                # 验证项目目录不为空
+                FILE_COUNT=\$(find \"${{ inputs.apps_root }}/${{ inputs.project }}\" -type f | wc -l)
+                if [ \"\$FILE_COUNT\" -eq 0 ]; then
+                  echo \"🚨 项目目录为空: ${{ inputs.apps_root }}/${{ inputs.project }}\"
+                  exit 1
                 fi
                 
-                # 执行启动命令
-                echo '📋 执行启动命令: \$START_CMD'
-                \$START_CMD &
-              fi
-              
-              echo '✅ 启动命令执行完成'
-              EOF
-              
-              # 使用SSH执行启动脚本
-              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} 'bash -s' < /tmp/start_service_script.sh
+                echo \"✅ 项目目录验证通过，文件数量: \$FILE_COUNT\"
+                
+                # 详细诊断信息
+                echo \"🔍 诊断信息:\"
+                echo \"- 当前目录: \$(pwd)\"
+                echo \"- 文件列表:\"
+                ls -la
+                echo \"- backend 目录内容:\"
+                ls -la backend/ || echo \"backend 目录不存在\"
+                echo \"- 检查启动脚本:\"
+                if [ -f \"backend/test-server.js\" ]; then
+                  echo \"✅ backend/test-server.js 存在\"
+                  ls -la backend/test-server.js
+                  echo \"- 文件内容前10行:\"
+                  head -10 backend/test-server.js
+                else
+                  echo \"❌ backend/test-server.js 不存在\"
+                fi
+                echo \"- 检查依赖:\"
+                if [ -d \"node_modules\" ]; then
+                  echo \"✅ node_modules 存在\"
+                  ls -la node_modules/express/ || echo \"❌ express 依赖不存在\"
+                else
+                  echo \"❌ node_modules 不存在\"
+                fi
+                echo \"- 检查 ecosystem.config.js:\"
+                if [ -f \"ecosystem.config.js\" ]; then
+                  cat ecosystem.config.js
+                else
+                  echo \"❌ ecosystem.config.js 不存在\"
+                fi
+                echo \"- 检查 PM2 是否安装:\"
+                if command -v pm2 &> /dev/null; then
+                  echo \"✅ PM2 已安装: \$(pm2 --version)\"
+                else
+                  echo \"❌ PM2 未安装\"
+                fi
+                echo \"- 检查端口占用:\"
+                netstat -tlnp | grep :8081 || echo \"端口8081未被占用\"
+                
+                # 检查启动命令是否存在
+                START_CMD=\"${{ inputs.start_cmd }}\"
+                CMD_NAME=\$(echo \"\$START_CMD\" | awk \"{print \\\$1}\")
+                
+                # 检查是否有 ecosystem.config.js 文件（PM2 项目）
+                if [ -f \"ecosystem.config.js\" ]; then
+                  echo \"📋 发现 PM2 配置文件，使用 PM2 启动...\"
+                  
+                  # 检查 PM2 是否安装
+                  if ! command -v pm2 &> /dev/null; then
+                    echo \"🚨 PM2 未安装，尝试安装...\"
+                    npm install -g pm2 || echo \"PM2 安装失败\"
+                  fi
+                  
+                  # 停止现有进程（如果存在）
+                  pm2 stop dashboard-backend 2>/dev/null || echo \"没有现有进程需要停止\"
+                  pm2 delete dashboard-backend 2>/dev/null || echo \"没有现有进程需要删除\"
+                  
+                  # 使用 PM2 启动
+                  echo \"📋 使用 PM2 启动服务...\"
+                  pm2 start ecosystem.config.js
+                  
+                  # 检查启动结果
+                  echo \"📋 检查 PM2 状态...\"
+                  pm2 status
+                  echo \"📋 检查 PM2 日志...\"
+                  pm2 logs dashboard-backend --lines 10 --nostream || echo \"无法获取日志\"
+                  
+                  # 保存 PM2 配置
+                  pm2 save
+                  
+                  echo \"✅ PM2 启动命令执行完成\"
+                else
+                  # 传统启动方式
+                  if ! command -v \"\$CMD_NAME\" &> /dev/null; then
+                    echo \"⚠️ 启动命令不存在: \$CMD_NAME\"
+                    echo \"🔍 尝试查找可执行文件...\"
+                    which \"\$CMD_NAME\" || echo \"未找到可执行文件\"
+                  fi
+                  
+                  # 执行启动命令
+                  echo \"📋 执行启动命令: \$START_CMD\"
+                  \$START_CMD &
+                fi
+                
+                echo \"✅ 启动命令执行完成\"
+              '
             "; then
               echo "✅ 命令执行成功！"
               
@@ -359,14 +355,18 @@ jobs:
               EXIT_CODE=$?
               if [ $EXIT_CODE -eq 124 ]; then
                 ERROR_MESSAGE="启动服务超时（${TIMEOUT_MINUTES}分钟）"
+                # 超时可以重试
+                RETRYABLE=true
               else
                 ERROR_MESSAGE="启动服务失败，退出码: $EXIT_CODE"
+                # 其他错误不重试，因为可能是配置问题
+                RETRYABLE=false
               fi
               
               echo "❌ 启动服务失败: $ERROR_MESSAGE"
               
-              # 检查是否还有重试机会
-              if [ $ATTEMPTS -le $MAX_RETRIES ]; then
+              # 检查是否还有重试机会且错误可重试
+              if [ $ATTEMPTS -le $MAX_RETRIES ] && [ "$RETRYABLE" = "true" ]; then
                 # 计算重试延迟
                 if [ "$STRATEGY" = "exponential" ]; then
                   DELAY=$((RETRY_DELAY * (2 ** (ATTEMPTS - 1))))
@@ -378,6 +378,9 @@ jobs:
                 
                 echo "⏳ 等待 $DELAY 秒后重试..."
                 sleep $DELAY
+              else
+                echo "💥 错误不可重试或已达到最大重试次数，停止重试"
+                break
               fi
             fi
           done
