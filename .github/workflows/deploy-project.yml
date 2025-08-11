@@ -466,7 +466,7 @@ jobs:
             fi
           fi
 
-                  - name: 上传构建产物到服务器
+      - name: 上传构建产物到服务器
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ inputs.server_host }}
