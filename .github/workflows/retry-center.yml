@@ -131,16 +131,21 @@ jobs:
 
       - name: 执行重试逻辑
         id: retry-step
-        uses: ./.github/actions/retry-center
-        with:
-          step_name: ${{ inputs.step_name }}
-          command: ${{ inputs.command }}
-          max_retries: ${{ inputs.max_retries }}
-          retry_delay: ${{ inputs.retry_delay }}
-          timeout_minutes: ${{ inputs.timeout_minutes }}
-          strategy: ${{ inputs.retry_strategy }}
-          continue_on_error: ${{ inputs.continue_on_error }}
-          notify_on_failure: ${{ inputs.notify_on_failure }}
+        shell: bash
+        run: |
+          # 重试中心核心逻辑
+          source .github/actions/retry-center/retry-logic.sh
+          
+          # 执行重试逻辑
+          execute_with_retry \
+            --max-retries "${{ inputs.max_retries }}" \
+            --retry-delay "${{ inputs.retry_delay }}" \
+            --timeout-minutes "${{ inputs.timeout_minutes }}" \
+            --strategy "${{ inputs.retry_strategy }}" \
+            --step-name "${{ inputs.step_name }}" \
+            --command "${{ inputs.command }}" \
+            --continue-on-error "${{ inputs.continue_on_error }}" \
+            --notify-on-failure "${{ inputs.notify_on_failure }}"
 
       - name: 生成重试报告
         if: always()
