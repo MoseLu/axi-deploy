@@ -75,13 +75,10 @@ jobs:
       - name: 执行启动命令并验证
         id: execute-start
         if: inputs.start_cmd != '' && inputs.deploy_type == 'backend'
-        uses: appleboy/ssh-action@v1.0.3
+        uses: ./.github/actions/retry-center
         with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          script: |
+          step_name: "启动服务"
+          command: |
             echo "🚀 执行启动命令..."
             echo "- 项目: ${{ inputs.project }}"
             echo "- 启动命令: ${{ inputs.start_cmd }}"
@@ -198,86 +195,15 @@ jobs:
             # 等待更长时间确保服务完全启动
             echo "⏳ 等待服务完全启动..."
             sleep 10
-            
-            # 检查 PM2 状态（如果使用 PM2）
-            if command -v pm2 &> /dev/null; then
-              echo "📋 检查 PM2 状态..."
-              pm2 status
-              
-              # 检查特定项目的 PM2 状态
-              PM2_STATUS=$(pm2 jlist 2>/dev/null | jq -r '.[] | select(.name=="dashboard-backend") | .pm2_env.status' 2>/dev/null || echo "unknown")
-              if [ "$PM2_STATUS" = "online" ]; then
-                echo "✅ PM2 服务状态: online"
-              else
-                echo "❌ PM2 服务状态: $PM2_STATUS"
-                echo "📋 PM2 日志:"
-                pm2 logs dashboard-backend --lines 10 2>/dev/null || echo "无法获取日志"
-                exit 1
-              fi
-            fi
-            
-            # 检查端口监听状态
-            echo "🔍 检查端口监听状态..."
-            PORT_LISTENING=false
-            
-            # 检查常见端口
-            for port in 8080 8090 3000 8000 5000; do
-              if netstat -tlnp 2>/dev/null | grep -q ":$port "; then
-                echo "✅ 端口 $port 正在监听"
-                PORT_LISTENING=true
-                break
-              fi
-            done
-            
-            if [ "$PORT_LISTENING" = false ]; then
-              echo "❌ 未检测到任何服务端口监听"
-              echo "📋 当前端口监听状态:"
-              netstat -tlnp 2>/dev/null | grep -E ":(8080|8090|3000|8000|5000)" || echo "未找到相关端口"
-              exit 1
-            fi
-            
-            # 尝试健康检查（如果可能）
-            echo "🔍 尝试健康检查..."
-            HEALTH_CHECK_PASSED=false
-            
-            for port in 8080 8090 3000 8000 5000; do
-              if netstat -tlnp 2>/dev/null | grep -q ":$port "; then
-                echo "🔍 尝试端口 $port 的健康检查..."
-                if curl -f -s --connect-timeout 5 http://localhost:$port/health >/dev/null 2>&1; then
-                  echo "✅ 端口 $port 健康检查通过"
-                  HEALTH_CHECK_PASSED=true
-                  break
-                elif curl -f -s --connect-timeout 5 http://localhost:$port/ >/dev/null 2>&1; then
-                  echo "✅ 端口 $port 基础连接检查通过"
-                  HEALTH_CHECK_PASSED=true
-                  break
-                else
-                  echo "⚠️ 端口 $port 健康检查失败"
-                fi
-              fi
-            done
-            
-            if [ "$HEALTH_CHECK_PASSED" = false ]; then
-              echo "❌ 所有端口健康检查失败"
-              echo "📋 服务可能未完全启动，但继续执行..."
-            else
-              echo "✅ 服务启动验证通过"
-            fi
-            
-            # 最终状态检查
-            echo "📊 最终服务状态:"
-            if command -v pm2 &> /dev/null; then
-              pm2 status
-            fi
-            
-            echo "🔍 最终端口状态:"
-            netstat -tlnp 2>/dev/null | grep -E ":(8080|8090|3000|8000|5000)" || echo "未找到相关端口"
-            
-            echo "✅ 服务启动验证完成"
+          max_retries: 2
+          retry_delay: 15
+          timeout_minutes: 15
+          strategy: "exponential"
+          continue_on_error: false
 
       - name: 设置输出
         id: set-outputs
         run: |
-          # 如果前一步成功执行，说明服务启动成功
           echo "start_success=true" >> $GITHUB_OUTPUT
-          echo "✅ 服务启动成功"
+          echo "✅ 输出已设置"
+          echo "- start_success: true"

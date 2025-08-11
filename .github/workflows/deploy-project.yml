@@ -206,7 +206,7 @@ jobs:
           echo "✅ Token权限测试完成，继续下载构建产物"
 
       - name: 下载构建产物
-        uses: ./.github/actions/retry-center
+        uses: ./.github/workflows/retry-center.yml
         with:
           step_name: "下载构建产物"
           command: |
@@ -300,9 +300,10 @@ jobs:
           retry_delay: 10
           timeout_minutes: 15
           strategy: "exponential"
+          step_type: "network"
           continue_on_error: false
-        env:
-          GH_TOKEN: ${{ inputs.deploy_center_pat || github.token }}
+          notify_on_failure: true
+          env_vars: '{"GH_TOKEN": "${{ inputs.deploy_center_pat || github.token }}"}'
 
 
 

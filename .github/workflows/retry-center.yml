@@ -1,0 +1,209 @@
+name: Retry Center Workflow
+
+description: "重试中心可复用工作流 - 统一管理 GitHub Actions 工作流中的重试机制"
+
+on:
+  workflow_call:
+    inputs:
+      # 重试配置
+      max_retries:
+        description: '最大重试次数'
+        required: false
+        type: number
+        default: 3
+      retry_delay:
+        description: '重试间隔（秒）'
+        required: false
+        type: number
+        default: 5
+      timeout_minutes:
+        description: '单次执行超时时间（分钟）'
+        required: false
+        type: number
+        default: 10
+      
+      # 重试策略
+      retry_strategy:
+        description: '重试策略 (simple/exponential/adaptive)'
+        required: false
+        type: string
+        default: 'simple'
+      
+      # 执行配置
+      step_name:
+        description: '步骤名称（用于日志和跟踪）'
+        required: true
+        type: string
+      command:
+        description: '要执行的命令'
+        required: true
+        type: string
+      
+      # 错误处理
+      continue_on_error:
+        description: '重试失败后是否继续执行'
+        required: false
+        type: boolean
+        default: false
+      
+      # 通知配置
+      notify_on_failure:
+        description: '失败时是否发送通知'
+        required: false
+        type: boolean
+        default: true
+      
+      # 步骤类型配置
+      step_type:
+        description: '步骤类型 (network/file_operation/validation/parsing)'
+        required: false
+        type: string
+        default: 'network'
+      
+      # 环境变量
+      env_vars:
+        description: '环境变量（JSON格式）'
+        required: false
+        type: string
+        default: '{}'
+
+    outputs:
+      success:
+        description: '执行是否成功'
+        value: ${{ jobs.retry-execution.outputs.success }}
+      attempts:
+        description: '实际重试次数'
+        value: ${{ jobs.retry-execution.outputs.attempts }}
+      execution_time:
+        description: '总执行时间（秒）'
+        value: ${{ jobs.retry-execution.outputs.execution_time }}
+      error_message:
+        description: '错误信息（如果失败）'
+        value: ${{ jobs.retry-execution.outputs.error_message }}
+      retry_report:
+        description: '重试报告（JSON格式）'
+        value: ${{ jobs.retry-execution.outputs.retry_report }}
+
+jobs:
+  retry-execution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      success: ${{ steps.retry-step.outputs.success }}
+      attempts: ${{ steps.retry-step.outputs.attempts }}
+      execution_time: ${{ steps.retry-step.outputs.execution_time }}
+      error_message: ${{ steps.retry-step.outputs.error_message }}
+      retry_report: ${{ steps.retry-step.outputs.retry_report }}
+    
+    steps:
+      - name: 检查重试中心配置
+        run: |
+          echo "🔍 检查重试中心配置..."
+          
+          # 验证重试中心action是否存在
+          if [ ! -f ".github/actions/retry-center/action.yml" ]; then
+            echo "❌ 重试中心action不存在"
+            exit 1
+          fi
+          
+          if [ ! -f ".github/actions/retry-center/retry-logic.sh" ]; then
+            echo "❌ 重试中心逻辑脚本不存在"
+            exit 1
+          fi
+          
+          echo "✅ 重试中心配置完整"
+
+      - name: 解析环境变量
+        id: parse-env
+        run: |
+          echo "🔍 解析环境变量..."
+          
+          # 解析JSON格式的环境变量
+          ENV_VARS='${{ inputs.env_vars }}'
+          if [ "$ENV_VARS" != "{}" ]; then
+            echo "📋 环境变量:"
+            echo "$ENV_VARS" | jq -r 'to_entries[] | "export \(.key)=\(.value)"'
+          else
+            echo "📋 无自定义环境变量"
+          fi
+          
+          echo "env_vars_parsed=true" >> $GITHUB_OUTPUT
+
+      - name: 执行重试逻辑
+        id: retry-step
+        uses: ./.github/actions/retry-center
+        with:
+          step_name: ${{ inputs.step_name }}
+          command: ${{ inputs.command }}
+          max_retries: ${{ inputs.max_retries }}
+          retry_delay: ${{ inputs.retry_delay }}
+          timeout_minutes: ${{ inputs.timeout_minutes }}
+          strategy: ${{ inputs.retry_strategy }}
+          continue_on_error: ${{ inputs.continue_on_error }}
+          notify_on_failure: ${{ inputs.notify_on_failure }}
+
+      - name: 生成重试报告
+        if: always()
+        run: |
+          echo "📊 生成重试报告..."
+          
+          # 创建报告目录
+          mkdir -p .github/retry-reports
+          
+          # 生成报告文件名
+          REPORT_FILE=".github/retry-reports/retry-report-$(date +%Y%m%d_%H%M%S).json"
+          
+          # 构建报告内容
+          cat > "$REPORT_FILE" << EOF
+          {
+            "step_name": "${{ inputs.step_name }}",
+            "workflow_run_id": "${{ github.run_id }}",
+            "job_name": "retry-execution",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "success": ${{ steps.retry-step.outputs.success || 'false' }},
+            "attempts": ${{ steps.retry-step.outputs.attempts || '0' }},
+            "execution_time_seconds": ${{ steps.retry-step.outputs.execution_time || '0' }},
+            "error_message": "${{ steps.retry-step.outputs.error_message || '' }}",
+            "retry_config": {
+              "max_retries": ${{ inputs.max_retries }},
+              "retry_delay": ${{ inputs.retry_delay }},
+              "timeout_minutes": ${{ inputs.timeout_minutes }},
+              "strategy": "${{ inputs.retry_strategy }}",
+              "step_type": "${{ inputs.step_type }}"
+            },
+            "environment": {
+              "runner": "${{ runner.os }}",
+              "workflow": "${{ github.workflow }}",
+              "repository": "${{ github.repository }}"
+            }
+          }
+          EOF
+          
+          echo "✅ 重试报告已生成: $REPORT_FILE"
+          
+          # 输出报告内容
+          cat "$REPORT_FILE"
+
+      - name: 上传重试报告
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: retry-reports-${{ github.run_id }}
+          path: .github/retry-reports/
+          retention-days: 30
+
+      - name: 失败通知
+        if: failure() && inputs.notify_on_failure == 'true'
+        run: |
+          echo "📢 重试失败通知"
+          echo "=================="
+          echo "步骤名称: ${{ inputs.step_name }}"
+          echo "工作流运行ID: ${{ github.run_id }}"
+          echo "重试次数: ${{ steps.retry-step.outputs.attempts || '0' }}"
+          echo "执行时间: ${{ steps.retry-step.outputs.execution_time || '0' }}秒"
+          echo "错误信息: ${{ steps.retry-step.outputs.error_message || '未知错误' }}"
+          echo ""
+          echo "🔍 请检查重试报告了解详细信息"
+          
+          # 这里可以集成Slack、Email等通知服务
+          # 例如：curl -X POST -H 'Content-type: application/json' --data '{"text":"重试失败通知"}' $SLACK_WEBHOOK_URL

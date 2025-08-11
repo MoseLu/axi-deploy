@@ -1,0 +1,154 @@
+name: Retry Center Example
+
+description: "重试中心使用示例 - 展示如何在其他工作流中使用重试中心"
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: '测试类型'
+        required: false
+        default: 'network'
+        type: choice
+        options:
+          - network
+          - file_operation
+          - validation
+          - parsing
+
+jobs:
+  # 示例1：网络操作重试
+  network-retry-example:
+    if: inputs.test_type == 'network'
+    uses: ./.github/workflows/retry-center.yml
+    with:
+      step_name: "网络连接测试"
+      command: |
+        echo "🌐 测试网络连接..."
+        # 模拟网络操作
+        curl -f --connect-timeout 10 https://httpbin.org/delay/3
+        echo "✅ 网络连接测试成功"
+      max_retries: 3
+      retry_delay: 10
+      timeout_minutes: 15
+      strategy: "exponential"
+      step_type: "network"
+      continue_on_error: false
+      notify_on_failure: true
+      env_vars: '{"CURL_TIMEOUT": "10", "RETRY_ON_TIMEOUT": "true"}'
+
+  # 示例2：文件操作重试
+  file-operation-retry-example:
+    if: inputs.test_type == 'file_operation'
+    uses: ./.github/workflows/retry-center.yml
+    with:
+      step_name: "文件下载测试"
+      command: |
+        echo "📁 测试文件操作..."
+        # 模拟文件下载
+        wget --timeout=10 --tries=1 https://httpbin.org/bytes/1024 -O test-file
+        if [ -f test-file ]; then
+          echo "✅ 文件下载成功"
+          rm test-file
+        else
+          echo "❌ 文件下载失败"
+          exit 1
+        fi
+      max_retries: 2
+      retry_delay: 5
+      timeout_minutes: 10
+      strategy: "simple"
+      step_type: "file_operation"
+      continue_on_error: false
+      notify_on_failure: true
+
+  # 示例3：验证操作重试
+  validation-retry-example:
+    if: inputs.test_type == 'validation'
+    uses: ./.github/workflows/retry-center.yml
+    with:
+      step_name: "服务验证测试"
+      command: |
+        echo "🔍 测试服务验证..."
+        # 模拟服务健康检查
+        response=$(curl -s -o /dev/null -w "%{http_code}" https://httpbin.org/status/200)
+        if [ "$response" = "200" ]; then
+          echo "✅ 服务验证成功"
+        else
+          echo "❌ 服务验证失败，状态码: $response"
+          exit 1
+        fi
+      max_retries: 1
+      retry_delay: 3
+      timeout_minutes: 5
+      strategy: "simple"
+      step_type: "validation"
+      continue_on_error: true
+      notify_on_failure: false
+
+  # 示例4：解析操作重试
+  parsing-retry-example:
+    if: inputs.test_type == 'parsing'
+    uses: ./.github/workflows/retry-center.yml
+    with:
+      step_name: "JSON解析测试"
+      command: |
+        echo "📝 测试JSON解析..."
+        # 模拟JSON解析
+        echo '{"status": "success", "data": "test"}' | jq -r '.status'
+        if [ $? -eq 0 ]; then
+          echo "✅ JSON解析成功"
+        else
+          echo "❌ JSON解析失败"
+          exit 1
+        fi
+      max_retries: 0
+      retry_delay: 0
+      timeout_minutes: 2
+      strategy: "simple"
+      step_type: "parsing"
+      continue_on_error: false
+      notify_on_failure: true
+
+  # 结果汇总
+  summarize-results:
+    needs: [network-retry-example, file-operation-retry-example, validation-retry-example, parsing-retry-example]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 汇总重试结果
+        run: |
+          echo "📊 重试中心测试结果汇总"
+          echo "========================"
+          echo "测试时间: $(date)"
+          echo "测试类型: ${{ inputs.test_type }}"
+          echo ""
+          
+          # 检查各个测试的结果
+          if [ "${{ needs.network-retry-example.result }}" = "success" ]; then
+            echo "✅ 网络操作重试测试: 成功"
+          else
+            echo "❌ 网络操作重试测试: 失败"
+          fi
+          
+          if [ "${{ needs.file-operation-retry-example.result }}" = "success" ]; then
+            echo "✅ 文件操作重试测试: 成功"
+          else
+            echo "❌ 文件操作重试测试: 失败"
+          fi
+          
+          if [ "${{ needs.validation-retry-example.result }}" = "success" ]; then
+            echo "✅ 验证操作重试测试: 成功"
+          else
+            echo "❌ 验证操作重试测试: 失败"
+          fi
+          
+          if [ "${{ needs.parsing-retry-example.result }}" = "success" ]; then
+            echo "✅ 解析操作重试测试: 成功"
+          else
+            echo "❌ 解析操作重试测试: 失败"
+          fi
+          
+          echo ""
+          echo "📋 重试报告已上传为构建产物"
+          echo "🔍 请查看重试报告了解详细信息"
