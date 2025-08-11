@@ -179,11 +179,11 @@ jobs:
                       echo "- PM2进程:"
                       pm2 list 2>/dev/null || echo "PM2未安装或未运行"
                       
-                      echo "- 端口8090进程:"
-                      netstat -tlnp | grep :8090 || echo "端口8090未被占用"
+                      echo "- 端口8080进程:"
+                      netstat -tlnp | grep :8080 || echo "端口8080未被占用"
                       
-                      echo "- 测试本地8090端口:"
-                      curl -f -s http://localhost:8090/health >/dev/null 2>&1 && echo "✅ 本地8090端口响应正常" || echo "❌ 本地8090端口无响应"
+                      echo "- 测试本地8080端口:"
+                      curl -f -s http://localhost:8080/health >/dev/null 2>&1 && echo "✅ 本地8080端口响应正常" || echo "❌ 本地8080端口无响应"
                     fi
                     
                     # 检查Nginx状态
@@ -235,7 +235,7 @@ jobs:
                   sleep 10
                   
                   # 检查重启后状态
-                  HEALTH_RESPONSE_AFTER=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8090/health" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
+                  HEALTH_RESPONSE_AFTER=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080/health" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
                   if [ "$HEALTH_RESPONSE_AFTER" = "200" ]; then
                     echo "✅ PM2重启成功，服务恢复正常"
                     echo "🔄 重新测试网站..."
@@ -274,7 +274,7 @@ jobs:
                         sleep 15
                         
                         # 检查启动后状态
-                        HEALTH_RESPONSE_FINAL=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8090/health" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
+                        HEALTH_RESPONSE_FINAL=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080/health" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
                         if [ "$HEALTH_RESPONSE_FINAL" = "200" ]; then
                           echo "✅ 服务重新启动成功"
                           echo "🔄 重新测试网站..."
@@ -333,10 +333,9 @@ jobs:
                     pgrep -f "${{ inputs.project }}" || echo "未找到相关进程"
                     
                     echo "- 端口占用情况:"
-                    netstat -tlnp | grep -E ":(80|443|8090|8080)" || echo "未找到相关端口"
+                    netstat -tlnp | grep -E ":(80|443|8080)" || echo "未找到相关端口"
                     
                     echo "- 测试本地连接:"
-                    curl -f -s http://localhost:8090/health >/dev/null 2>&1 && echo "✅ 本地8090端口响应正常" || echo "❌ 本地8090端口无响应"
                     curl -f -s http://localhost:8080/health >/dev/null 2>&1 && echo "✅ 本地8080端口响应正常" || echo "❌ 本地8080端口无响应"
                   fi
                   

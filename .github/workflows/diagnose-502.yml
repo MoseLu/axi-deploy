@@ -60,7 +60,7 @@ jobs:
             echo "🔌 端口占用检查:"
             echo "- 端口80: $(netstat -tlnp | grep :80 | head -1 || echo '未占用')"
             echo "- 端口443: $(netstat -tlnp | grep :443 | head -1 || echo '未占用')"
-            echo "- 端口8090: $(netstat -tlnp | grep :8090 | head -1 || echo '未占用')"
+            echo "- 端口8080: $(netstat -tlnp | grep :8080 | head -1 || echo '未占用')"
             echo "- 端口8080: $(netstat -tlnp | grep :8080 | head -1 || echo '未占用')"
             echo ""
             
@@ -122,8 +122,8 @@ jobs:
             echo "- 系统进程:"
             pgrep -f "$PROJECT" || echo "未找到相关进程"
             
-            echo "- 端口8090进程:"
-            netstat -tlnp | grep :8090 || echo "端口8090未被占用"
+            echo "- 端口8080进程:"
+            netstat -tlnp | grep :8080 || echo "端口8080未被占用"
             echo ""
             
             # 9. 检查日志文件
@@ -140,8 +140,8 @@ jobs:
             
             # 10. 测试本地连接
             echo "🔍 本地连接测试:"
-            echo "- 测试本地8090端口:"
-            curl -f -s http://localhost:8090/health >/dev/null 2>&1 && echo "✅ 本地8090端口响应正常" || echo "❌ 本地8090端口无响应"
+            echo "- 测试本地8080端口:"
+            curl -f -s http://localhost:8080/health >/dev/null 2>&1 && echo "✅ 本地8080端口响应正常" || echo "❌ 本地8080端口无响应"
             
             echo "- 测试本地8080端口:"
             curl -f -s http://localhost:8080/health >/dev/null 2>&1 && echo "✅ 本地8080端口响应正常" || echo "❌ 本地8080端口无响应"
@@ -153,7 +153,7 @@ jobs:
             systemctl status firewalld --no-pager -l 2>/dev/null || echo "firewalld未运行"
             
             echo "- iptables规则:"
-            iptables -L -n | grep -E "(80|443|8090)" || echo "未找到相关防火墙规则"
+            iptables -L -n | grep -E "(80|443|8080)" || echo "未找到相关防火墙规则"
             echo ""
             
             # 12. 检查SSL证书

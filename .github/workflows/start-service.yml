@@ -92,7 +92,7 @@ jobs:
           
           # 服务验证配置
           SERVICE_VALIDATION=true
-          SERVICE_PORT="8090"
+          SERVICE_PORT="8080"
           HEALTH_ENDPOINT="/health"
           VALIDATION_TIMEOUT=30
           

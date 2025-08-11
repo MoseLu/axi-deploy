@@ -34,7 +34,7 @@ on:
         required: false
         type: string
         description: "服务端口"
-        default: "8090"
+        default: "8080"
       health_endpoint:
         required: false
         type: string
