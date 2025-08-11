@@ -108,16 +108,42 @@ jobs:
             START_CMD="${{ inputs.start_cmd }}"
             CMD_NAME=$(echo "$START_CMD" | awk '{print $1}')
             
-            if ! command -v "$CMD_NAME" &> /dev/null; then
-              echo "⚠️ 启动命令不存在: $CMD_NAME"
-              echo "🔍 尝试查找可执行文件..."
-              which "$CMD_NAME" || echo "未找到可执行文件"
+            # 检查是否有 ecosystem.config.js 文件（PM2 项目）
+            if [ -f "ecosystem.config.js" ]; then
+              echo "📋 发现 PM2 配置文件，使用 PM2 启动..."
+              
+              # 检查 PM2 是否安装
+              if ! command -v pm2 &> /dev/null; then
+                echo "🚨 PM2 未安装，尝试安装..."
+                npm install -g pm2 || echo "PM2 安装失败"
+              fi
+              
+              # 停止现有进程（如果存在）
+              pm2 stop dashboard-backend 2>/dev/null || echo "没有现有进程需要停止"
+              pm2 delete dashboard-backend 2>/dev/null || echo "没有现有进程需要删除"
+              
+              # 使用 PM2 启动
+              echo "📋 使用 PM2 启动服务..."
+              pm2 start ecosystem.config.js
+              
+              # 保存 PM2 配置
+              pm2 save
+              
+              echo "✅ PM2 启动命令执行完成"
+              START_PID=$(pm2 pid dashboard-backend 2>/dev/null || echo "0")
+            else
+              # 传统启动方式
+              if ! command -v "$CMD_NAME" &> /dev/null; then
+                echo "⚠️ 启动命令不存在: $CMD_NAME"
+                echo "🔍 尝试查找可执行文件..."
+                which "$CMD_NAME" || echo "未找到可执行文件"
+              fi
+              
+              # 执行启动命令
+              echo "📋 执行启动命令: $START_CMD"
+              $START_CMD &
+              START_PID=$!
             fi
-            
-            # 执行启动命令
-            echo "📋 执行启动命令: $START_CMD"
-            $START_CMD &
-            START_PID=$!
             
             # 等待服务启动
             echo "⏳ 等待服务启动..."

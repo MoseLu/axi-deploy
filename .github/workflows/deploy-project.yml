@@ -572,6 +572,25 @@ jobs:
             sudo chown deploy:deploy $DEPLOY_PATH
             echo "✅ 部署目录已清理并重新创建"
 
+      - name: 调试构建产物
+        run: |
+          echo "🔍 调试构建产物..."
+          echo "📁 当前目录: $(pwd)"
+          echo "📁 当前目录内容:"
+          ls -la
+          echo ""
+          echo "🔍 检查构建产物目录: ./dist-${{ inputs.project }}"
+          if [ -d "./dist-${{ inputs.project }}" ]; then
+            echo "✅ 构建产物目录存在"
+            echo "📁 构建产物内容:"
+            ls -la "./dist-${{ inputs.project }}/"
+            echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
+          else
+            echo "❌ 构建产物目录不存在"
+            echo "🔍 查找可能的构建产物..."
+            find . -type d -name "*${{ inputs.project }}*" 2>/dev/null || echo "未找到相关目录"
+          fi
+
       - name: 上传构建产物到部署目录
         uses: appleboy/scp-action@v0.1.4
         with:
