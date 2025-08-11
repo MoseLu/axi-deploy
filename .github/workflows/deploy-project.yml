@@ -510,7 +510,7 @@ jobs:
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
           source: "./dist-${{ inputs.project }}/"
-          target: "/tmp/dist-${{ inputs.project }}"
+          target: "/tmp/"
           strip_components: 0
 
 
@@ -534,17 +534,35 @@ jobs:
             fi
             
             # 检查临时目录中的构建产物
-            TEMP_SOURCE="/tmp/dist-$PROJECT"
-            echo "📁 检查临时构建产物: $TEMP_SOURCE"
+            echo "📁 检查 /tmp 目录内容:"
+            ls -la /tmp/
             
-            if [ ! -d "$TEMP_SOURCE" ]; then
-              echo "🚨 临时构建产物目录不存在: $TEMP_SOURCE"
+            # 查找构建产物目录
+            TEMP_SOURCE=""
+            if [ -d "/tmp/dist-$PROJECT" ]; then
+              TEMP_SOURCE="/tmp/dist-$PROJECT"
+            elif [ -d "/tmp/dist" ]; then
+              TEMP_SOURCE="/tmp/dist"
+            else
+              echo "🔍 查找可能的构建产物目录..."
+              for dir in /tmp/*; do
+                if [ -d "$dir" ] && [[ "$dir" != /tmp/.ICE-unix ]] && [[ "$dir" != /tmp/.X11-unix ]] && [[ "$dir" != /tmp/.XIM-unix ]] && [[ "$dir" != /tmp/.font-unix ]] && [[ "$dir" != /tmp/snap-private-tmp ]] && [[ "$dir" != /tmp/systemd-private-* ]]; then
+                  echo "📁 发现目录: $dir"
+                  TEMP_SOURCE="$dir"
+                  break
+                fi
+              done
+            fi
+            
+            if [ -z "$TEMP_SOURCE" ] || [ ! -d "$TEMP_SOURCE" ]; then
+              echo "🚨 未找到构建产物目录"
               echo "📁 /tmp 目录内容:"
               ls -la /tmp/
               exit 1
             fi
             
-            echo "📁 临时构建产物内容:"
+            echo "📁 找到构建产物目录: $TEMP_SOURCE"
+            echo "📁 构建产物内容:"
             ls -la "$TEMP_SOURCE/"
             
             # 统计文件数量
