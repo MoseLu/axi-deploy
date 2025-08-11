@@ -205,67 +205,60 @@ jobs:
           
           echo "✅ Token权限测试完成，继续下载构建产物"
 
-      - name: 下载构建产物（自动重试）
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 5
-          command: |
-            echo "🔄 开始下载构建产物..."
-            
-            # 彻底清理旧文件和目录
-            echo "🧹 清理旧文件..."
-            rm -rf dist-${{ inputs.project }}/ || true
-            rm -f dist-${{ inputs.project }}.zip || true
-            rm -rf backend/ || true
-            rm -rf frontend/ || true
-            rm -rf node_modules/ || true
-            rm -f package*.json || true
-            rm -f *.js || true
-            rm -f *.ts || true
-            
-            # 确保工作目录干净
-            echo "📁 当前工作目录内容:"
+      - name: 下载构建产物
+        run: |
+          echo "🔄 开始下载构建产物..."
+          
+          # 彻底清理旧文件和目录
+          echo "🧹 清理旧文件..."
+          rm -rf dist-${{ inputs.project }}/ || true
+          rm -f dist-${{ inputs.project }}.zip || true
+          rm -rf backend/ || true
+          rm -rf frontend/ || true
+          rm -rf node_modules/ || true
+          rm -f package*.json || true
+          rm -f *.js || true
+          rm -f *.ts || true
+          rm -f deploy.sh || true
+          rm -f start.sh || true
+          
+          # 确保工作目录干净
+          echo "📁 当前工作目录内容:"
+          ls -la
+          
+          # 下载构建产物
+          echo "⬇️ 开始下载构建产物..."
+          gh run download ${{ inputs.run_id }} \
+            --name "dist-${{ inputs.project }}" \
+            --dir . \
+            --repo ${{ inputs.source_repo }}
+          
+          # 验证下载结果
+          echo "🔍 验证下载结果..."
+          if [ -d "dist-${{ inputs.project }}" ]; then
+            file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+            echo "✅ 构建产物下载成功，包含 $file_count 个文件"
+          elif [ -f "dist-${{ inputs.project }}.zip" ]; then
+            echo "✅ 构建产物压缩包下载成功"
+            unzip -q "dist-${{ inputs.project }}.zip"
+            file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+            echo "✅ 构建产物解压成功，包含 $file_count 个文件"
+          else
+            echo "❌ 构建产物下载失败"
+            echo "📁 当前目录内容:"
             ls -la
-            
-            # 下载构建产物
-            echo "⬇️ 开始下载构建产物..."
-            gh run download ${{ inputs.run_id }} \
-              --name "dist-${{ inputs.project }}" \
-              --dir . \
-              --repo ${{ inputs.source_repo }}
-            
-            # 验证下载结果
-            echo "🔍 验证下载结果..."
-            if [ -d "dist-${{ inputs.project }}" ]; then
-              file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
-              echo "✅ 构建产物下载成功，包含 $file_count 个文件"
-              if [ "$file_count" -gt 0 ]; then
-                echo "✅ 下载成功，无需重试"
-                exit 0
-              else
-                echo "❌ 构建产物目录为空"
-                exit 1
-              fi
-            elif [ -f "dist-${{ inputs.project }}.zip" ]; then
-              echo "✅ 构建产物压缩包下载成功"
-              unzip -q "dist-${{ inputs.project }}.zip"
-              file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
-              echo "✅ 构建产物解压成功，包含 $file_count 个文件"
-              if [ "$file_count" -gt 0 ]; then
-                echo "✅ 下载成功，无需重试"
-                exit 0
-              else
-                echo "❌ 解压后构建产物为空"
-                exit 1
-              fi
-            else
-              echo "❌ 构建产物下载失败"
-              echo "📁 当前目录内容:"
-              ls -la
-              exit 1
-            fi
+            exit 1
+          fi
+          
+          # 最终验证
+          if [ ! -d "dist-${{ inputs.project }}" ] || [ "$(find "dist-${{ inputs.project }}" -type f | wc -l)" -eq 0 ]; then
+            echo "❌ 构建产物验证失败，目录为空或不存在"
+            echo "📁 当前目录内容:"
+            ls -la
+            exit 1
+          fi
+          
+          echo "✅ 构建产物验证通过"
         env:
           GH_TOKEN: ${{ inputs.deploy_center_pat || github.token }}
 
@@ -352,13 +345,14 @@ jobs:
           
           echo "✅ SSH参数验证通过"
 
-      - name: 部署到服务器（自动重试）
-        uses: nick-fields/retry@v3
+      - name: 部署到服务器
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 5
-          command: |
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
             echo "🚀 开始部署项目: ${{ inputs.project }}"
             
             # 标准化目录结构
@@ -472,33 +466,16 @@ jobs:
             fi
           fi
 
-      - name: 上传构建产物到服务器（自动重试）
-        uses: nick-fields/retry@v3
+                  - name: 上传构建产物到服务器
+        uses: appleboy/scp-action@v0.1.4
         with:
-          timeout_minutes: 10
-          max_attempts: 3
-          retry_wait_seconds: 5
-          command: |
-            echo "🚀 开始上传构建产物到服务器..."
-            
-            # 使用rsync替代scp，更可靠
-            rsync -avz --progress --timeout=300 \
-              -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=60" \
-              "./dist-${{ inputs.project }}/" ${{ inputs.server_user }}@${{ inputs.server_host }}:/tmp/
-            
-            # 验证上传结果
-            file_count=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
-              ${{ inputs.server_user }}@${{ inputs.server_host }} \
-              "find /tmp/dist-${{ inputs.project }}/ -type f | wc -l")
-            
-            if [ "$file_count" -gt 0 ]; then
-              echo "✅ 文件上传成功，共 $file_count 个文件"
-              echo "✅ 上传成功，无需重试"
-              exit 0
-            else
-              echo "❌ 文件上传失败，目标目录为空"
-              exit 1
-            fi
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          source: "./dist-${{ inputs.project }}/"
+          target: "/tmp/"
+          strip_components: 0
 
 
 
