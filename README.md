@@ -646,11 +646,7 @@ curl -I https://your-domain.com/
 | `test_url` | string | ❌ | 测试URL |
 | `start_cmd` | string | ❌ | 启动命令（后端项目） |
 | `skip_init` | boolean | ❌ | 跳过服务器初始化 |
-| `retry_enabled` | boolean | ❌ | 是否启用重试机制 (默认: true) |
-| `max_retry_attempts` | number | ❌ | 最大重试次数 (默认: 5) |
-| `retry_timeout_minutes` | number | ❌ | 重试超时时间（分钟）(默认: 15) |
-| `upload_timeout_minutes` | number | ❌ | 文件上传超时时间（分钟）(默认: 20) |
-| `deploy_timeout_minutes` | number | ❌ | 部署操作超时时间（分钟）(默认: 15) |
+
 
 ## 重试机制
 
@@ -658,15 +654,15 @@ curl -I https://your-domain.com/
 
 axi-deploy 的 `deploy-project.yml` 工作流现在集成了完整的重试机制，可以有效解决 timeout i/o 问题，提高部署成功率。
 
-### 重试配置参数
+### 自动重试机制
 
-| 参数名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `retry_enabled` | boolean | true | 是否启用重试机制 |
-| `max_retry_attempts` | number | 5 | 最大重试次数 |
-| `retry_timeout_minutes` | number | 15 | 重试超时时间（分钟） |
-| `upload_timeout_minutes` | number | 20 | 文件上传超时时间（分钟） |
-| `deploy_timeout_minutes` | number | 15 | 部署操作超时时间（分钟） |
+axi-deploy 内置自动重试机制，无需额外配置：
+
+| 操作类型 | 重试次数 | 超时时间 | 重试间隔 |
+|----------|----------|----------|----------|
+| 构建产物下载 | 3次 | 5分钟 | 5秒 |
+| 文件上传 | 3次 | 10分钟 | 5秒 |
+| SSH操作 | 3次 | 5分钟 | 5秒 |
 
 ### 重试覆盖的操作
 
@@ -677,8 +673,10 @@ axi-deploy 的 `deploy-project.yml` 工作流现在集成了完整的重试机�
 
 ### 使用方法
 
+重试机制完全自动化，无需任何配置：
+
 ```yaml
-# 在 main-deployment.yml 中配置重试参数
+# 正常部署即可，重试机制自动启用
 name: 部署我的项目
 on:
   workflow_dispatch:
@@ -688,33 +686,14 @@ on:
       run_id: "1234567890"
       deploy_type: "static"
       deploy_secrets: "eyJTRVJWRVJfSE9TVCI6ImV4YW1wbGUuY29tIiwiU0VSVkVSX1BPUlQiOiIyMiIsIlNFUlZFUl9VU0VSIjoiZGVwbG95IiwiU0VSVkVSX0tFWSI6InNzaC1rZXkiLCJERVBMT1lfQ0VOVEVSX1BBVCI6ImdoX3Rva2VuIn0="
-      # 重试配置
-      retry_enabled: true
-      max_retry_attempts: 5
-      retry_timeout_minutes: 15
-      upload_timeout_minutes: 20
-      deploy_timeout_minutes: 15
 ```
 
-### 配置示例
+### 重试策略
 
-#### 生产环境配置（保守策略）
-```yaml
-retry_enabled: true
-max_retry_attempts: 3
-retry_timeout_minutes: 10
-upload_timeout_minutes: 15
-deploy_timeout_minutes: 10
-```
-
-#### 测试环境配置（激进策略）
-```yaml
-retry_enabled: true
-max_retry_attempts: 5
-retry_timeout_minutes: 20
-upload_timeout_minutes: 25
-deploy_timeout_minutes: 15
-```
+- **快速重试**：出现timeout i/o错误立即重试，间隔仅5秒
+- **智能重试**：只对网络错误和I/O超时进行重试
+- **快速失败**：配置错误、权限错误等立即失败
+- **自动回滚**：部署失败时自动恢复到上一个版本
 
 ### 预期效果
 

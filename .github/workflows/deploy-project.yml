@@ -208,9 +208,9 @@ jobs:
       - name: 下载构建产物（自动重试）
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 15
+          timeout_minutes: 5
           max_attempts: 3
-          retry_wait_seconds: 30
+          retry_wait_seconds: 5
           command: |
             echo "🔄 开始下载构建产物..."
             
@@ -334,9 +334,9 @@ jobs:
       - name: 部署到服务器（自动重试）
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 15
+          timeout_minutes: 5
           max_attempts: 3
-          retry_wait_seconds: 60
+          retry_wait_seconds: 5
           command: |
             echo "🚀 开始部署项目: ${{ inputs.project }}"
             
@@ -454,9 +454,9 @@ jobs:
       - name: 上传构建产物到服务器（自动重试）
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 20
+          timeout_minutes: 10
           max_attempts: 3
-          retry_wait_seconds: 60
+          retry_wait_seconds: 5
           command: |
             echo "🚀 开始上传构建产物到服务器..."
             
@@ -482,9 +482,9 @@ jobs:
       - name: 移动构建产物到部署目录（自动重试）
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 15
+          timeout_minutes: 5
           max_attempts: 3
-          retry_wait_seconds: 30
+          retry_wait_seconds: 5
           command: |
             echo "📁 移动构建产物到部署目录..."
             
