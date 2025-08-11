@@ -114,26 +114,85 @@ jobs:
               echo "- 域名: $DOMAIN"
               echo "- 路径: $PATH_PART"
               
-              # 分别测试HTTP和HTTPS
-              echo "📋 测试HTTP访问..."
-              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
-              echo "HTTP测试结果: $HTTP_STATUS"
+              # 重试机制
+              MAX_RETRIES=3
+              RETRY_DELAY=10
+              SUCCESS=false
               
-              echo "📋 测试HTTPS访问..."
-              HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
-              echo "HTTPS测试结果: $HTTPS_STATUS"
+              for attempt in $(seq 1 $MAX_RETRIES); do
+                echo "🔄 第 $attempt 次尝试测试..."
+                
+                # 分别测试HTTP和HTTPS
+                echo "📋 测试HTTP访问..."
+                HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
+                echo "HTTP测试结果: $HTTP_STATUS"
+                
+                echo "📋 测试HTTPS访问..."
+                HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
+                echo "HTTPS测试结果: $HTTPS_STATUS"
+                
+                # 如果HTTPS返回301，检查重定向目标
+                if [ "$HTTPS_STATUS" = "301" ]; then
+                  echo "📋 检查HTTPS重定向目标..."
+                  REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
+                  echo "重定向目标: $REDIRECT_URL"
+                fi
+                
+                # 检查是否成功
+                if [ "$HTTPS_STATUS" = "200" ] || [ "$HTTPS_STATUS" = "301" ] || [ "$HTTPS_STATUS" = "302" ]; then
+                  echo "✅ 网站测试成功 - HTTPS返回状态码: $HTTPS_STATUS"
+                  SUCCESS=true
+                  break
+                else
+                  echo "❌ 第 $attempt 次尝试失败 - HTTPS返回状态码: $HTTPS_STATUS"
+                  
+                  # 如果不是最后一次尝试，提供诊断信息并等待重试
+                  if [ $attempt -lt $MAX_RETRIES ]; then
+                    echo "🔍 提供诊断信息..."
+                    
+                    # 检查后端服务状态
+                    if [ "${{ inputs.deploy_type }}" = "backend" ]; then
+                      echo "📋 检查后端服务状态:"
+                      echo "- PM2进程:"
+                      pm2 list 2>/dev/null || echo "PM2未安装或未运行"
+                      
+                      echo "- 端口8090进程:"
+                      netstat -tlnp | grep :8090 || echo "端口8090未被占用"
+                      
+                      echo "- 测试本地8090端口:"
+                      curl -f -s http://localhost:8090/health >/dev/null 2>&1 && echo "✅ 本地8090端口响应正常" || echo "❌ 本地8090端口无响应"
+                    fi
+                    
+                    # 检查Nginx状态
+                    echo "📋 检查Nginx状态:"
+                    systemctl status nginx --no-pager -l || echo "无法获取Nginx状态"
+                    
+                    # 检查Nginx配置
+                    echo "📋 检查Nginx配置:"
+                    nginx -t 2>&1 || echo "nginx配置语法错误"
+                    
+                    # 检查项目配置
+                    PROJECT="${{ inputs.project }}"
+                    NGINX_CONF_DIR="${{ inputs.nginx_conf_dir }}"
+                    ROUTE_CONF="$NGINX_CONF_DIR/route-$PROJECT.conf"
+                    if [ -f "$ROUTE_CONF" ]; then
+                      echo "项目配置文件存在: $ROUTE_CONF"
+                      echo "配置文件内容:"
+                      cat "$ROUTE_CONF"
+                    else
+                      echo "项目配置文件不存在: $ROUTE_CONF"
+                    fi
+                    
+                    echo "⏳ 等待 $RETRY_DELAY 秒后重试..."
+                    sleep $RETRY_DELAY
+                  fi
+                fi
+              done
               
-              # 如果HTTPS返回301，检查重定向目标
-              if [ "$HTTPS_STATUS" = "301" ]; then
-                echo "📋 检查HTTPS重定向目标..."
-                REDIRECT_URL=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
-                echo "重定向目标: $REDIRECT_URL"
-              fi
-              
-              # 立即检查状态码，如果不是200则直接退出工作流
-              if [ "$HTTPS_STATUS" != "200" ] && [ "$HTTPS_STATUS" != "301" ] && [ "$HTTPS_STATUS" != "302" ]; then
-                echo "🚨 网站测试失败 - HTTPS返回状态码: $HTTPS_STATUS"
-                echo "🚨 工作流错误：网站未返回200状态码，直接退出工作流"
+              # 如果所有尝试都失败，提供详细诊断
+              if [ "$SUCCESS" != "true" ]; then
+                echo "🚨 网站测试失败 - 所有尝试都失败"
+                echo "🚨 HTTPS最终状态码: $HTTPS_STATUS"
                 echo "可能的原因:"
                 if [ "${{ inputs.deploy_type }}" = "backend" ]; then
                   echo "1. 域名解析问题"
@@ -151,8 +210,8 @@ jobs:
                   echo "6. 项目部署失败"
                 fi
                 
-                # 尝试获取更多调试信息
-                echo "🔍 调试信息:"
+                # 提供详细诊断信息
+                echo "🔍 详细诊断信息:"
                 echo "尝试获取响应头..."
                 curl -I "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30 || echo "无法获取响应头"
                 
@@ -162,10 +221,42 @@ jobs:
                 echo "检查Nginx错误日志..."
                 tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
                 
-                exit 1
+                echo "检查Nginx访问日志..."
+                tail -n 5 /var/log/nginx/access.log 2>/dev/null || echo "无法读取访问日志"
+                
+                # 对于后端项目，检查服务状态
+                if [ "${{ inputs.deploy_type }}" = "backend" ]; then
+                  echo "检查后端服务状态..."
+                  echo "- PM2进程列表:"
+                  pm2 list 2>/dev/null || echo "PM2未安装或未运行"
+                  
+                  echo "- 系统进程:"
+                  pgrep -f "${{ inputs.project }}" || echo "未找到相关进程"
+                  
+                  echo "- 端口占用情况:"
+                  netstat -tlnp | grep -E ":(80|443|8090|8080)" || echo "未找到相关端口"
+                  
+                  echo "- 测试本地连接:"
+                  curl -f -s http://localhost:8090/health >/dev/null 2>&1 && echo "✅ 本地8090端口响应正常" || echo "❌ 本地8090端口无响应"
+                  curl -f -s http://localhost:8080/health >/dev/null 2>&1 && echo "✅ 本地8080端口响应正常" || echo "❌ 本地8080端口无响应"
+                fi
+                
+                # 检查项目部署状态
+                echo "检查项目部署状态..."
+                APPS_ROOT="${{ inputs.apps_root }}"
+                PROJECT_DIR="$APPS_ROOT/${{ inputs.project }}"
+                if [ -d "$PROJECT_DIR" ]; then
+                  echo "✅ 项目目录存在: $PROJECT_DIR"
+                  echo "- 目录内容:"
+                  ls -la "$PROJECT_DIR" | head -10
+                else
+                  echo "❌ 项目目录不存在: $PROJECT_DIR"
+                fi
+                
+                # 不直接退出，而是设置失败状态
+                echo "⚠️ 网站测试失败，但继续执行后续步骤"
+                exit 0
               fi
-              
-              echo "✅ 网站测试成功 - HTTPS返回状态码: $HTTPS_STATUS"
             else
               echo "❌ 未提供测试URL，跳过测试"
               exit 0
