@@ -99,23 +99,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         
-      - name: 检查重试中心配置
-        run: |
-          echo "🔍 检查重试中心配置..."
-          
-          # 验证重试中心action是否存在
-          if [ ! -f ".github/actions/retry-center/action.yml" ]; then
-            echo "❌ 重试中心action不存在"
-            exit 1
-          fi
-          
-          if [ ! -f ".github/actions/retry-center/retry-logic.sh" ]; then
-            echo "❌ 重试中心逻辑脚本不存在"
-            exit 1
-          fi
-          
-          echo "✅ 重试中心配置完整"
-
       - name: 解析环境变量
         id: parse-env
         run: |
@@ -137,47 +120,98 @@ jobs:
         shell: bash
         run: |
           # 重试中心核心逻辑
-          source .github/actions/retry-center/retry-logic.sh
+          MAX_RETRIES=${{ inputs.max_retries }}
+          RETRY_DELAY=${{ inputs.retry_delay }}
+          TIMEOUT_MINUTES=${{ inputs.timeout_minutes }}
+          STRATEGY="${{ inputs.retry_strategy }}"
+          STEP_NAME="${{ inputs.step_name }}"
+          COMMAND="${{ inputs.command }}"
+          CONTINUE_ON_ERROR="${{ inputs.continue_on_error }}"
+          NOTIFY_ON_FAILURE="${{ inputs.notify_on_failure }}"
+          STEP_TYPE="${{ inputs.step_type }}"
           
-          # 执行重试逻辑
-          execute_with_retry \
-            --max-retries "${{ inputs.max_retries }}" \
-            --retry-delay "${{ inputs.retry_delay }}" \
-            --timeout-minutes "${{ inputs.timeout_minutes }}" \
-            --strategy "${{ inputs.retry_strategy }}" \
-            --step-name "${{ inputs.step_name }}" \
-            --command "${{ inputs.command }}" \
-            --continue-on-error "${{ inputs.continue_on_error }}" \
-            --notify-on-failure "${{ inputs.notify_on_failure }}"
-
-      - name: 生成重试报告
-        if: always()
-        run: |
-          echo "📊 生成重试报告..."
+          # 初始化变量
+          ATTEMPTS=0
+          SUCCESS=false
+          ERROR_MESSAGE=""
+          START_TIME=$(date +%s)
           
-          # 创建报告目录
-          mkdir -p .github/retry-reports
+          echo "🚀 开始执行重试逻辑"
+          echo "步骤名称: $STEP_NAME"
+          echo "最大重试次数: $MAX_RETRIES"
+          echo "重试间隔: $RETRY_DELAY秒"
+          echo "超时时间: $TIMEOUT_MINUTES分钟"
+          echo "重试策略: $STRATEGY"
+          echo "步骤类型: $STEP_TYPE"
           
-          # 生成报告文件名
-          REPORT_FILE=".github/retry-reports/retry-report-$(date +%Y%m%d_%H%M%S).json"
+          # 重试逻辑
+          while [ $ATTEMPTS -le $MAX_RETRIES ]; do
+            ATTEMPTS=$((ATTEMPTS + 1))
+            echo ""
+            echo "🔄 第 $ATTEMPTS 次尝试执行..."
+            
+            # 设置超时
+            TIMEOUT_CMD="timeout ${TIMEOUT_MINUTES}m"
+            
+            # 执行命令
+            if $TIMEOUT_CMD bash -c "$COMMAND"; then
+              SUCCESS=true
+              echo "✅ 执行成功！"
+              break
+            else
+              EXIT_CODE=$?
+              if [ $EXIT_CODE -eq 124 ]; then
+                ERROR_MESSAGE="执行超时（${TIMEOUT_MINUTES}分钟）"
+              else
+                ERROR_MESSAGE="执行失败，退出码: $EXIT_CODE"
+              fi
+              
+              echo "❌ 执行失败: $ERROR_MESSAGE"
+              
+              # 检查是否还有重试机会
+              if [ $ATTEMPTS -le $MAX_RETRIES ]; then
+                # 计算重试延迟
+                if [ "$STRATEGY" = "exponential" ]; then
+                  DELAY=$((RETRY_DELAY * (2 ** (ATTEMPTS - 1))))
+                elif [ "$STRATEGY" = "adaptive" ]; then
+                  DELAY=$((RETRY_DELAY + ATTEMPTS * 2))
+                else
+                  DELAY=$RETRY_DELAY
+                fi
+                
+                echo "⏳ 等待 $DELAY 秒后重试..."
+                sleep $DELAY
+              fi
+            fi
+          done
           
-          # 构建报告内容
-          cat > "$REPORT_FILE" << EOF
+          # 计算执行时间
+          END_TIME=$(date +%s)
+          EXECUTION_TIME=$((END_TIME - START_TIME))
+          
+          # 设置输出
+          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
+          echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
+          echo "execution_time=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+          echo "error_message=$ERROR_MESSAGE" >> $GITHUB_OUTPUT
+          
+          # 生成重试报告
+          RETRY_REPORT=$(cat << EOF
           {
-            "step_name": "${{ inputs.step_name }}",
+            "step_name": "$STEP_NAME",
             "workflow_run_id": "${{ github.run_id }}",
             "job_name": "retry-execution",
             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "success": ${{ steps.retry-step.outputs.success || 'false' }},
-            "attempts": ${{ steps.retry-step.outputs.attempts || '0' }},
-            "execution_time_seconds": ${{ steps.retry-step.outputs.execution_time || '0' }},
-            "error_message": "${{ steps.retry-step.outputs.error_message || '' }}",
+            "success": $SUCCESS,
+            "attempts": $ATTEMPTS,
+            "execution_time_seconds": $EXECUTION_TIME,
+            "error_message": "$ERROR_MESSAGE",
             "retry_config": {
-              "max_retries": ${{ inputs.max_retries }},
-              "retry_delay": ${{ inputs.retry_delay }},
-              "timeout_minutes": ${{ inputs.timeout_minutes }},
-              "strategy": "${{ inputs.retry_strategy }}",
-              "step_type": "${{ inputs.step_type }}"
+              "max_retries": $MAX_RETRIES,
+              "retry_delay": $RETRY_DELAY,
+              "timeout_minutes": $TIMEOUT_MINUTES,
+              "strategy": "$STRATEGY",
+              "step_type": "$STEP_TYPE"
             },
             "environment": {
               "runner": "${{ runner.os }}",
@@ -186,6 +220,33 @@ jobs:
             }
           }
           EOF
+          )
+          
+          echo "retry_report='$RETRY_REPORT'" >> $GITHUB_OUTPUT
+          
+          # 最终结果
+          if [ "$SUCCESS" = "true" ]; then
+            echo "🎉 重试逻辑执行完成 - 成功"
+          else
+            echo "💥 重试逻辑执行完成 - 失败"
+            if [ "$CONTINUE_ON_ERROR" = "false" ]; then
+              exit 1
+            fi
+          fi
+
+      - name: 生成重试报告文件
+        if: always()
+        run: |
+          echo "📊 生成重试报告文件..."
+          
+          # 创建报告目录
+          mkdir -p .github/retry-reports
+          
+          # 生成报告文件名
+          REPORT_FILE=".github/retry-reports/retry-report-$(date +%Y%m%d_%H%M%S).json"
+          
+          # 写入报告内容
+          echo '${{ steps.retry-step.outputs.retry_report }}' > "$REPORT_FILE"
           
           echo "✅ 重试报告已生成: $REPORT_FILE"
           
