@@ -598,7 +598,110 @@ jobs:
           port: ${{ inputs.server_port }}
           source: "./dist-${{ inputs.project }}/"
           target: "${{ inputs.deploy_type == 'backend' && format('{0}/{1}', inputs.apps_root || '/srv/apps', inputs.project) || format('{0}/{1}', inputs.static_root || '/srv/static', inputs.project) }}"
-          strip_components: 0
+
+      - name: 修复目录结构
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔧 修复目录结构..."
+            
+            # 标准化目录结构
+            APPS_ROOT="${{ inputs.apps_root || '/srv/apps' }}"
+            STATIC_ROOT="${{ inputs.static_root || '/srv/static' }}"
+            PROJECT="${{ inputs.project }}"
+            
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
+            else
+              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
+            fi
+            
+            echo "📁 检查部署路径: $DEPLOY_PATH"
+            
+            # 检查是否存在额外的dist-目录
+            DIST_SUBDIR="$DEPLOY_PATH/dist-$PROJECT"
+            if [ -d "$DIST_SUBDIR" ]; then
+              echo "🔍 发现额外的dist-目录: $DIST_SUBDIR"
+              echo "📁 dist-目录内容:"
+              ls -la "$DIST_SUBDIR/"
+              
+              # 检查dist-目录下是否有正确的项目文件
+              if [ -f "$DIST_SUBDIR/package.json" ] || [ -f "$DIST_SUBDIR/ecosystem.config.js" ] || [ -d "$DIST_SUBDIR/backend" ] || [ -d "$DIST_SUBDIR/frontend" ]; then
+                echo "✅ dist-目录包含正确的项目文件，正在修复目录结构..."
+                
+                # 创建临时目录
+                TEMP_DIR="/tmp/fix-$PROJECT-$(date +%s)"
+                mkdir -p "$TEMP_DIR"
+                
+                # 移动dist-目录下的所有内容到临时目录
+                mv "$DIST_SUBDIR"/* "$TEMP_DIR/" 2>/dev/null || true
+                mv "$DIST_SUBDIR"/.* "$TEMP_DIR/" 2>/dev/null || true
+                
+                # 删除空的dist-目录
+                rmdir "$DIST_SUBDIR" 2>/dev/null || true
+                
+                # 移动临时目录的内容到项目根目录
+                mv "$TEMP_DIR"/* "$DEPLOY_PATH/" 2>/dev/null || true
+                mv "$TEMP_DIR"/.* "$DEPLOY_PATH/" 2>/dev/null || true
+                
+                # 删除临时目录
+                rmdir "$TEMP_DIR" 2>/dev/null || true
+                
+                echo "✅ 目录结构修复完成"
+              else
+                echo "⚠️ dist-目录不包含预期的项目文件，保持原结构"
+              fi
+            else
+              echo "✅ 目录结构正常，无需修复"
+            fi
+            
+            # 显示最终的项目目录结构
+            echo "📁 最终项目目录结构:"
+            ls -la "$DEPLOY_PATH/"
+            
+            # 检查关键文件是否存在
+            echo "🔍 检查关键文件:"
+            if [ -f "$DEPLOY_PATH/package.json" ]; then
+              echo "✅ package.json 存在"
+            else
+              echo "❌ package.json 不存在"
+            fi
+            
+            if [ -f "$DEPLOY_PATH/ecosystem.config.js" ]; then
+              echo "✅ ecosystem.config.js 存在"
+            else
+              echo "❌ ecosystem.config.js 不存在"
+            fi
+            
+            if [ -d "$DEPLOY_PATH/backend" ]; then
+              echo "✅ backend 目录存在"
+            else
+              echo "❌ backend 目录不存在"
+            fi
+            
+            if [ -d "$DEPLOY_PATH/frontend" ]; then
+              echo "✅ frontend 目录存在"
+            else
+              echo "❌ frontend 目录不存在"
+            fi
+            
+            # 设置正确的权限
+            echo "🔧 设置文件权限..."
+            chown -R deploy:deploy "$DEPLOY_PATH"
+            chmod -R 755 "$DEPLOY_PATH"
+            
+            # 确保启动脚本可执行
+            if [ -f "$DEPLOY_PATH/start.sh" ]; then
+              chmod +x "$DEPLOY_PATH/start.sh"
+              echo "✅ start.sh 设置为可执行"
+            fi
+            
+            echo "✅ 目录结构修复和权限设置完成"
 
       - name: 验证部署结果
         uses: appleboy/ssh-action@v1.0.3
