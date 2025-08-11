@@ -234,6 +234,21 @@ jobs:
                     npm install -g pm2 || echo \"PM2 安装失败\"
                   fi
                   
+                  # 检查并安装依赖
+                  if [ ! -d \"node_modules\" ]; then
+                    echo \"📦 node_modules 不存在，安装依赖...\"
+                    if command -v pnpm &> /dev/null; then
+                      echo \"📦 使用 pnpm 安装依赖...\"
+                      pnpm install --prod --no-frozen-lockfile || echo \"pnpm 安装失败，尝试 npm\"
+                    fi
+                    if [ ! -d \"node_modules\" ] && command -v npm &> /dev/null; then
+                      echo \"📦 使用 npm 安装依赖...\"
+                      npm install --production || echo \"npm 安装失败\"
+                    fi
+                  else
+                    echo \"✅ node_modules 已存在\"
+                  fi
+                  
                   # 停止现有进程（如果存在）
                   pm2 stop dashboard-backend 2>/dev/null || echo \"没有现有进程需要停止\"
                   pm2 delete dashboard-backend 2>/dev/null || echo \"没有现有进程需要删除\"
