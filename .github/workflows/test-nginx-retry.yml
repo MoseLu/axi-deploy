@@ -1,0 +1,62 @@
+name: Test Nginx Retry Mechanism
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: '测试类型'
+        required: true
+        default: 'success'
+        type: choice
+        options:
+          - success
+          - timeout
+          - connection_error
+
+jobs:
+  test-nginx-retry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: 测试Nginx配置重试机制
+        uses: ./.github/workflows/retry-center.yml
+        with:
+          step_name: "测试Nginx配置"
+          command: |
+            echo "🧪 测试Nginx配置重试机制..."
+            echo "测试类型: ${{ github.event.inputs.test_type }}"
+            
+            # 模拟不同的测试场景
+            if [ "${{ github.event.inputs.test_type }}" = "timeout" ]; then
+              echo "⏰ 模拟超时场景..."
+              sleep 30  # 模拟长时间操作
+              echo "✅ 超时测试完成"
+            elif [ "${{ github.event.inputs.test_type }}" = "connection_error" ]; then
+              echo "🔌 模拟连接错误..."
+              # 尝试连接一个不存在的服务器
+              ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no user@invalid-host.com "echo test" || true
+              echo "❌ 连接错误测试完成"
+            else
+              echo "✅ 模拟成功场景..."
+              echo "Nginx配置测试成功"
+            fi
+          max_retries: 3
+          retry_delay: 5
+          timeout_minutes: 10
+          retry_strategy: "exponential"
+          continue_on_error: true
+          notify_on_failure: false
+          step_type: "network"
+          
+      - name: 显示测试结果
+        run: |
+          echo "🧪 Nginx重试机制测试完成"
+          echo "测试类型: ${{ github.event.inputs.test_type }}"
+          echo "成功状态: ${{ needs.test-nginx-retry.outputs.success }}"
+          echo "重试次数: ${{ needs.test-nginx-retry.outputs.attempts }}"
+          echo "执行时间: ${{ needs.test-nginx-retry.outputs.execution_time }}秒"
+          if [ "${{ needs.test-nginx-retry.outputs.success }}" = "false" ]; then
+            echo "错误信息: ${{ needs.test-nginx-retry.outputs.error_message }}"
+          fi
