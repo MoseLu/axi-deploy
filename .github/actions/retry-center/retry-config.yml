@@ -1,0 +1,198 @@
+# 重试中心配置管理器
+# 定义不同步骤的重试策略和参数
+
+# 重试策略定义
+retry_strategies:
+  # 简单重试：固定延迟
+  simple:
+    description: "固定延迟重试"
+    delay_calculation: "fixed"
+    
+  # 指数退避：延迟时间递增
+  exponential:
+    description: "指数退避重试"
+    delay_calculation: "exponential"
+    
+  # 自适应重试：根据错误类型调整
+  adaptive:
+    description: "自适应重试"
+    delay_calculation: "adaptive"
+
+# 步骤类型配置
+step_types:
+  # 网络操作类型（需要重试）
+  network:
+    description: "网络相关操作"
+    default_retries: 3
+    default_delay: 5
+    default_timeout: 10
+    default_strategy: "exponential"
+    retryable: true
+    
+  # 文件操作类型（需要重试）
+  file_operation:
+    description: "文件操作"
+    default_retries: 2
+    default_delay: 3
+    default_timeout: 5
+    default_strategy: "simple"
+    retryable: true
+    
+  # 验证操作类型（不需要重试）
+  validation:
+    description: "验证操作"
+    default_retries: 0
+    default_delay: 0
+    default_timeout: 2
+    default_strategy: "simple"
+    retryable: false
+    
+  # 解析操作类型（不需要重试）
+  parsing:
+    description: "解析操作"
+    default_retries: 0
+    default_delay: 0
+    default_timeout: 1
+    default_strategy: "simple"
+    retryable: false
+
+# 具体步骤配置
+steps:
+  # 验证构建产物
+  validate_artifact:
+    type: "validation"
+    description: "验证构建产物可用性"
+    custom_config:
+      max_retries: 0
+      timeout_minutes: 5
+      continue_on_error: false
+      
+  # 解析部署密钥
+  parse_secrets:
+    type: "parsing"
+    description: "解析部署密钥"
+    custom_config:
+      max_retries: 0
+      timeout_minutes: 2
+      continue_on_error: false
+      
+  # 服务器初始化
+  server_init:
+    type: "network"
+    description: "服务器初始化"
+    custom_config:
+      max_retries: 2
+      retry_delay: 10
+      timeout_minutes: 15
+      strategy: "exponential"
+      continue_on_error: false
+      
+  # 部署项目
+  deploy_project:
+    type: "file_operation"
+    description: "部署项目到服务器"
+    custom_config:
+      max_retries: 3
+      retry_delay: 8
+      timeout_minutes: 20
+      strategy: "adaptive"
+      continue_on_error: false
+      
+  # 启动服务
+  start_service:
+    type: "network"
+    description: "启动服务"
+    custom_config:
+      max_retries: 2
+      retry_delay: 15
+      timeout_minutes: 15
+      strategy: "exponential"
+      continue_on_error: false
+      
+  # 配置Nginx
+  configure_nginx:
+    type: "file_operation"
+    description: "配置Nginx"
+    custom_config:
+      max_retries: 2
+      retry_delay: 5
+      timeout_minutes: 10
+      strategy: "simple"
+      continue_on_error: false
+      
+  # 测试网站
+  test_website:
+    type: "network"
+    description: "测试网站可用性"
+    custom_config:
+      max_retries: 3
+      retry_delay: 10
+      timeout_minutes: 10
+      strategy: "exponential"
+      continue_on_error: true
+      
+  # 部署总结
+  deployment_summary:
+    type: "validation"
+    description: "部署完成总结"
+    custom_config:
+      max_retries: 0
+      timeout_minutes: 5
+      continue_on_error: true
+
+# 错误类型映射
+error_mapping:
+  # 可重试的错误
+  retryable:
+    - "timeout"
+    - "connection refused"
+    - "network unreachable"
+    - "temporary failure"
+    - "rate limit"
+    - "server error"
+    - "gateway timeout"
+    - "service unavailable"
+    - "connection reset"
+    - "no route to host"
+    
+  # 不可重试的错误
+  non_retryable:
+    - "permission denied"
+    - "file not found"
+    - "invalid argument"
+    - "syntax error"
+    - "authentication failed"
+    - "invalid credentials"
+    - "quota exceeded"
+    - "resource not found"
+
+# 通知配置
+notifications:
+  enabled: true
+  channels:
+    - "github_actions"
+    # - "slack"
+    # - "email"
+  
+  # 通知级别
+  levels:
+    warning:
+      - "retry_attempt"
+      - "timeout"
+    error:
+      - "max_retries_exceeded"
+      - "critical_failure"
+      
+# 报告配置
+reporting:
+  enabled: true
+  format: "json"
+  include_logs: true
+  include_metrics: true
+  
+  # 指标收集
+  metrics:
+    - "execution_time"
+    - "retry_count"
+    - "success_rate"
+    - "error_types"

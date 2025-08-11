@@ -1,0 +1,78 @@
+name: 'Retry Center'
+description: '统一的重试中心 - 管理 GitHub Actions 工作流中的重试机制'
+
+inputs:
+  # 重试配置
+  max_retries:
+    description: '最大重试次数'
+    required: false
+    default: '3'
+  retry_delay:
+    description: '重试间隔（秒）'
+    required: false
+    default: '5'
+  timeout_minutes:
+    description: '单次执行超时时间（分钟）'
+    required: false
+    default: '10'
+  
+  # 重试策略
+  retry_strategy:
+    description: '重试策略 (simple/exponential/adaptive)'
+    required: false
+    default: 'simple'
+  
+  # 执行配置
+  step_name:
+    description: '步骤名称（用于日志和跟踪）'
+    required: true
+  command:
+    description: '要执行的命令'
+    required: true
+  
+  # 错误处理
+  continue_on_error:
+    description: '重试失败后是否继续执行'
+    required: false
+    default: 'false'
+  
+  # 通知配置
+  notify_on_failure:
+    description: '失败时是否发送通知'
+    required: false
+    default: 'true'
+
+outputs:
+  success:
+    description: '执行是否成功'
+    value: ${{ steps.retry-execution.outputs.success }}
+  attempts:
+    description: '实际重试次数'
+    value: ${{ steps.retry-execution.outputs.attempts }}
+  execution_time:
+    description: '总执行时间（秒）'
+    value: ${{ steps.retry-execution.outputs.execution_time }}
+  error_message:
+    description: '错误信息（如果失败）'
+    value: ${{ steps.retry-execution.outputs.error_message }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 重试中心执行
+      id: retry-execution
+      shell: bash
+      run: |
+        # 重试中心核心逻辑
+        source ${{ github.action_path }}/retry-logic.sh
+        
+        # 执行重试逻辑
+        execute_with_retry \
+          --max-retries "${{ inputs.max_retries }}" \
+          --retry-delay "${{ inputs.retry_delay }}" \
+          --timeout-minutes "${{ inputs.timeout_minutes }}" \
+          --strategy "${{ inputs.retry_strategy }}" \
+          --step-name "${{ inputs.step_name }}" \
+          --command "${{ inputs.command }}" \
+          --continue-on-error "${{ inputs.continue_on_error }}" \
+          --notify-on-failure "${{ inputs.notify_on_failure }}"
