@@ -75,103 +75,100 @@ jobs:
       - name: 执行启动命令并验证
         id: execute-start
         if: inputs.start_cmd != '' && inputs.deploy_type == 'backend'
-        uses: ./.github/actions/retry-center
-        with:
-          step_name: "启动服务"
-          command: |
-            echo "🚀 执行启动命令..."
-            echo "- 项目: ${{ inputs.project }}"
-            echo "- 启动命令: ${{ inputs.start_cmd }}"
+        run: |
+          echo "🚀 执行启动命令..."
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 启动命令: ${{ inputs.start_cmd }}"
+          
+          # 切换到项目目录
+          cd ${{ inputs.apps_root }}/${{ inputs.project }}
+          echo "📁 当前目录: $(pwd)"
+          
+          # 验证项目目录是否存在
+          if [ ! -d "${{ inputs.apps_root }}/${{ inputs.project }}" ]; then
+            echo "🚨 项目目录不存在: ${{ inputs.apps_root }}/${{ inputs.project }}"
+            exit 1
+          fi
+          
+          # 验证项目目录不为空
+          FILE_COUNT=$(find "${{ inputs.apps_root }}/${{ inputs.project }}" -type f | wc -l)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "🚨 项目目录为空: ${{ inputs.apps_root }}/${{ inputs.project }}"
+            exit 1
+          fi
+          
+          echo "✅ 项目目录验证通过，文件数量: $FILE_COUNT"
+          
+          # 检查启动命令是否存在
+          START_CMD="${{ inputs.start_cmd }}"
+          CMD_NAME=$(echo "$START_CMD" | awk '{print $1}')
+          
+          # 检查是否有 ecosystem.config.js 文件（PM2 项目）
+          if [ -f "ecosystem.config.js" ]; then
+            echo "📋 发现 PM2 配置文件，使用 PM2 启动..."
             
-            # 切换到项目目录
-            cd ${{ inputs.apps_root }}/${{ inputs.project }}
-            echo "📁 当前目录: $(pwd)"
-            
-            # 验证项目目录是否存在
-            if [ ! -d "${{ inputs.apps_root }}/${{ inputs.project }}" ]; then
-              echo "🚨 项目目录不存在: ${{ inputs.apps_root }}/${{ inputs.project }}"
-              exit 1
+            # 检查 PM2 是否安装
+            if ! command -v pm2 &> /dev/null; then
+              echo "🚨 PM2 未安装，尝试安装..."
+              npm install -g pm2 || echo "PM2 安装失败"
             fi
             
-            # 验证项目目录不为空
-            FILE_COUNT=$(find "${{ inputs.apps_root }}/${{ inputs.project }}" -type f | wc -l)
-            if [ "$FILE_COUNT" -eq 0 ]; then
-              echo "🚨 项目目录为空: ${{ inputs.apps_root }}/${{ inputs.project }}"
-              exit 1
+            # 停止现有进程（如果存在）
+            pm2 stop dashboard-backend 2>/dev/null || echo "没有现有进程需要停止"
+            pm2 delete dashboard-backend 2>/dev/null || echo "没有现有进程需要删除"
+            
+            # 使用 PM2 启动
+            echo "📋 使用 PM2 启动服务..."
+            pm2 start ecosystem.config.js
+            
+            # 保存 PM2 配置
+            pm2 save
+            
+            echo "✅ PM2 启动命令执行完成"
+            START_PID=$(pm2 pid dashboard-backend 2>/dev/null || echo "0")
+          else
+            # 传统启动方式
+            if ! command -v "$CMD_NAME" &> /dev/null; then
+              echo "⚠️ 启动命令不存在: $CMD_NAME"
+              echo "🔍 尝试查找可执行文件..."
+              which "$CMD_NAME" || echo "未找到可执行文件"
             fi
             
-            echo "✅ 项目目录验证通过，文件数量: $FILE_COUNT"
-            
-            # 检查启动命令是否存在
-            START_CMD="${{ inputs.start_cmd }}"
-            CMD_NAME=$(echo "$START_CMD" | awk '{print $1}')
-            
-            # 检查是否有 ecosystem.config.js 文件（PM2 项目）
-            if [ -f "ecosystem.config.js" ]; then
-              echo "📋 发现 PM2 配置文件，使用 PM2 启动..."
-              
-              # 检查 PM2 是否安装
-              if ! command -v pm2 &> /dev/null; then
-                echo "🚨 PM2 未安装，尝试安装..."
-                npm install -g pm2 || echo "PM2 安装失败"
-              fi
-              
-              # 停止现有进程（如果存在）
-              pm2 stop dashboard-backend 2>/dev/null || echo "没有现有进程需要停止"
-              pm2 delete dashboard-backend 2>/dev/null || echo "没有现有进程需要删除"
-              
-              # 使用 PM2 启动
-              echo "📋 使用 PM2 启动服务..."
-              pm2 start ecosystem.config.js
-              
-              # 保存 PM2 配置
-              pm2 save
-              
-              echo "✅ PM2 启动命令执行完成"
-              START_PID=$(pm2 pid dashboard-backend 2>/dev/null || echo "0")
+            # 执行启动命令
+            echo "📋 执行启动命令: $START_CMD"
+            $START_CMD &
+            START_PID=$!
+          fi
+          
+          # 等待服务启动
+          echo "⏳ 等待服务启动..."
+          sleep 5
+          
+          # 检查进程是否还在运行
+          if kill -0 $START_PID 2>/dev/null; then
+            echo "✅ 启动命令执行成功，进程ID: $START_PID"
+          else
+            echo "⚠️ 启动命令可能已结束，检查服务状态..."
+          fi
+          
+          # 检查服务状态（如果可能）
+          echo "📋 检查服务状态..."
+          if command -v systemctl &> /dev/null; then
+            SERVICE_NAME="${{ inputs.project }}"
+            if systemctl is-active --quiet $SERVICE_NAME; then
+              echo "✅ 服务 $SERVICE_NAME 正在运行"
             else
-              # 传统启动方式
-              if ! command -v "$CMD_NAME" &> /dev/null; then
-                echo "⚠️ 启动命令不存在: $CMD_NAME"
-                echo "🔍 尝试查找可执行文件..."
-                which "$CMD_NAME" || echo "未找到可执行文件"
-              fi
-              
-              # 执行启动命令
-              echo "📋 执行启动命令: $START_CMD"
-              $START_CMD &
-              START_PID=$!
-            fi
-            
-            # 等待服务启动
-            echo "⏳ 等待服务启动..."
-            sleep 5
-            
-            # 检查进程是否还在运行
-            if kill -0 $START_PID 2>/dev/null; then
-              echo "✅ 启动命令执行成功，进程ID: $START_PID"
-            else
-              echo "⚠️ 启动命令可能已结束，检查服务状态..."
-            fi
-            
-            # 检查服务状态（如果可能）
-            echo "📋 检查服务状态..."
-            if command -v systemctl &> /dev/null; then
-              SERVICE_NAME="${{ inputs.project }}"
-              if systemctl is-active --quiet $SERVICE_NAME; then
-                echo "✅ 服务 $SERVICE_NAME 正在运行"
+              echo "⚠️ 服务 $SERVICE_NAME 未运行或无法检查"
+              # 尝试检查进程
+              if pgrep -f "${{ inputs.project }}" > /dev/null; then
+                echo "✅ 找到相关进程:"
+                pgrep -f "${{ inputs.project }}" | head -5
               else
-                echo "⚠️ 服务 $SERVICE_NAME 未运行或无法检查"
-                # 尝试检查进程
-                if pgrep -f "${{ inputs.project }}" > /dev/null; then
-                  echo "✅ 找到相关进程:"
-                  pgrep -f "${{ inputs.project }}" | head -5
-                else
-                  echo "⚠️ 未找到相关进程"
-                fi
+                echo "⚠️ 未找到相关进程"
               fi
-            else
-              echo "⚠️ 无法检查服务状态（systemctl不可用）"
+            fi
+          else
+            echo "⚠️ 无法检查服务状态（systemctl不可用）"
               # 尝试检查进程
               if pgrep -f "${{ inputs.project }}" > /dev/null; then
                 echo "✅ 找到相关进程:"
