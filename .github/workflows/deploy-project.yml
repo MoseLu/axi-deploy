@@ -510,7 +510,7 @@ jobs:
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
           source: "./dist-${{ inputs.project }}/"
-          target: "/tmp/"
+          target: "/tmp/dist-${{ inputs.project }}"
           strip_components: 0
 
 
@@ -620,18 +620,32 @@ jobs:
             PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
             
             # 检查是否有备份
-            LATEST_BACKUP=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | head -1)
+            echo "🔍 查找最新备份..."
+            echo "📁 备份目录: $PROJECT_BACKUP_DIR"
             
-            if [ -n "$LATEST_BACKUP" ] && [ -d "$LATEST_BACKUP" ]; then
-              echo "📦 恢复最新备份: $LATEST_BACKUP"
-              sudo rm -rf "$DEPLOY_PATH"/*
-              sudo cp -r "$LATEST_BACKUP"/* "$DEPLOY_PATH"/
-              sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} "$DEPLOY_PATH"
-              echo "✅ 回滚完成，已恢复到: $LATEST_BACKUP"
-            else
-              echo "⚠️ 未找到备份，无法自动回滚"
+            if [ -d "$PROJECT_BACKUP_DIR" ]; then
               echo "📁 备份目录内容:"
-              ls -la "$PROJECT_BACKUP_DIR" 2>/dev/null || echo "备份目录不存在"
+              ls -la "$PROJECT_BACKUP_DIR"
+              
+              # 查找最新的备份目录
+              LATEST_BACKUP=$(find "$PROJECT_BACKUP_DIR" -name "$PROJECT.backup.*" -type d 2>/dev/null | sort -r | head -1)
+              
+              if [ -n "$LATEST_BACKUP" ] && [ -d "$LATEST_BACKUP" ]; then
+                echo "📦 找到最新备份: $LATEST_BACKUP"
+                echo "📁 备份内容:"
+                ls -la "$LATEST_BACKUP"
+                
+                sudo rm -rf "$DEPLOY_PATH"/*
+                sudo cp -r "$LATEST_BACKUP"/* "$DEPLOY_PATH/"
+                sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} "$DEPLOY_PATH"
+                echo "✅ 回滚完成，已恢复到: $LATEST_BACKUP"
+              else
+                echo "⚠️ 未找到有效的备份目录"
+                echo "🔍 可用的备份:"
+                find "$PROJECT_BACKUP_DIR" -name "$PROJECT.backup.*" -type d 2>/dev/null || echo "没有找到备份"
+              fi
+            else
+              echo "⚠️ 备份目录不存在: $PROJECT_BACKUP_DIR"
             fi
           EOF
 
