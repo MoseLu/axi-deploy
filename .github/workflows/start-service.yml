@@ -84,279 +84,103 @@ jobs:
 
       - name: 使用重试中心启动服务
         id: retry-start
-        run: |
-          # 重试中心核心逻辑
-          MAX_RETRIES=3
-          RETRY_DELAY=10
-          TIMEOUT_MINUTES=15
-          STRATEGY="exponential"
-          STEP_NAME="启动服务"
-          CONTINUE_ON_ERROR=false
-          NOTIFY_ON_FAILURE=true
-          STEP_TYPE="backend_service"
-          
-          # 动态获取项目端口
-          PROJECT_NAME="${{ inputs.project }}"
-          echo "🔍 获取项目端口配置..."
-          
-          # 方法1: 从环境变量获取端口（优先级最高）
-          if [ ! -z "${{ inputs.service_port }}" ]; then
-            SERVICE_PORT="${{ inputs.service_port }}"
-            echo "✅ 从输入参数获取端口: $SERVICE_PORT"
-          # 方法2: 从端口配置文件获取端口
-          elif [ -f "port-config.yml" ]; then
-            SERVICE_PORT=$(grep -A 1 "^  $PROJECT_NAME:" port-config.yml | grep "port:" | awk '{print $2}')
-            if [ -z "$SERVICE_PORT" ]; then
-              echo "⚠️  项目 '$PROJECT_NAME' 在端口配置中未找到，使用默认端口8080"
-              SERVICE_PORT="8080"
-            else
-              echo "✅ 从配置文件获取端口: $SERVICE_PORT"
-            fi
-          # 方法3: 使用默认端口
-          else
-            echo "⚠️  端口配置文件不存在，使用默认端口8080"
-            SERVICE_PORT="8080"
-          fi
-          
-          # 服务验证配置
-          SERVICE_VALIDATION=true
-          HEALTH_ENDPOINT="/health"
-          VALIDATION_TIMEOUT=30
-          
-          # 初始化变量
-          ATTEMPTS=0
-          SUCCESS=false
-          ERROR_MESSAGE=""
-          START_TIME=$(date +%s)
-          
-          echo "🚀 开始执行启动服务重试逻辑"
-          echo "步骤名称: $STEP_NAME"
-          echo "最大重试次数: $MAX_RETRIES"
-          echo "重试间隔: $RETRY_DELAY秒"
-          echo "超时时间: $TIMEOUT_MINUTES分钟"
-          echo "重试策略: $STRATEGY"
-          echo "步骤类型: $STEP_TYPE"
-          echo "服务验证: $SERVICE_VALIDATION"
-          echo "服务端口: $SERVICE_PORT"
-          echo "健康检查端点: $HEALTH_ENDPOINT"
-          
-          # 重试逻辑
-          while [ $ATTEMPTS -le $MAX_RETRIES ]; do
-            ATTEMPTS=$((ATTEMPTS + 1))
-            echo ""
-            echo "🔄 第 $ATTEMPTS 次尝试启动服务..."
+        uses: ./.github/workflows/retry-center.yml
+        with:
+          step_name: "启动服务"
+          command: |
+            # 创建SSH密钥文件
+            echo '${{ inputs.server_key }}' > /tmp/ssh_key
+            chmod 600 /tmp/ssh_key
             
-            # 设置超时
-            TIMEOUT_CMD="timeout ${TIMEOUT_MINUTES}m"
+            # 创建启动脚本
+            cat > /tmp/start_service_script.sh << 'EOF'
+            #!/bin/bash
+            set -e
             
-            # 执行启动服务命令
-            if $TIMEOUT_CMD bash -c "
-              # 创建SSH密钥文件
-              echo '${{ inputs.server_key }}' > /tmp/ssh_key
-              chmod 600 /tmp/ssh_key
-              
-              # 创建启动脚本
-              cat > /tmp/start_service_script.sh << 'EOF'
-              #!/bin/bash
-              set -e
-              
-              echo '🚀 执行启动命令...'
-              echo '- 项目: ${{ inputs.project }}'
-              echo '- 启动命令: ${{ inputs.start_cmd }}'
-              
-              # 切换到项目目录
-              cd ${{ inputs.apps_root }}/${{ inputs.project }}
-              echo '📁 当前目录: \$(pwd)'
-              
-              # 验证项目目录是否存在
-              if [ ! -d '${{ inputs.apps_root }}/${{ inputs.project }}' ]; then
-                echo '🚨 项目目录不存在: ${{ inputs.apps_root }}/${{ inputs.project }}'
-                exit 1
-              fi
-              
-              # 验证项目目录不为空
-              FILE_COUNT=\$(find '${{ inputs.apps_root }}/${{ inputs.project }}' -type f | wc -l)
-              if [ \"\$FILE_COUNT\" -eq 0 ]; then
-                echo '🚨 项目目录为空: ${{ inputs.apps_root }}/${{ inputs.project }}'
-                exit 1
-              fi
-              
-              echo '✅ 项目目录验证通过，文件数量: \$FILE_COUNT'
-              
-              # 检查启动命令是否存在
-              START_CMD='${{ inputs.start_cmd }}'
-              CMD_NAME=\$(echo \"\$START_CMD\" | awk '{print \$1}')
-              
-              # 检查是否有 ecosystem.config.js 文件（PM2 项目）
-              if [ -f 'ecosystem.config.js' ]; then
-                echo '📋 发现 PM2 配置文件，使用 PM2 启动...'
-                
-                # 检查 PM2 是否安装
-                if ! command -v pm2 &> /dev/null; then
-                  echo '🚨 PM2 未安装，尝试安装...'
-                  npm install -g pm2 || echo 'PM2 安装失败'
-                fi
-                
-                # 停止现有进程（如果存在）
-                pm2 stop dashboard-backend 2>/dev/null || echo '没有现有进程需要停止'
-                pm2 delete dashboard-backend 2>/dev/null || echo '没有现有进程需要删除'
-                
-                # 使用 PM2 启动
-                echo '📋 使用 PM2 启动服务...'
-                pm2 start ecosystem.config.js
-                
-                # 保存 PM2 配置
-                pm2 save
-                
-                echo '✅ PM2 启动命令执行完成'
-              else
-                # 传统启动方式
-                if ! command -v \"\$CMD_NAME\" &> /dev/null; then
-                  echo '⚠️ 启动命令不存在: \$CMD_NAME'
-                  echo '🔍 尝试查找可执行文件...'
-                  which \"\$CMD_NAME\" || echo '未找到可执行文件'
-                fi
-                
-                # 执行启动命令
-                echo '📋 执行启动命令: \$START_CMD'
-                \$START_CMD &
-              fi
-              
-              echo '✅ 启动命令执行完成'
-              EOF
-              
-              # 使用SSH执行启动脚本
-              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} 'bash -s' < /tmp/start_service_script.sh
-            "; then
-              echo "✅ 命令执行成功！"
-              
-              # 如果启用了服务验证，进行服务验证
-              if [ "$SERVICE_VALIDATION" = "true" ] && [ -n "$SERVICE_PORT" ]; then
-                echo "🔍 开始服务验证..."
-                echo "- 服务端口: $SERVICE_PORT"
-                echo "- 健康检查端点: $HEALTH_ENDPOINT"
-                echo "- 验证超时: $VALIDATION_TIMEOUT秒"
-                
-                # 等待服务启动
-                echo "⏳ 等待服务启动..."
-                sleep 5
-                
-                # 验证服务是否响应
-                VALIDATION_SUCCESS=false
-                VALIDATION_ATTEMPTS=0
-                MAX_VALIDATION_ATTEMPTS=6
-                
-                while [ $VALIDATION_ATTEMPTS -lt $MAX_VALIDATION_ATTEMPTS ]; do
-                  VALIDATION_ATTEMPTS=$((VALIDATION_ATTEMPTS + 1))
-                  echo "🔍 验证尝试 $VALIDATION_ATTEMPTS/$MAX_VALIDATION_ATTEMPTS..."
-                  
-                  # 创建SSH密钥文件用于验证
-                  echo '${{ inputs.server_key }}' > /tmp/ssh_key_validation
-                  chmod 600 /tmp/ssh_key_validation
-                  
-                  # 在服务器上执行验证
-                  VALIDATION_RESULT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key_validation -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
-                    # 检查端口是否监听
-                    if netstat -tlnp 2>/dev/null | grep -q ':$SERVICE_PORT'; then
-                      echo 'PORT_LISTENING'
-                      
-                      # 测试健康检查端点
-                      HEALTH_RESPONSE=\$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:$SERVICE_PORT$HEALTH_ENDPOINT' --connect-timeout 5 --max-time 10 2>/dev/null || echo 'connection_failed')
-                      
-                      if [ \"\$HEALTH_RESPONSE\" = \"200\" ]; then
-                        echo 'HEALTH_SUCCESS:\$HEALTH_RESPONSE'
-                      else
-                        echo 'HEALTH_FAILED:\$HEALTH_RESPONSE'
-                      fi
-                    else
-                      echo 'PORT_NOT_LISTENING'
-                    fi
-                  " 2>/dev/null || echo "SSH_FAILED")
-                  
-                  # 解析验证结果
-                  if echo "$VALIDATION_RESULT" | grep -q "PORT_LISTENING"; then
-                    echo "✅ 端口 $SERVICE_PORT 正在监听"
-                    
-                    if echo "$VALIDATION_RESULT" | grep -q "HEALTH_SUCCESS"; then
-                      HEALTH_CODE=$(echo "$VALIDATION_RESULT" | grep "HEALTH_SUCCESS" | cut -d':' -f2)
-                      echo "✅ 健康检查成功 - 状态码: $HEALTH_CODE"
-                      VALIDATION_SUCCESS=true
-                      break
-                    else
-                      HEALTH_CODE=$(echo "$VALIDATION_RESULT" | grep "HEALTH_FAILED" | cut -d':' -f2)
-                      echo "❌ 健康检查失败 - 响应: $HEALTH_CODE"
-                    fi
-                  else
-                    echo "❌ 端口 $SERVICE_PORT 未监听"
-                  fi
-                  
-                  # 如果不是最后一次验证，等待后重试
-                  if [ $VALIDATION_ATTEMPTS -lt $MAX_VALIDATION_ATTEMPTS ]; then
-                    echo "⏳ 等待 5 秒后重试验证..."
-                    sleep 5
-                  fi
-                done
-                
-                if [ "$VALIDATION_SUCCESS" = "true" ]; then
-                  echo "✅ 服务验证成功！"
-                  SUCCESS=true
-                  break
-                else
-                  echo "❌ 服务验证失败"
-                  ERROR_MESSAGE="服务启动成功但验证失败 - 端口:$SERVICE_PORT, 健康检查:$HEALTH_ENDPOINT"
-                  SUCCESS=false
-                fi
-              else
-                # 没有启用服务验证，直接认为成功
-                SUCCESS=true
-                break
-              fi
-            else
-              EXIT_CODE=$?
-              if [ $EXIT_CODE -eq 124 ]; then
-                ERROR_MESSAGE="启动服务超时（${TIMEOUT_MINUTES}分钟）"
-              else
-                ERROR_MESSAGE="启动服务失败，退出码: $EXIT_CODE"
-              fi
-              
-              echo "❌ 启动服务失败: $ERROR_MESSAGE"
-              
-              # 检查是否还有重试机会
-              if [ $ATTEMPTS -le $MAX_RETRIES ]; then
-                # 计算重试延迟
-                if [ "$STRATEGY" = "exponential" ]; then
-                  DELAY=$((RETRY_DELAY * (2 ** (ATTEMPTS - 1))))
-                elif [ "$STRATEGY" = "adaptive" ]; then
-                  DELAY=$((RETRY_DELAY + ATTEMPTS * 2))
-                else
-                  DELAY=$RETRY_DELAY
-                fi
-                
-                echo "⏳ 等待 $DELAY 秒后重试..."
-                sleep $DELAY
-              fi
-            fi
-          done
-          
-          # 计算执行时间
-          END_TIME=$(date +%s)
-          EXECUTION_TIME=$((END_TIME - START_TIME))
-          
-          # 设置输出
-          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
-          echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
-          echo "execution_time=$EXECUTION_TIME" >> $GITHUB_OUTPUT
-          echo "error_message=$ERROR_MESSAGE" >> $GITHUB_OUTPUT
-          
-          # 最终结果
-          if [ "$SUCCESS" = "true" ]; then
-            echo "🎉 启动服务重试逻辑执行完成 - 成功"
-          else
-            echo "💥 启动服务重试逻辑执行完成 - 失败"
-            if [ "$CONTINUE_ON_ERROR" = "false" ]; then
+            echo '🚀 执行启动命令...'
+            echo '- 项目: ${{ inputs.project }}'
+            echo '- 启动命令: ${{ inputs.start_cmd }}'
+            
+            # 切换到项目目录
+            cd ${{ inputs.apps_root }}/${{ inputs.project }}
+            echo '📁 当前目录: $(pwd)'
+            
+            # 验证项目目录是否存在
+            if [ ! -d '${{ inputs.apps_root }}/${{ inputs.project }}' ]; then
+              echo '🚨 项目目录不存在: ${{ inputs.apps_root }}/${{ inputs.project }}'
               exit 1
             fi
-          fi
+            
+            # 验证项目目录不为空
+            FILE_COUNT=$(find '${{ inputs.apps_root }}/${{ inputs.project }}' -type f | wc -l)
+            if [ "$FILE_COUNT" -eq 0 ]; then
+              echo '🚨 项目目录为空: ${{ inputs.apps_root }}/${{ inputs.project }}'
+              exit 1
+            fi
+            
+            echo '✅ 项目目录验证通过，文件数量: $FILE_COUNT'
+            
+            # 检查启动命令是否存在
+            START_CMD='${{ inputs.start_cmd }}'
+            CMD_NAME=$(echo "$START_CMD" | awk '{print $1}')
+            
+            # 检查是否有 ecosystem.config.js 文件（PM2 项目）
+            if [ -f 'ecosystem.config.js' ]; then
+              echo '📋 发现 PM2 配置文件，使用 PM2 启动...'
+              
+              # 检查 PM2 是否安装
+              if ! command -v pm2 &> /dev/null; then
+                echo '🚨 PM2 未安装，尝试安装...'
+                npm install -g pm2 || echo 'PM2 安装失败'
+              fi
+              
+              # 停止现有进程（如果存在）
+              pm2 stop dashboard-backend 2>/dev/null || echo '没有现有进程需要停止'
+              pm2 delete dashboard-backend 2>/dev/null || echo '没有现有进程需要删除'
+              
+              # 使用 PM2 启动
+              echo '📋 使用 PM2 启动服务...'
+              pm2 start ecosystem.config.js
+              
+              # 保存 PM2 配置
+              pm2 save
+              
+              echo '✅ PM2 启动命令执行完成'
+            else
+              # 传统启动方式
+              if ! command -v "$CMD_NAME" &> /dev/null; then
+                echo '⚠️ 启动命令不存在: $CMD_NAME'
+                echo '🔍 尝试查找可执行文件...'
+                which "$CMD_NAME" || echo '未找到可执行文件'
+              fi
+              
+              # 执行启动命令
+              echo '📋 执行启动命令: $START_CMD'
+              $START_CMD &
+            fi
+            
+            echo '✅ 启动命令执行完成'
+            EOF
+            
+            # 使用SSH执行启动脚本
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} 'bash -s' < /tmp/start_service_script.sh
+          max_retries: 3
+          retry_delay: 10
+          timeout_minutes: 15
+          retry_strategy: "exponential"
+          step_type: "backend_service"
+          continue_on_error: false
+          notify_on_failure: true
+          # 启用服务验证
+          service_validation: true
+          service_port: "${{ inputs.service_port || '8080' }}"
+          health_endpoint: "/health"
+          validation_timeout: 30
+          # SSH连接配置（用于远程服务验证）
+          ssh_host: "${{ inputs.server_host }}"
+          ssh_port: "${{ inputs.server_port }}"
+          ssh_user: "${{ inputs.server_user }}"
+          ssh_key: "${{ inputs.server_key }}"
 
       - name: 设置输出
         id: set-outputs
@@ -365,9 +189,13 @@ jobs:
           if [ "${{ steps.retry-start.outputs.success }}" = "true" ]; then
             echo "start_success=true" >> $GITHUB_OUTPUT
             echo "✅ 启动服务成功"
+            echo "重试次数: ${{ steps.retry-start.outputs.attempts }}"
+            echo "执行时间: ${{ steps.retry-start.outputs.execution_time }}秒"
           else
             echo "start_success=false" >> $GITHUB_OUTPUT
             echo "❌ 启动服务失败"
             echo "错误信息: ${{ steps.retry-start.outputs.error_message }}"
+            echo "重试次数: ${{ steps.retry-start.outputs.attempts }}"
+            echo "执行时间: ${{ steps.retry-start.outputs.execution_time }}秒"
             exit 1
           fi

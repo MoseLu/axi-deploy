@@ -108,6 +108,31 @@ on:
         required: false
         type: number
         default: 30
+      
+      # 新增：SSH连接配置（用于远程服务验证）
+      ssh_host:
+        description: 'SSH主机地址（用于远程服务验证）'
+        required: false
+        type: string
+        default: ''
+      
+      ssh_port:
+        description: 'SSH端口（用于远程服务验证）'
+        required: false
+        type: string
+        default: '22'
+      
+      ssh_user:
+        description: 'SSH用户名（用于远程服务验证）'
+        required: false
+        type: string
+        default: ''
+      
+      ssh_key:
+        description: 'SSH私钥（用于远程服务验证）'
+        required: false
+        type: string
+        default: ''
 
     outputs:
       success:
@@ -208,7 +233,7 @@ jobs:
                 
                 # 等待服务启动
                 echo "⏳ 等待服务启动..."
-                sleep 5
+                sleep 10
                 
                 # 验证服务是否响应
                 VALIDATION_SUCCESS=false
@@ -219,22 +244,70 @@ jobs:
                   VALIDATION_ATTEMPTS=$((VALIDATION_ATTEMPTS + 1))
                   echo "🔍 验证尝试 $VALIDATION_ATTEMPTS/$MAX_VALIDATION_ATTEMPTS..."
                   
-                  # 检查端口是否监听
-                  if netstat -tlnp 2>/dev/null | grep -q ":${{ inputs.service_port }}"; then
-                    echo "✅ 端口 ${{ inputs.service_port }} 正在监听"
+                  # 检查是否有SSH连接配置（远程服务验证）
+                  if [ -n "${{ inputs.ssh_host }}" ] && [ -n "${{ inputs.ssh_user }}" ] && [ -n "${{ inputs.ssh_key }}" ]; then
+                    echo "🔍 检测到SSH配置，进行远程服务验证..."
                     
-                    # 测试健康检查端点
-                    HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${{ inputs.service_port }}${{ inputs.health_endpoint }}" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
+                    # 创建SSH密钥文件用于验证
+                    echo '${{ inputs.ssh_key }}' > /tmp/ssh_key_validation
+                    chmod 600 /tmp/ssh_key_validation
                     
-                    if [ "$HEALTH_RESPONSE" = "200" ]; then
-                      echo "✅ 健康检查成功 - 状态码: $HEALTH_RESPONSE"
-                      VALIDATION_SUCCESS=true
-                      break
+                    # 在服务器上执行验证
+                    VALIDATION_RESULT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key_validation -p ${{ inputs.ssh_port }} ${{ inputs.ssh_user }}@${{ inputs.ssh_host }} "
+                      # 检查端口是否监听
+                      if netstat -tlnp 2>/dev/null | grep -q ':${{ inputs.service_port }}'; then
+                        echo 'PORT_LISTENING'
+                        
+                        # 测试健康检查端点
+                        HEALTH_RESPONSE=\$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:${{ inputs.service_port }}${{ inputs.health_endpoint }}' --connect-timeout 5 --max-time 10 2>/dev/null || echo 'connection_failed')
+                        
+                        if [ \"\$HEALTH_RESPONSE\" = \"200\" ]; then
+                          echo 'HEALTH_SUCCESS:\$HEALTH_RESPONSE'
+                        else
+                          echo 'HEALTH_FAILED:\$HEALTH_RESPONSE'
+                        fi
+                      else
+                        echo 'PORT_NOT_LISTENING'
+                      fi
+                    " 2>/dev/null || echo "SSH_FAILED")
+                    
+                    # 解析验证结果
+                    if echo "$VALIDATION_RESULT" | grep -q "PORT_LISTENING"; then
+                      echo "✅ 端口 ${{ inputs.service_port }} 正在监听"
+                      
+                      if echo "$VALIDATION_RESULT" | grep -q "HEALTH_SUCCESS"; then
+                        HEALTH_CODE=$(echo "$VALIDATION_RESULT" | grep "HEALTH_SUCCESS" | cut -d':' -f2)
+                        echo "✅ 健康检查成功 - 状态码: $HEALTH_CODE"
+                        VALIDATION_SUCCESS=true
+                        break
+                      else
+                        HEALTH_CODE=$(echo "$VALIDATION_RESULT" | grep "HEALTH_FAILED" | cut -d':' -f2)
+                        echo "❌ 健康检查失败 - 响应: $HEALTH_CODE"
+                      fi
                     else
-                      echo "❌ 健康检查失败 - 响应: $HEALTH_RESPONSE"
+                      echo "❌ 端口 ${{ inputs.service_port }} 未监听"
                     fi
                   else
-                    echo "❌ 端口 ${{ inputs.service_port }} 未监听"
+                    # 本地服务验证
+                    echo "🔍 进行本地服务验证..."
+                    
+                    # 检查端口是否监听
+                    if netstat -tlnp 2>/dev/null | grep -q ":${{ inputs.service_port }}"; then
+                      echo "✅ 端口 ${{ inputs.service_port }} 正在监听"
+                      
+                      # 测试健康检查端点
+                      HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${{ inputs.service_port }}${{ inputs.health_endpoint }}" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
+                      
+                      if [ "$HEALTH_RESPONSE" = "200" ]; then
+                        echo "✅ 健康检查成功 - 状态码: $HEALTH_RESPONSE"
+                        VALIDATION_SUCCESS=true
+                        break
+                      else
+                        echo "❌ 健康检查失败 - 响应: $HEALTH_RESPONSE"
+                      fi
+                    else
+                      echo "❌ 端口 ${{ inputs.service_port }} 未监听"
+                    fi
                   fi
                   
                   # 如果不是最后一次验证，等待后重试
@@ -296,31 +369,7 @@ jobs:
           echo "error_message=$ERROR_MESSAGE" >> $GITHUB_OUTPUT
           
           # 生成重试报告
-          RETRY_REPORT=$(cat << EOF
-          {
-            "step_name": "$STEP_NAME",
-            "workflow_run_id": "${{ github.run_id }}",
-            "job_name": "retry-execution",
-            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "success": $SUCCESS,
-            "attempts": $ATTEMPTS,
-            "execution_time_seconds": $EXECUTION_TIME,
-            "error_message": "$ERROR_MESSAGE",
-            "retry_config": {
-              "max_retries": $MAX_RETRIES,
-              "retry_delay": $RETRY_DELAY,
-              "timeout_minutes": $TIMEOUT_MINUTES,
-              "strategy": "$STRATEGY",
-              "step_type": "$STEP_TYPE"
-            },
-            "environment": {
-              "runner": "${{ runner.os }}",
-              "workflow": "${{ github.workflow }}",
-              "repository": "${{ github.repository }}"
-            }
-          }
-          EOF
-          )
+          RETRY_REPORT='{"step_name":"'$STEP_NAME'","workflow_run_id":"'${{ github.run_id }}'","job_name":"retry-execution","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","success":'$SUCCESS',"attempts":'$ATTEMPTS',"execution_time_seconds":'$EXECUTION_TIME',"error_message":"'$ERROR_MESSAGE'","retry_config":{"max_retries":'$MAX_RETRIES',"retry_delay":'$RETRY_DELAY',"timeout_minutes":'$TIMEOUT_MINUTES',"strategy":"'$STRATEGY'","step_type":"'$STEP_TYPE'"},"environment":{"runner":"'${{ runner.os }}'","workflow":"'${{ github.workflow }}'","repository":"'${{ github.repository }}'"}}'
           
           echo "retry_report='$RETRY_REPORT'" >> $GITHUB_OUTPUT
           
