@@ -60,6 +60,32 @@ on:
         type: string
         description: "运行用户"
         default: "deploy"
+      # 新增重试配置参数
+      retry_enabled:
+        required: false
+        type: boolean
+        default: true
+        description: '是否启用重试机制'
+      max_retry_attempts:
+        required: false
+        type: number
+        default: 5
+        description: '最大重试次数'
+      retry_timeout_minutes:
+        required: false
+        type: number
+        default: 15
+        description: '重试超时时间（分钟）'
+      upload_timeout_minutes:
+        required: false
+        type: number
+        default: 20
+        description: '文件上传超时时间（分钟）'
+      deploy_timeout_minutes:
+        required: false
+        type: number
+        default: 15
+        description: '部署操作超时时间（分钟）'
     outputs:
       deploy_success:
         description: "部署是否成功"
@@ -71,6 +97,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # 工作流总超时时间
     permissions:
       contents: read
       actions: read
@@ -88,6 +115,9 @@ jobs:
           echo "- 运行ID: ${{ inputs.run_id }}"
           echo "- 部署类型: ${{ inputs.deploy_type }}"
           echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
+          echo "- 重试机制: ${{ inputs.retry_enabled }}"
+          echo "- 最大重试次数: ${{ inputs.max_retry_attempts }}"
+          echo "- 重试超时时间: ${{ inputs.retry_timeout_minutes }}分钟"
           
           # 验证部署类型
           DEPLOY_TYPE="${{ inputs.deploy_type }}"
@@ -202,7 +232,52 @@ jobs:
           
           echo "✅ Token权限测试完成，继续下载构建产物"
 
-      - name: 下载构建产物
+      - name: 下载构建产物（带重试）
+        if: ${{ inputs.retry_enabled }}
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: ${{ inputs.retry_timeout_minutes }}
+          max_attempts: ${{ inputs.max_retry_attempts }}
+          retry_wait_seconds: 30
+          command: |
+            echo "🔄 开始下载构建产物..."
+            
+            # 清理旧文件
+            rm -rf dist-${{ inputs.project }}/ || true
+            rm -f dist-${{ inputs.project }}.zip || true
+            
+            # 下载构建产物
+            gh run download ${{ inputs.run_id }} \
+              --name "dist-${{ inputs.project }}" \
+              --dir . \
+              --repo ${{ inputs.source_repo }}
+            
+            # 验证下载结果
+            if [ -d "dist-${{ inputs.project }}" ]; then
+              file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+              echo "✅ 构建产物下载成功，包含 $file_count 个文件"
+            elif [ -f "dist-${{ inputs.project }}.zip" ]; then
+              echo "✅ 构建产物压缩包下载成功"
+              unzip -q "dist-${{ inputs.project }}.zip"
+              file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+              echo "✅ 构建产物解压成功，包含 $file_count 个文件"
+            else
+              echo "❌ 构建产物下载失败"
+              exit 1
+            fi
+            
+            # 最终验证
+            if [ ! -d "dist-${{ inputs.project }}" ] || [ "$(find "dist-${{ inputs.project }}" -type f | wc -l)" -eq 0 ]; then
+              echo "❌ 构建产物验证失败，目录为空或不存在"
+              exit 1
+            fi
+            
+            echo "✅ 构建产物验证通过"
+        env:
+          GH_TOKEN: ${{ inputs.deploy_center_pat || github.token }}
+
+      - name: 下载构建产物（无重试）
+        if: ${{ !inputs.retry_enabled }}
         uses: actions/download-artifact@v4
         with:
           name: dist-${{ inputs.project }}
@@ -225,46 +300,42 @@ jobs:
             echo "📁 构建产物内容:"
             ls -la "./dist-${{ inputs.project }}/"
           else
-            echo "❌ 构建产物目录不存在"
-          fi
-          
-          if [ -f "./dist-${{ inputs.project }}.zip" ]; then
-            echo "✅ 找到构建产物压缩包"
-            ls -lh "./dist-${{ inputs.project }}.zip"
-          else
-            echo "❌ 构建产物压缩包不存在"
-          fi
-          
-          echo ""
-          echo "🔍 所有文件和目录:"
-          find . -type f -maxdepth 2
-          find . -type d -maxdepth 2
-          
-          # 如果下载失败，提供详细的调试信息
-          if [ "${{ steps.download-artifact.outcome }}" == "failure" ]; then
+            echo "📝 构建产物目录不存在，检查当前目录内容..."
+            echo "📁 当前目录内容:"
+            ls -la ./
             echo ""
-            echo "🚨 下载失败，详细调试信息:"
-            echo "- 项目名称: ${{ inputs.project }}"
-            echo "- 源仓库: ${{ inputs.source_repo }}"
-            echo "- 运行ID: ${{ inputs.run_id }}"
-            echo "- 期望的构建产物名称: dist-${{ inputs.project }}"
-            echo "- GitHub Token: ${{ inputs.deploy_center_pat != '' && '已提供' || '未提供' }}"
-            echo ""
-            echo "🔧 可能的原因:"
-            echo "1. 构建产物名称不匹配"
-            echo "2. 构建产物已过期"
-            echo "3. GitHub Token权限不足"
-            echo "4. 源仓库或运行ID错误"
-            echo "5. 跨仓库访问限制"
-            echo "6. 仓库权限设置问题"
-            echo ""
-            echo "🔍 建议检查:"
-            echo "1. 访问 https://github.com/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}"
-            echo "2. 查看构建产物列表"
-            echo "3. 确认构建产物名称"
-            echo "4. 检查Token权限"
-            echo "5. 确认仓库访问权限"
-            exit 1
+            echo "🔍 所有文件和目录:"
+            find . -type f -maxdepth 2
+            find . -type d -maxdepth 2
+            
+            # 检查是否有压缩包
+            if [ -f "deployment.tar.gz" ]; then
+              echo "✅ 发现部署压缩包，正在解压..."
+              mkdir -p "./dist-${{ inputs.project }}"
+              tar -xzf deployment.tar.gz -C "./dist-${{ inputs.project }}"
+              echo "✅ 部署压缩包解压完成"
+              echo "📁 构建产物内容:"
+              ls -la "./dist-${{ inputs.project }}/"
+              echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
+            # 检查当前目录是否包含构建产物文件
+            elif [ -f "index.html" ] || [ -f "package.json" ] || [ -d "assets" ]; then
+              echo "✅ 发现构建产物文件在当前目录，创建标准目录结构..."
+              mkdir -p "./dist-${{ inputs.project }}"
+              # 移动所有文件到构建产物目录（除了隐藏文件）
+              find . -maxdepth 1 -type f ! -name ".*" -exec mv {} "./dist-${{ inputs.project }}/" \;
+              find . -maxdepth 1 -type d ! -name "." ! -name ".*" -exec mv {} "./dist-${{ inputs.project }}/" \;
+              echo "✅ 构建产物已移动到标准目录: ./dist-${{ inputs.project }}"
+              echo "📁 构建产物内容:"
+              ls -la "./dist-${{ inputs.project }}/"
+              echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
+            else
+              echo "❌ 构建产物下载失败，无法继续部署"
+              echo "🔍 期望的文件:"
+              echo "- ./dist-${{ inputs.project }}/ (目录)"
+              echo "- deployment.tar.gz (压缩包)"
+              echo "- index.html, package.json, assets/ (静态文件)"
+              exit 1
+            fi
           fi
 
       - name: 调试SSH参数
@@ -296,7 +367,78 @@ jobs:
           
           echo "✅ SSH参数验证通过"
 
-      - name: 部署到服务器
+      - name: 部署到服务器（带重试）
+        if: ${{ inputs.retry_enabled }}
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: ${{ inputs.deploy_timeout_minutes }}
+          max_attempts: ${{ inputs.max_retry_attempts }}
+          retry_wait_seconds: 60
+          command: |
+            echo "🚀 开始部署项目: ${{ inputs.project }}"
+            
+            # 标准化目录结构
+            APPS_ROOT="${{ inputs.apps_root || '/srv/apps' }}"
+            STATIC_ROOT="${{ inputs.static_root || '/srv/static' }}"
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_PATH=""
+            
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              # 后端项目部署到应用目录
+              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
+              echo "📁 后端项目部署到: $DEPLOY_PATH"
+            else
+              # 静态项目部署到静态文件目录
+              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
+              echo "📁 静态项目部署到: $DEPLOY_PATH"
+            fi
+            
+            # 创建部署目录
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH
+            
+            # 创建项目专用备份目录
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/apps"
+            else
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 备份旧部署（如果存在）
+            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
+              echo "📋 备份旧部署目录: $DEPLOY_PATH"
+              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
+              echo "✅ 旧部署目录已备份到: $BACKUP_NAME"
+              
+              # 清理旧的备份文件，只保留最近5个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +6)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近5个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 没有旧部署需要备份"
+            fi
+            
+            # 清理目标部署目录（避免残留文件）
+            echo "🧹 清理目标部署目录..."
+            sudo rm -rf $DEPLOY_PATH/*
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown deploy:deploy $DEPLOY_PATH
+            echo "✅ 部署目录已清理并重新创建"
+
+      - name: 部署到服务器（无重试）
+        if: ${{ !inputs.retry_enabled }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ inputs.server_host }}
@@ -415,7 +557,35 @@ jobs:
             fi
           fi
 
-      - name: 上传构建产物到服务器
+      - name: 上传构建产物到服务器（带重试）
+        if: ${{ inputs.retry_enabled }}
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: ${{ inputs.upload_timeout_minutes }}
+          max_attempts: ${{ inputs.max_retry_attempts }}
+          retry_wait_seconds: 60
+          command: |
+            echo "🚀 开始上传构建产物到服务器..."
+            
+            # 使用rsync替代scp，更可靠
+            rsync -avz --progress --timeout=300 \
+              -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=60" \
+              "./dist-${{ inputs.project }}/" ${{ inputs.server_user }}@${{ inputs.server_host }}:/tmp/
+            
+            # 验证上传结果
+            file_count=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+              ${{ inputs.server_user }}@${{ inputs.server_host }} \
+              "find /tmp/dist-${{ inputs.project }}/ -type f | wc -l")
+            
+            if [ "$file_count" -eq 0 ]; then
+              echo "❌ 文件上传失败，目标目录为空"
+              exit 1
+            fi
+            
+            echo "✅ 文件上传成功，共 $file_count 个文件"
+
+      - name: 上传构建产物到服务器（无重试）
+        if: ${{ !inputs.retry_enabled }}
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ inputs.server_host }}
@@ -426,7 +596,77 @@ jobs:
           target: "/tmp/"
           strip_components: 0
 
-      - name: 移动构建产物到部署目录
+      - name: 移动构建产物到部署目录（带重试）
+        if: ${{ inputs.retry_enabled }}
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: ${{ inputs.deploy_timeout_minutes }}
+          max_attempts: ${{ inputs.max_retry_attempts }}
+          retry_wait_seconds: 30
+          command: |
+            echo "📁 移动构建产物到部署目录..."
+            
+            PROJECT="${{ inputs.project }}"
+            
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              DEPLOY_PATH="${{ inputs.apps_root || '/srv/apps' }}/$PROJECT"
+            else
+              DEPLOY_PATH="${{ inputs.static_root || '/srv/static' }}/$PROJECT"
+            fi
+            
+            # 检查临时目录中的构建产物
+            TEMP_SOURCE="/tmp/dist-$PROJECT"
+            echo "📁 检查临时构建产物: $TEMP_SOURCE"
+            
+            if [ ! -d "$TEMP_SOURCE" ]; then
+              echo "🚨 临时构建产物目录不存在: $TEMP_SOURCE"
+              echo "📁 /tmp 目录内容:"
+              ls -la /tmp/
+              exit 1
+            fi
+            
+            echo "📁 临时构建产物内容:"
+            ls -la "$TEMP_SOURCE/"
+            
+            # 统计文件数量
+            FILE_COUNT=$(find "$TEMP_SOURCE" -type f | wc -l)
+            echo "📊 构建产物文件数量: $FILE_COUNT"
+            
+            if [ "$FILE_COUNT" -eq 0 ]; then
+              echo "🚨 构建产物为空"
+              exit 1
+            fi
+            
+            # 移动构建产物到部署目录
+            echo "📁 移动构建产物到部署目录: $DEPLOY_PATH"
+            sudo cp -r "$TEMP_SOURCE"/* "$DEPLOY_PATH/"
+            sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} "$DEPLOY_PATH"
+            
+            echo "✅ 构建产物已成功部署到: $DEPLOY_PATH"
+            echo "📁 部署目录内容:"
+            ls -la "$DEPLOY_PATH/"
+            echo "📊 部署文件数量: $(find "$DEPLOY_PATH" -type f | wc -l)"
+            
+            # 清理临时文件
+            echo "🧹 清理临时文件..."
+            sudo rm -rf "$TEMP_SOURCE"
+            echo "✅ 临时文件已清理"
+            
+            # 最终验证
+            echo "🔍 最终验证部署结果..."
+            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
+              echo "✅ 部署验证通过"
+              echo "📁 部署目录内容:"
+              ls -la $DEPLOY_PATH/
+              echo "📊 最终文件数量: $(find "$DEPLOY_PATH" -type f | wc -l)"
+            else
+              echo "🚨 部署验证失败"
+              exit 1
+            fi
+
+      - name: 移动构建产物到部署目录（无重试）
+        if: ${{ !inputs.retry_enabled }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ inputs.server_host }}
@@ -501,6 +741,42 @@ jobs:
             echo "✅ 临时目录已清理: $TEMP_DIR"
             
             echo "✅ 项目部署完成: ${{ inputs.project }}"
+
+      - name: 部署失败自动回滚
+        if: failure()
+        run: |
+          echo "❌ 部署失败，开始自动回滚..."
+          
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+            ${{ inputs.server_user }}@${{ inputs.server_host }} << 'EOF'
+            
+            PROJECT="${{ inputs.project }}"
+            
+            if [ "${{ inputs.deploy_type }}" = "static" ]; then
+              DEPLOY_PATH="${{ inputs.static_root || '/srv/static' }}/$PROJECT"
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/static"
+            else
+              DEPLOY_PATH="${{ inputs.apps_root || '/srv/apps' }}/$PROJECT"
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/apps"
+            fi
+            
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            
+            # 检查是否有备份
+            LATEST_BACKUP=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | head -1)
+            
+            if [ -n "$LATEST_BACKUP" ] && [ -d "$LATEST_BACKUP" ]; then
+              echo "📦 恢复最新备份: $LATEST_BACKUP"
+              sudo rm -rf "$DEPLOY_PATH"/*
+              sudo cp -r "$LATEST_BACKUP"/* "$DEPLOY_PATH"/
+              sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} "$DEPLOY_PATH"
+              echo "✅ 回滚完成，已恢复到: $LATEST_BACKUP"
+            else
+              echo "⚠️ 未找到备份，无法自动回滚"
+              echo "📁 备份目录内容:"
+              ls -la "$PROJECT_BACKUP_DIR" 2>/dev/null || echo "备份目录不存在"
+            fi
+          EOF
 
       - name: 设置输出
         id: set-outputs

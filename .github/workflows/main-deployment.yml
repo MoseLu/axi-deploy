@@ -46,6 +46,32 @@ on:
         required: false
         type: boolean
         default: false
+      # 新增重试配置参数
+      retry_enabled:
+        description: '是否启用重试机制'
+        required: false
+        type: boolean
+        default: true
+      max_retry_attempts:
+        description: '最大重试次数'
+        required: false
+        type: number
+        default: 5
+      retry_timeout_minutes:
+        description: '重试超时时间（分钟）'
+        required: false
+        type: number
+        default: 15
+      upload_timeout_minutes:
+        description: '文件上传超时时间（分钟）'
+        required: false
+        type: number
+        default: 20
+      deploy_timeout_minutes:
+        description: '部署操作超时时间（分钟）'
+        required: false
+        type: number
+        default: 15
 
 jobs:
   # 步骤1: 验证构建产物可用性
@@ -100,6 +126,12 @@ jobs:
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
       # GitHub Token (可选)
       deploy_center_pat: ${{ needs.parse-secrets.outputs.deploy_center_pat || '' }}
+      # 重试配置参数
+      retry_enabled: ${{ inputs.retry_enabled }}
+      max_retry_attempts: ${{ inputs.max_retry_attempts }}
+      retry_timeout_minutes: ${{ inputs.retry_timeout_minutes }}
+      upload_timeout_minutes: ${{ inputs.upload_timeout_minutes }}
+      deploy_timeout_minutes: ${{ inputs.deploy_timeout_minutes }}
 
   # 步骤5: 配置Nginx（可选）
   configure-nginx:
