@@ -10,5 +10,11 @@ inputs:
     required: true
 
 runs:
-  using: 'node20'
-  main: 'index.js'
+  using: 'composite'
+  steps:
+    - name: 执行命令
+      shell: bash
+      run: |
+        echo "执行步骤: ${{ inputs.step_name }}"
+        echo "执行命令: ${{ inputs.command }}"
+        eval "${{ inputs.command }}"
