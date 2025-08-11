@@ -218,7 +218,7 @@ jobs:
                   echo \"❌ PM2 未安装\"
                 fi
                 echo \"- 检查端口占用:\"
-                netstat -tlnp | grep :8081 || echo \"端口8081未被占用\"
+                netstat -tlnp | grep :8090 || echo \"端口8090未被占用\"
                 
                 # 检查启动命令是否存在
                 START_CMD=\"${{ inputs.start_cmd }}\"

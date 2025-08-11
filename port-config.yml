@@ -10,8 +10,8 @@ projects:
     
   # 业务项目
   axi-project-dashboard:
-    port: 8081
-    websocket_port: 8082
+    port: 8090
+    websocket_port: 8091
     description: "项目仪表板"
     
   axi-docs:
