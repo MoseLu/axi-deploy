@@ -15,29 +15,29 @@ projects:
     description: "项目仪表板"
     
   axi-docs:
-    port: 8082
-    description: "文档服务"
+    port: 8083
+    description: "文档服务（静态站点）"
     
   # 预留端口（未来项目）
   axi-chat:
-    port: 8083
+    port: 8084
     description: "聊天服务"
     
   axi-notification:
-    port: 8084
+    port: 8085
     description: "通知服务"
     
   axi-analytics:
-    port: 8085
+    port: 8086
     description: "分析服务"
     
   # 系统服务
   axi-monitor:
-    port: 8086
+    port: 8087
     description: "监控服务"
     
   axi-backup:
-    port: 8087
+    port: 8088
     description: "备份服务"
 
 # 端口分配规则
