@@ -80,6 +80,34 @@ on:
         required: false
         type: boolean
         default: false
+      
+      # 新增：服务验证配置
+      service_validation:
+        description: '是否启用服务验证'
+        required: false
+        type: boolean
+        default: false
+      
+      # 新增：服务端口配置
+      service_port:
+        description: '服务端口（用于验证）'
+        required: false
+        type: string
+        default: ''
+      
+      # 新增：健康检查端点
+      health_endpoint:
+        description: '健康检查端点'
+        required: false
+        type: string
+        default: '/health'
+      
+      # 新增：验证超时时间
+      validation_timeout:
+        description: '验证超时时间（秒）'
+        required: false
+        type: number
+        default: 30
 
     outputs:
       success:
@@ -169,9 +197,67 @@ jobs:
             
             # 执行命令
             if $TIMEOUT_CMD bash -c "$COMMAND"; then
-              SUCCESS=true
-              echo "✅ 执行成功！"
-              break
+              echo "✅ 命令执行成功！"
+              
+              # 如果启用了服务验证，进行服务验证
+              if [ "${{ inputs.service_validation }}" = "true" ] && [ -n "${{ inputs.service_port }}" ]; then
+                echo "🔍 开始服务验证..."
+                echo "- 服务端口: ${{ inputs.service_port }}"
+                echo "- 健康检查端点: ${{ inputs.health_endpoint }}"
+                echo "- 验证超时: ${{ inputs.validation_timeout }}秒"
+                
+                # 等待服务启动
+                echo "⏳ 等待服务启动..."
+                sleep 5
+                
+                # 验证服务是否响应
+                VALIDATION_SUCCESS=false
+                VALIDATION_ATTEMPTS=0
+                MAX_VALIDATION_ATTEMPTS=6
+                
+                while [ $VALIDATION_ATTEMPTS -lt $MAX_VALIDATION_ATTEMPTS ]; do
+                  VALIDATION_ATTEMPTS=$((VALIDATION_ATTEMPTS + 1))
+                  echo "🔍 验证尝试 $VALIDATION_ATTEMPTS/$MAX_VALIDATION_ATTEMPTS..."
+                  
+                  # 检查端口是否监听
+                  if netstat -tlnp 2>/dev/null | grep -q ":${{ inputs.service_port }}"; then
+                    echo "✅ 端口 ${{ inputs.service_port }} 正在监听"
+                    
+                    # 测试健康检查端点
+                    HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${{ inputs.service_port }}${{ inputs.health_endpoint }}" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
+                    
+                    if [ "$HEALTH_RESPONSE" = "200" ]; then
+                      echo "✅ 健康检查成功 - 状态码: $HEALTH_RESPONSE"
+                      VALIDATION_SUCCESS=true
+                      break
+                    else
+                      echo "❌ 健康检查失败 - 响应: $HEALTH_RESPONSE"
+                    fi
+                  else
+                    echo "❌ 端口 ${{ inputs.service_port }} 未监听"
+                  fi
+                  
+                  # 如果不是最后一次验证，等待后重试
+                  if [ $VALIDATION_ATTEMPTS -lt $MAX_VALIDATION_ATTEMPTS ]; then
+                    echo "⏳ 等待 5 秒后重试验证..."
+                    sleep 5
+                  fi
+                done
+                
+                if [ "$VALIDATION_SUCCESS" = "true" ]; then
+                  echo "✅ 服务验证成功！"
+                  SUCCESS=true
+                  break
+                else
+                  echo "❌ 服务验证失败"
+                  ERROR_MESSAGE="服务启动成功但验证失败 - 端口:${{ inputs.service_port }}, 健康检查:${{ inputs.health_endpoint }}"
+                  SUCCESS=false
+                fi
+              else
+                # 没有启用服务验证，直接认为成功
+                SUCCESS=true
+                break
+              fi
             else
               EXIT_CODE=$?
               if [ $EXIT_CODE -eq 124 ]; then
