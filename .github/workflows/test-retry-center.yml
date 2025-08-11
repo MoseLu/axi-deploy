@@ -11,7 +11,7 @@ jobs:
         uses: actions/checkout@v4
         
       - name: Test Retry Center
-        uses: ./.github/actions/retry-center@main
+        uses: ./.github/actions/retry-center
         with:
           step_name: "测试重试中心"
           command: "echo '测试成功'"
