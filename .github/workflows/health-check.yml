@@ -65,42 +65,13 @@ jobs:
 
       - name: 服务器基础检查
         if: ${{ inputs.check_type == 'all' || inputs.check_type == 'server' }}
-        uses: ./.github/actions/retry-center
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          step_name: "服务器健康检查"
-          command: |
-            echo "🔍 服务器基础检查..."
-            
-            # 1. 系统信息检查
-            echo "📊 系统信息:"
-            echo "- 操作系统: $(uname -a)"
-            echo "- 内核版本: $(uname -r)"
-            echo "- 系统负载: $(uptime)"
-            echo "- 内存使用: $(free -h)"
-            echo "- 磁盘使用: $(df -h /)"
-            
-            # 2. 网络连接检查
-            echo "🌐 网络连接检查:"
-            if ping -c 1 8.8.8.8 > /dev/null 2>&1; then
-              echo "✅ 外网连接正常"
-            else
-              echo "❌ 外网连接异常"
-            fi
-            
-            # 3. 关键服务检查
-            echo "🔧 关键服务检查:"
-            
-            # 检查SSH服务
-            if systemctl is-active --quiet sshd; then
-              echo "✅ SSH服务正常运行"
-            else
-              echo "❌ SSH服务异常"
-            fi
-          max_retries: 2
-          retry_delay: 10
-          timeout_minutes: 10
-          strategy: "simple"
-          continue_on_error: true
+          host: ${{ steps.parse-config.outputs.server_host || env.SERVER_HOST }}
+          username: ${{ steps.parse-config.outputs.server_user || env.SERVER_USER }}
+          key: ${{ steps.parse-config.outputs.server_key || env.SERVER_KEY }}
+          port: ${{ steps.parse-config.outputs.server_port || env.SERVER_PORT }}
+          script: |
             echo "🔍 服务器基础检查..."
             
             # 1. 系统信息检查
