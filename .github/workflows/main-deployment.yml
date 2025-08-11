@@ -43,6 +43,11 @@ on:
         description: '部署密钥 (JSON格式或base64编码的JSON: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})，DEPLOY_CENTER_PAT可选，默认使用内置Token'
         required: true
         type: string
+      service_port:
+        description: '服务端口（可选，默认从配置文件获取）'
+        required: false
+        type: string
+        default: ""
       skip_init:
         description: '跳过服务器初始化步骤'
         required: false
@@ -133,6 +138,8 @@ jobs:
       start_cmd: ${{ inputs.start_cmd }}
       # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
+      # 服务端口（从配置文件获取）
+      service_port: ${{ inputs.service_port || '' }}
       # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}

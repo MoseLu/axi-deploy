@@ -1,0 +1,44 @@
+name: Get Project Port
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+    outputs:
+      port:
+        description: '项目端口'
+        value: ${{ jobs.get-port.outputs.port }}
+
+jobs:
+  get-port:
+    runs-on: ubuntu-latest
+    outputs:
+      port: ${{ steps.get-port.outputs.port }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 获取项目端口
+        id: get-port
+        run: |
+          PROJECT_NAME="${{ inputs.project }}"
+          echo "🔍 获取项目端口配置..."
+          
+          # 从端口配置文件获取端口
+          if [ -f "port-config.yml" ]; then
+            PORT=$(grep -A 1 "^  $PROJECT_NAME:" port-config.yml | grep "port:" | awk '{print $2}')
+            if [ -z "$PORT" ]; then
+              echo "⚠️  项目 '$PROJECT_NAME' 在端口配置中未找到，使用默认端口8080"
+              PORT="8080"
+            else
+              echo "✅ 获取到项目端口: $PORT"
+            fi
+          else
+            echo "⚠️  端口配置文件不存在，使用默认端口8080"
+            PORT="8080"
+          fi
+          
+          echo "port=$PORT" >> $GITHUB_OUTPUT
