@@ -190,13 +190,13 @@ jobs:
                 echo \"- backend 目录内容:\"
                 ls -la backend/ || echo \"backend 目录不存在\"
                 echo \"- 检查启动脚本:\"
-                if [ -f \"backend/dist/index.js\" ]; then
-                  echo \"✅ backend/dist/index.js 存在\"
-                  ls -la backend/dist/index.js
+                if [ -f \"backend/index.js\" ]; then
+                  echo \"✅ backend/index.js 存在\"
+                  ls -la backend/index.js
                   echo \"- 文件内容前10行:\"
-                  head -10 backend/dist/index.js
+                  head -10 backend/index.js
                 else
-                  echo \"❌ backend/dist/index.js 不存在\"
+                  echo \"❌ backend/index.js 不存在\"
                 fi
                 echo \"- 检查依赖:\"
                 if [ -d \"node_modules\" ]; then
