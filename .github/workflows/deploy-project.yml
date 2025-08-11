@@ -206,7 +206,7 @@ jobs:
           echo "✅ Token权限测试完成，继续下载构建产物"
 
       - name: 下载构建产物
-        uses: ./.github/actions/retry-center
+        uses: ../actions/retry-center
         with:
           step_name: "下载构建产物"
           command: |
