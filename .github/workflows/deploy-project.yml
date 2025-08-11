@@ -580,7 +580,7 @@ jobs:
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
           source: "./dist-${{ inputs.project }}/"
-          target: "${{ inputs.deploy_type == 'backend' && format('{0}/apps/{1}', inputs.apps_root || '/srv/apps', inputs.project) || format('{0}/static/{1}', inputs.static_root || '/srv/static', inputs.project) }}"
+          target: "${{ inputs.deploy_type == 'backend' && format('{0}/{1}', inputs.apps_root || '/srv/apps', inputs.project) || format('{0}/{1}', inputs.static_root || '/srv/static', inputs.project) }}"
           strip_components: 0
 
       - name: 验证部署结果
