@@ -214,37 +214,58 @@ jobs:
           command: |
             echo "🔄 开始下载构建产物..."
             
-            # 清理旧文件
+            # 彻底清理旧文件和目录
+            echo "🧹 清理旧文件..."
             rm -rf dist-${{ inputs.project }}/ || true
             rm -f dist-${{ inputs.project }}.zip || true
+            rm -rf backend/ || true
+            rm -rf frontend/ || true
+            rm -rf node_modules/ || true
+            rm -f package*.json || true
+            rm -f *.js || true
+            rm -f *.ts || true
+            
+            # 确保工作目录干净
+            echo "📁 当前工作目录内容:"
+            ls -la
             
             # 下载构建产物
+            echo "⬇️ 开始下载构建产物..."
             gh run download ${{ inputs.run_id }} \
               --name "dist-${{ inputs.project }}" \
               --dir . \
               --repo ${{ inputs.source_repo }}
             
             # 验证下载结果
+            echo "🔍 验证下载结果..."
             if [ -d "dist-${{ inputs.project }}" ]; then
               file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
               echo "✅ 构建产物下载成功，包含 $file_count 个文件"
+              if [ "$file_count" -gt 0 ]; then
+                echo "✅ 下载成功，无需重试"
+                exit 0
+              else
+                echo "❌ 构建产物目录为空"
+                exit 1
+              fi
             elif [ -f "dist-${{ inputs.project }}.zip" ]; then
               echo "✅ 构建产物压缩包下载成功"
               unzip -q "dist-${{ inputs.project }}.zip"
               file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
               echo "✅ 构建产物解压成功，包含 $file_count 个文件"
+              if [ "$file_count" -gt 0 ]; then
+                echo "✅ 下载成功，无需重试"
+                exit 0
+              else
+                echo "❌ 解压后构建产物为空"
+                exit 1
+              fi
             else
               echo "❌ 构建产物下载失败"
+              echo "📁 当前目录内容:"
+              ls -la
               exit 1
             fi
-            
-            # 最终验证
-            if [ ! -d "dist-${{ inputs.project }}" ] || [ "$(find "dist-${{ inputs.project }}" -type f | wc -l)" -eq 0 ]; then
-              echo "❌ 构建产物验证失败，目录为空或不存在"
-              exit 1
-            fi
-            
-            echo "✅ 构建产物验证通过"
         env:
           GH_TOKEN: ${{ inputs.deploy_center_pat || github.token }}
 
@@ -470,12 +491,14 @@ jobs:
               ${{ inputs.server_user }}@${{ inputs.server_host }} \
               "find /tmp/dist-${{ inputs.project }}/ -type f | wc -l")
             
-            if [ "$file_count" -eq 0 ]; then
+            if [ "$file_count" -gt 0 ]; then
+              echo "✅ 文件上传成功，共 $file_count 个文件"
+              echo "✅ 上传成功，无需重试"
+              exit 0
+            else
               echo "❌ 文件上传失败，目标目录为空"
               exit 1
             fi
-            
-            echo "✅ 文件上传成功，共 $file_count 个文件"
 
 
 
@@ -538,10 +561,18 @@ jobs:
             # 最终验证
             echo "🔍 最终验证部署结果..."
             if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
+              final_file_count=$(find "$DEPLOY_PATH" -type f | wc -l)
               echo "✅ 部署验证通过"
               echo "📁 部署目录内容:"
               ls -la $DEPLOY_PATH/
-              echo "📊 最终文件数量: $(find "$DEPLOY_PATH" -type f | wc -l)"
+              echo "📊 最终文件数量: $final_file_count"
+              if [ "$final_file_count" -gt 0 ]; then
+                echo "✅ 部署成功，无需重试"
+                exit 0
+              else
+                echo "❌ 部署后目录为空"
+                exit 1
+              fi
             else
               echo "🚨 部署验证失败"
               exit 1
