@@ -355,23 +355,23 @@ jobs:
                 # 根据配置决定是否退出
                 if [ "${{ inputs.continue_on_test_failure }}" = "true" ]; then
                   echo "⚠️ 网站测试失败，但继续执行后续步骤"
-                  echo "test_failed=true" >> $GITHUB_OUTPUT
-                  echo "final_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
+                  echo "::set-output name=test_failed::true"
+                  echo "::set-output name=final_status::$FINAL_STATUS"
                   exit 0
                 else
                   echo "❌ 网站测试失败，终止部署流程"
-                  echo "test_failed=true" >> $GITHUB_OUTPUT
-                  echo "final_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
+                  echo "::set-output name=test_failed::true"
+                  echo "::set-output name=final_status::$FINAL_STATUS"
                   exit 1
                 fi
               else
                 echo "✅ 网站测试成功"
-                echo "test_failed=false" >> $GITHUB_OUTPUT
-                echo "final_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
+                echo "::set-output name=test_failed::false"
+                echo "::set-output name=final_status::$FINAL_STATUS"
               fi
             else
               echo "❌ 未提供测试URL，跳过测试"
-              echo "test_failed=false" >> $GITHUB_OUTPUT
+              echo "::set-output name=test_failed::false"
               exit 0
             fi
 
