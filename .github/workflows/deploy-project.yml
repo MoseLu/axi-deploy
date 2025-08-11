@@ -92,6 +92,10 @@ jobs:
           echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
           echo "- 重试机制: 自动启用（最多重试2次）"
           
+          # 记录部署开始时间
+          echo "DEPLOY_START_TIME=$(date +%s)" >> $GITHUB_ENV
+          echo "🚀 部署开始时间: $(date)"
+          
           # 验证部署类型
           DEPLOY_TYPE="${{ inputs.deploy_type }}"
           if [ "$DEPLOY_TYPE" != "backend" ] && [ "$DEPLOY_TYPE" != "static" ]; then
@@ -814,3 +818,119 @@ jobs:
           echo "✅ 输出已设置"
           echo "- deploy_success: true"
           echo "- deploy_path: $DEPLOY_PATH"
+
+      - name: 通知部署仪表板
+        if: success()
+        run: |
+          echo "📤 通知 axi-project-dashboard 部署成功..."
+          
+          # 计算部署耗时
+          DEPLOY_START_TIME="${{ env.DEPLOY_START_TIME }}"
+          DEPLOY_END_TIME=$(date +%s)
+          DEPLOY_DURATION=$((DEPLOY_END_TIME - DEPLOY_START_TIME))
+          
+          # 构建通知数据
+          NOTIFICATION_DATA=$(cat <<EOF
+          {
+            "project": "${{ inputs.project }}",
+            "status": "success",
+            "duration": $DEPLOY_DURATION,
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "sourceRepo": "${{ inputs.source_repo }}",
+            "runId": "${{ inputs.run_id }}",
+            "deployType": "${{ inputs.deploy_type }}",
+            "serverHost": "${{ inputs.server_host }}",
+            "logs": "部署成功，耗时 ${DEPLOY_DURATION} 秒"
+          }
+          EOF
+          )
+          
+          echo "📊 部署信息:"
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 状态: success"
+          echo "- 耗时: ${DEPLOY_DURATION}秒"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 运行ID: ${{ inputs.run_id }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          
+          # 发送通知到 axi-project-dashboard
+          DASHBOARD_URL="https://redamancy.com.cn/project-dashboard/api/webhooks/deployment"
+          
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: axi-deploy/1.0" \
+            -d "$NOTIFICATION_DATA" \
+            "$DASHBOARD_URL" \
+            2>/dev/null)
+          
+          # 解析响应
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ 部署通知发送成功"
+            echo "响应: $RESPONSE_BODY"
+          else
+            echo "⚠️ 部署通知发送失败 (HTTP $HTTP_CODE)"
+            echo "响应: $RESPONSE_BODY"
+            # 不退出，因为这只是通知，不应该影响部署流程
+          fi
+
+      - name: 通知部署失败
+        if: failure()
+        run: |
+          echo "📤 通知 axi-project-dashboard 部署失败..."
+          
+          # 计算部署耗时
+          DEPLOY_START_TIME="${{ env.DEPLOY_START_TIME }}"
+          DEPLOY_END_TIME=$(date +%s)
+          DEPLOY_DURATION=$((DEPLOY_END_TIME - DEPLOY_START_TIME))
+          
+          # 构建通知数据
+          NOTIFICATION_DATA=$(cat <<EOF
+          {
+            "project": "${{ inputs.project }}",
+            "status": "failed",
+            "duration": $DEPLOY_DURATION,
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "sourceRepo": "${{ inputs.source_repo }}",
+            "runId": "${{ inputs.run_id }}",
+            "deployType": "${{ inputs.deploy_type }}",
+            "serverHost": "${{ inputs.server_host }}",
+            "errorMessage": "部署失败，请查看 GitHub Actions 日志"
+          }
+          EOF
+          )
+          
+          echo "📊 部署信息:"
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 状态: failed"
+          echo "- 耗时: ${DEPLOY_DURATION}秒"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 运行ID: ${{ inputs.run_id }}"
+          echo "- 部署类型: ${{ inputs.deploy_type }}"
+          
+          # 发送通知到 axi-project-dashboard
+          DASHBOARD_URL="https://redamancy.com.cn/project-dashboard/api/webhooks/deployment"
+          
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: axi-deploy/1.0" \
+            -d "$NOTIFICATION_DATA" \
+            "$DASHBOARD_URL" \
+            2>/dev/null)
+          
+          # 解析响应
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ 部署失败通知发送成功"
+            echo "响应: $RESPONSE_BODY"
+          else
+            echo "⚠️ 部署失败通知发送失败 (HTTP $HTTP_CODE)"
+            echo "响应: $RESPONSE_BODY"
+            # 不退出，因为这只是通知，不应该影响部署流程
+          fi
