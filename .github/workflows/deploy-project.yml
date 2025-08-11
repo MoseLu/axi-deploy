@@ -60,32 +60,7 @@ on:
         type: string
         description: "运行用户"
         default: "deploy"
-      # 新增重试配置参数
-      retry_enabled:
-        required: false
-        type: boolean
-        default: true
-        description: '是否启用重试机制'
-      max_retry_attempts:
-        required: false
-        type: number
-        default: 5
-        description: '最大重试次数'
-      retry_timeout_minutes:
-        required: false
-        type: number
-        default: 15
-        description: '重试超时时间（分钟）'
-      upload_timeout_minutes:
-        required: false
-        type: number
-        default: 20
-        description: '文件上传超时时间（分钟）'
-      deploy_timeout_minutes:
-        required: false
-        type: number
-        default: 15
-        description: '部署操作超时时间（分钟）'
+
     outputs:
       deploy_success:
         description: "部署是否成功"
@@ -115,9 +90,7 @@ jobs:
           echo "- 运行ID: ${{ inputs.run_id }}"
           echo "- 部署类型: ${{ inputs.deploy_type }}"
           echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
-          echo "- 重试机制: ${{ inputs.retry_enabled }}"
-          echo "- 最大重试次数: ${{ inputs.max_retry_attempts }}"
-          echo "- 重试超时时间: ${{ inputs.retry_timeout_minutes }}分钟"
+          echo "- 重试机制: 自动启用（最多重试2次）"
           
           # 验证部署类型
           DEPLOY_TYPE="${{ inputs.deploy_type }}"
@@ -232,12 +205,11 @@ jobs:
           
           echo "✅ Token权限测试完成，继续下载构建产物"
 
-      - name: 下载构建产物（带重试）
-        if: ${{ inputs.retry_enabled }}
+      - name: 下载构建产物（自动重试）
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: ${{ inputs.retry_timeout_minutes }}
-          max_attempts: ${{ inputs.max_retry_attempts }}
+          timeout_minutes: 15
+          max_attempts: 3
           retry_wait_seconds: 30
           command: |
             echo "🔄 开始下载构建产物..."
@@ -276,15 +248,7 @@ jobs:
         env:
           GH_TOKEN: ${{ inputs.deploy_center_pat || github.token }}
 
-      - name: 下载构建产物（无重试）
-        if: ${{ !inputs.retry_enabled }}
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ inputs.project }}
-          path: ./
-          github-token: ${{ inputs.deploy_center_pat || github.token }}
-          repository: ${{ inputs.source_repo }}
-          run-id: ${{ inputs.run_id }}
+
 
       - name: 调试下载结果
         run: |
@@ -367,12 +331,11 @@ jobs:
           
           echo "✅ SSH参数验证通过"
 
-      - name: 部署到服务器（带重试）
-        if: ${{ inputs.retry_enabled }}
+      - name: 部署到服务器（自动重试）
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: ${{ inputs.deploy_timeout_minutes }}
-          max_attempts: ${{ inputs.max_retry_attempts }}
+          timeout_minutes: 15
+          max_attempts: 3
           retry_wait_seconds: 60
           command: |
             echo "🚀 开始部署项目: ${{ inputs.project }}"
@@ -437,76 +400,7 @@ jobs:
             sudo chown deploy:deploy $DEPLOY_PATH
             echo "✅ 部署目录已清理并重新创建"
 
-      - name: 部署到服务器（无重试）
-        if: ${{ !inputs.retry_enabled }}
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          script: |
-            echo "🚀 开始部署项目: ${{ inputs.project }}"
-            
-            # 标准化目录结构
-            APPS_ROOT="${{ inputs.apps_root || '/srv/apps' }}"
-            STATIC_ROOT="${{ inputs.static_root || '/srv/static' }}"
-            PROJECT="${{ inputs.project }}"
-            DEPLOY_PATH=""
-            
-            # 根据部署类型确定部署路径
-            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
-              # 后端项目部署到应用目录
-              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
-              echo "📁 后端项目部署到: $DEPLOY_PATH"
-            else
-              # 静态项目部署到静态文件目录
-              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
-              echo "📁 静态项目部署到: $DEPLOY_PATH"
-            fi
-            
-            # 创建部署目录
-            sudo mkdir -p $DEPLOY_PATH
-            sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH
-            
-            # 创建项目专用备份目录
-            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
-              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/apps"
-            else
-              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/static"
-            fi
-            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
-            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
-            sudo mkdir -p "$PROJECT_BACKUP_DIR"
-            sudo chmod 755 "$PROJECT_BACKUP_DIR"
-            
-            # 备份旧部署（如果存在）
-            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
-              echo "📋 备份旧部署目录: $DEPLOY_PATH"
-              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
-              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
-              echo "✅ 旧部署目录已备份到: $BACKUP_NAME"
-              
-              # 清理旧的备份文件，只保留最近5个
-              echo "🧹 清理旧的备份文件..."
-              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +6)
-              if [ -n "$BACKUP_FILES" ]; then
-                echo "🗑️ 删除旧的备份文件:"
-                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
-                echo "✅ 旧备份文件已清理，保留最近5个备份"
-              else
-                echo "📋 没有需要清理的旧备份文件"
-              fi
-            else
-              echo "📋 没有旧部署需要备份"
-            fi
-            
-            # 清理目标部署目录（避免残留文件）
-            echo "🧹 清理目标部署目录..."
-            sudo rm -rf $DEPLOY_PATH/*
-            sudo mkdir -p $DEPLOY_PATH
-            sudo chown deploy:deploy $DEPLOY_PATH
-            echo "✅ 部署目录已清理并重新创建"
+
 
       - name: 检查构建产物是否存在
         run: |
@@ -557,12 +451,11 @@ jobs:
             fi
           fi
 
-      - name: 上传构建产物到服务器（带重试）
-        if: ${{ inputs.retry_enabled }}
+      - name: 上传构建产物到服务器（自动重试）
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: ${{ inputs.upload_timeout_minutes }}
-          max_attempts: ${{ inputs.max_retry_attempts }}
+          timeout_minutes: 20
+          max_attempts: 3
           retry_wait_seconds: 60
           command: |
             echo "🚀 开始上传构建产物到服务器..."
@@ -584,24 +477,13 @@ jobs:
             
             echo "✅ 文件上传成功，共 $file_count 个文件"
 
-      - name: 上传构建产物到服务器（无重试）
-        if: ${{ !inputs.retry_enabled }}
-        uses: appleboy/scp-action@v0.1.4
-        with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          source: "./dist-${{ inputs.project }}/"
-          target: "/tmp/"
-          strip_components: 0
 
-      - name: 移动构建产物到部署目录（带重试）
-        if: ${{ inputs.retry_enabled }}
+
+      - name: 移动构建产物到部署目录（自动重试）
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: ${{ inputs.deploy_timeout_minutes }}
-          max_attempts: ${{ inputs.max_retry_attempts }}
+          timeout_minutes: 15
+          max_attempts: 3
           retry_wait_seconds: 30
           command: |
             echo "📁 移动构建产物到部署目录..."
@@ -665,82 +547,7 @@ jobs:
               exit 1
             fi
 
-      - name: 移动构建产物到部署目录（无重试）
-        if: ${{ !inputs.retry_enabled }}
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ inputs.server_host }}
-          username: ${{ inputs.server_user }}
-          key: ${{ inputs.server_key }}
-          port: ${{ inputs.server_port }}
-          script: |
-            echo "📁 移动构建产物到部署目录..."
-            
-            PROJECT="${{ inputs.project }}"
-            
-            # 根据部署类型确定部署路径
-            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
-              DEPLOY_PATH="${{ inputs.apps_root || '/srv/apps' }}/$PROJECT"
-            else
-              DEPLOY_PATH="${{ inputs.static_root || '/srv/static' }}/$PROJECT"
-            fi
-            
-            # 检查临时目录中的构建产物
-            TEMP_SOURCE="/tmp/dist-$PROJECT"
-            echo "📁 检查临时构建产物: $TEMP_SOURCE"
-            
-            if [ ! -d "$TEMP_SOURCE" ]; then
-              echo "🚨 临时构建产物目录不存在: $TEMP_SOURCE"
-              echo "📁 /tmp 目录内容:"
-              ls -la /tmp/
-              exit 1
-            fi
-            
-            echo "📁 临时构建产物内容:"
-            ls -la "$TEMP_SOURCE/"
-            
-            # 统计文件数量
-            FILE_COUNT=$(find "$TEMP_SOURCE" -type f | wc -l)
-            echo "📊 构建产物文件数量: $FILE_COUNT"
-            
-            if [ "$FILE_COUNT" -eq 0 ]; then
-              echo "🚨 构建产物为空"
-              exit 1
-            fi
-            
-            # 移动构建产物到部署目录
-            echo "📁 移动构建产物到部署目录: $DEPLOY_PATH"
-            sudo cp -r "$TEMP_SOURCE"/* "$DEPLOY_PATH/"
-            sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} "$DEPLOY_PATH"
-            
-            echo "✅ 构建产物已成功部署到: $DEPLOY_PATH"
-            echo "📁 部署目录内容:"
-            ls -la "$DEPLOY_PATH/"
-            echo "📊 部署文件数量: $(find "$DEPLOY_PATH" -type f | wc -l)"
-            
-            # 清理临时文件
-            echo "🧹 清理临时文件..."
-            sudo rm -rf "$TEMP_SOURCE"
-            echo "✅ 临时文件已清理"
-            
-            # 最终验证
-            echo "🔍 最终验证部署结果..."
-            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
-              echo "✅ 部署验证通过"
-              echo "📁 部署目录内容:"
-              ls -la $DEPLOY_PATH/
-              echo "📊 最终文件数量: $(find "$DEPLOY_PATH" -type f | wc -l)"
-            else
-              echo "🚨 部署验证失败"
-              exit 1
-            fi
-            
-            # 清理临时目录
-            echo "🧹 清理临时目录..."
-            sudo rm -rf $TEMP_DIR
-            echo "✅ 临时目录已清理: $TEMP_DIR"
-            
-            echo "✅ 项目部署完成: ${{ inputs.project }}"
+
 
       - name: 部署失败自动回滚
         if: failure()
