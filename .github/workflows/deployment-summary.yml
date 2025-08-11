@@ -75,6 +75,7 @@ on:
 jobs:
   summary:
     runs-on: ubuntu-latest
+    timeout-minutes: 5  # 部署总结超时时间
     steps:
       - name: 部署完成总结
         run: |

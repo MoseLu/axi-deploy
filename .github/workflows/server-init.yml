@@ -63,6 +63,7 @@ on:
 jobs:
   init:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # 服务器初始化超时时间
     outputs:
       init_success: ${{ steps.set-outputs.outputs.init_success }}
     

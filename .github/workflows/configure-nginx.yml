@@ -70,6 +70,7 @@ on:
 jobs:
   configure:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # Nginx配置超时时间
     outputs:
       config_success: ${{ steps.set-outputs.outputs.config_success }}
     

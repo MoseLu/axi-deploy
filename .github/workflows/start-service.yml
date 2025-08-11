@@ -46,6 +46,7 @@ on:
 jobs:
   start:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # 启动服务超时时间
     outputs:
       start_success: ${{ steps.set-outputs.outputs.start_success }}
     

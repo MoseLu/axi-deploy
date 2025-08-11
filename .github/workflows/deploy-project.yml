@@ -72,7 +72,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # 工作流总超时时间
+    timeout-minutes: 20  # 部署超时时间
     permissions:
       contents: read
       actions: read
