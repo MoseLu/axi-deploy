@@ -55,7 +55,7 @@ on:
       
       # 步骤类型配置
       step_type:
-        description: '步骤类型 (network/file_operation/validation/parsing)'
+        description: '步骤类型 (network/file_operation/validation/parsing/backend_service)'
         required: false
         type: string
         default: 'network'
@@ -66,6 +66,20 @@ on:
         required: false
         type: string
         default: '{}'
+      
+      # 新增：后端服务诊断配置
+      backend_diagnosis:
+        description: '是否启用后端服务诊断'
+        required: false
+        type: boolean
+        default: false
+      
+      # 新增：服务重启配置
+      restart_service:
+        description: '失败时是否尝试重启服务'
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       success:

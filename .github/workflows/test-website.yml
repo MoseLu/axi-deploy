@@ -48,6 +48,12 @@ on:
         type: string
         description: "Nginx配置目录"
         default: "/www/server/nginx/conf/conf.d/redamancy"
+      # 新增：测试失败时是否继续执行
+      continue_on_test_failure:
+        required: false
+        type: boolean
+        description: "测试失败时是否继续执行后续步骤"
+        default: false
     outputs:
       test_success:
         description: "测试是否成功"
@@ -67,6 +73,7 @@ jobs:
           echo "- 项目: ${{ inputs.project }}"
           echo "- 部署类型: ${{ inputs.deploy_type }}"
           echo "- 测试URL: '${{ inputs.test_url }}'"
+          echo "- 测试失败时继续: ${{ inputs.continue_on_test_failure }}"
           
           if [ -z "${{ inputs.test_url }}" ]; then
             echo "⚠️ 未提供test_url，跳过测试"
@@ -77,6 +84,7 @@ jobs:
           echo "✅ 输入参数验证通过"
 
       - name: 测试网站可访问性
+        id: website-test
         if: inputs.test_url != ''
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -118,6 +126,7 @@ jobs:
               MAX_RETRIES=3
               RETRY_DELAY=10
               SUCCESS=false
+              FINAL_STATUS=""
               
               for attempt in $(seq 1 $MAX_RETRIES); do
                 echo "🔄 第 $attempt 次尝试测试..."
@@ -130,6 +139,7 @@ jobs:
                 echo "📋 测试HTTPS访问..."
                 HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
                 echo "HTTPS测试结果: $HTTPS_STATUS"
+                FINAL_STATUS="$HTTPS_STATUS"
                 
                 # 如果HTTPS返回301，检查重定向目标
                 if [ "$HTTPS_STATUS" = "301" ]; then
@@ -138,11 +148,24 @@ jobs:
                   echo "重定向目标: $REDIRECT_URL"
                 fi
                 
-                # 检查是否成功
-                if [ "$HTTPS_STATUS" = "200" ] || [ "$HTTPS_STATUS" = "301" ] || [ "$HTTPS_STATUS" = "302" ]; then
+                # 检查是否成功 - 更严格的条件
+                if [ "$HTTPS_STATUS" = "200" ]; then
                   echo "✅ 网站测试成功 - HTTPS返回状态码: $HTTPS_STATUS"
                   SUCCESS=true
                   break
+                elif [ "$HTTPS_STATUS" = "301" ] || [ "$HTTPS_STATUS" = "302" ]; then
+                  echo "⚠️ 网站重定向 - HTTPS返回状态码: $HTTPS_STATUS"
+                  # 对于重定向，检查重定向目标是否可访问
+                  if [ -n "$REDIRECT_URL" ]; then
+                    REDIRECT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$REDIRECT_URL" --connect-timeout 10 --max-time 30)
+                    if [ "$REDIRECT_STATUS" = "200" ]; then
+                      echo "✅ 重定向目标可访问 - 状态码: $REDIRECT_STATUS"
+                      SUCCESS=true
+                      break
+                    else
+                      echo "❌ 重定向目标不可访问 - 状态码: $REDIRECT_STATUS"
+                    fi
+                  fi
                 else
                   echo "❌ 第 $attempt 次尝试失败 - HTTPS返回状态码: $HTTPS_STATUS"
                   
@@ -192,7 +215,7 @@ jobs:
               # 如果所有尝试都失败，提供详细诊断
               if [ "$SUCCESS" != "true" ]; then
                 echo "🚨 网站测试失败 - 所有尝试都失败"
-                echo "🚨 HTTPS最终状态码: $HTTPS_STATUS"
+                echo "🚨 HTTPS最终状态码: $FINAL_STATUS"
                 echo "可能的原因:"
                 if [ "${{ inputs.deploy_type }}" = "backend" ]; then
                   echo "1. 域名解析问题"
@@ -201,6 +224,80 @@ jobs:
                   echo "4. SSL证书问题"
                   echo "5. 后端服务未启动"
                   echo "6. 项目部署失败"
+                  
+                  # 对于后端项目，尝试自动修复
+                  echo ""
+                  echo "🔧 尝试自动修复后端服务..."
+                  
+                  # 修复策略1: 重启PM2进程
+                  echo "🔄 策略1: 重启PM2进程..."
+                  pm2 restart dashboard-backend 2>/dev/null || echo "PM2重启失败"
+                  sleep 10
+                  
+                  # 检查重启后状态
+                  HEALTH_RESPONSE_AFTER=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8090/health" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
+                  if [ "$HEALTH_RESPONSE_AFTER" = "200" ]; then
+                    echo "✅ PM2重启成功，服务恢复正常"
+                    echo "🔄 重新测试网站..."
+                    
+                    # 重新测试网站
+                    HTTPS_STATUS_FINAL=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
+                    if [ "$HTTPS_STATUS_FINAL" = "200" ]; then
+                      echo "✅ 网站测试成功 - 修复后状态码: $HTTPS_STATUS_FINAL"
+                      SUCCESS=true
+                      FINAL_STATUS="$HTTPS_STATUS_FINAL"
+                    else
+                      echo "❌ 修复后网站仍无法访问 - 状态码: $HTTPS_STATUS_FINAL"
+                    fi
+                  else
+                    echo "❌ PM2重启后仍无法访问"
+                    
+                    # 修复策略2: 重新启动服务
+                    echo "🔄 策略2: 重新启动服务..."
+                    PROJECT="${{ inputs.project }}"
+                    APPS_ROOT="${{ inputs.apps_root }}"
+                    PROJECT_DIR="$APPS_ROOT/$PROJECT"
+                    
+                    if [ -d "$PROJECT_DIR" ]; then
+                      cd "$PROJECT_DIR"
+                      
+                      # 停止现有服务
+                      pm2 stop dashboard-backend 2>/dev/null || echo "停止服务失败"
+                      pm2 delete dashboard-backend 2>/dev/null || echo "删除服务失败"
+                      
+                      # 检查配置文件
+                      if [ -f "ecosystem.config.js" ]; then
+                        echo "✅ 找到PM2配置文件"
+                        
+                        # 重新启动服务
+                        pm2 start ecosystem.config.js --update-env
+                        sleep 15
+                        
+                        # 检查启动后状态
+                        HEALTH_RESPONSE_FINAL=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8090/health" --connect-timeout 5 --max-time 10 2>/dev/null || echo "connection_failed")
+                        if [ "$HEALTH_RESPONSE_FINAL" = "200" ]; then
+                          echo "✅ 服务重新启动成功"
+                          echo "🔄 重新测试网站..."
+                          
+                          # 重新测试网站
+                          HTTPS_STATUS_FINAL=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30)
+                          if [ "$HTTPS_STATUS_FINAL" = "200" ]; then
+                            echo "✅ 网站测试成功 - 修复后状态码: $HTTPS_STATUS_FINAL"
+                            SUCCESS=true
+                            FINAL_STATUS="$HTTPS_STATUS_FINAL"
+                          else
+                            echo "❌ 修复后网站仍无法访问 - 状态码: $HTTPS_STATUS_FINAL"
+                          fi
+                        else
+                          echo "❌ 服务重新启动失败"
+                        fi
+                      else
+                        echo "❌ 未找到PM2配置文件"
+                      fi
+                    else
+                      echo "❌ 项目目录不存在: $PROJECT_DIR"
+                    fi
+                  fi
                 else
                   echo "1. 域名解析问题"
                   echo "2. 服务器防火墙设置"
@@ -210,55 +307,72 @@ jobs:
                   echo "6. 项目部署失败"
                 fi
                 
-                # 提供详细诊断信息
-                echo "🔍 详细诊断信息:"
-                echo "尝试获取响应头..."
-                curl -I "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30 || echo "无法获取响应头"
-                
-                echo "检查Nginx状态..."
-                systemctl status nginx --no-pager -l || echo "无法检查Nginx状态"
-                
-                echo "检查Nginx错误日志..."
-                tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
-                
-                echo "检查Nginx访问日志..."
-                tail -n 5 /var/log/nginx/access.log 2>/dev/null || echo "无法读取访问日志"
-                
-                # 对于后端项目，检查服务状态
-                if [ "${{ inputs.deploy_type }}" = "backend" ]; then
-                  echo "检查后端服务状态..."
-                  echo "- PM2进程列表:"
-                  pm2 list 2>/dev/null || echo "PM2未安装或未运行"
+                # 如果修复后仍然失败，提供详细诊断信息
+                if [ "$SUCCESS" != "true" ]; then
+                  echo ""
+                  echo "🔍 详细诊断信息:"
+                  echo "尝试获取响应头..."
+                  curl -I "https://$DOMAIN$PATH_PART" --connect-timeout 10 --max-time 30 || echo "无法获取响应头"
                   
-                  echo "- 系统进程:"
-                  pgrep -f "${{ inputs.project }}" || echo "未找到相关进程"
+                  echo "检查Nginx状态..."
+                  systemctl status nginx --no-pager -l || echo "无法检查Nginx状态"
                   
-                  echo "- 端口占用情况:"
-                  netstat -tlnp | grep -E ":(80|443|8090|8080)" || echo "未找到相关端口"
+                  echo "检查Nginx错误日志..."
+                  tail -n 10 /var/log/nginx/error.log 2>/dev/null || echo "无法读取错误日志"
                   
-                  echo "- 测试本地连接:"
-                  curl -f -s http://localhost:8090/health >/dev/null 2>&1 && echo "✅ 本地8090端口响应正常" || echo "❌ 本地8090端口无响应"
-                  curl -f -s http://localhost:8080/health >/dev/null 2>&1 && echo "✅ 本地8080端口响应正常" || echo "❌ 本地8080端口无响应"
+                  echo "检查Nginx访问日志..."
+                  tail -n 5 /var/log/nginx/access.log 2>/dev/null || echo "无法读取访问日志"
+                  
+                  # 对于后端项目，检查服务状态
+                  if [ "${{ inputs.deploy_type }}" = "backend" ]; then
+                    echo "检查后端服务状态..."
+                    echo "- PM2进程列表:"
+                    pm2 list 2>/dev/null || echo "PM2未安装或未运行"
+                    
+                    echo "- 系统进程:"
+                    pgrep -f "${{ inputs.project }}" || echo "未找到相关进程"
+                    
+                    echo "- 端口占用情况:"
+                    netstat -tlnp | grep -E ":(80|443|8090|8080)" || echo "未找到相关端口"
+                    
+                    echo "- 测试本地连接:"
+                    curl -f -s http://localhost:8090/health >/dev/null 2>&1 && echo "✅ 本地8090端口响应正常" || echo "❌ 本地8090端口无响应"
+                    curl -f -s http://localhost:8080/health >/dev/null 2>&1 && echo "✅ 本地8080端口响应正常" || echo "❌ 本地8080端口无响应"
+                  fi
+                  
+                  # 检查项目部署状态
+                  echo "检查项目部署状态..."
+                  APPS_ROOT="${{ inputs.apps_root }}"
+                  PROJECT_DIR="$APPS_ROOT/${{ inputs.project }}"
+                  if [ -d "$PROJECT_DIR" ]; then
+                    echo "✅ 项目目录存在: $PROJECT_DIR"
+                    echo "- 目录内容:"
+                    ls -la "$PROJECT_DIR" | head -10
+                  else
+                    echo "❌ 项目目录不存在: $PROJECT_DIR"
+                  fi
                 fi
                 
-                # 检查项目部署状态
-                echo "检查项目部署状态..."
-                APPS_ROOT="${{ inputs.apps_root }}"
-                PROJECT_DIR="$APPS_ROOT/${{ inputs.project }}"
-                if [ -d "$PROJECT_DIR" ]; then
-                  echo "✅ 项目目录存在: $PROJECT_DIR"
-                  echo "- 目录内容:"
-                  ls -la "$PROJECT_DIR" | head -10
+                # 根据配置决定是否退出
+                if [ "${{ inputs.continue_on_test_failure }}" = "true" ]; then
+                  echo "⚠️ 网站测试失败，但继续执行后续步骤"
+                  echo "test_failed=true" >> $GITHUB_OUTPUT
+                  echo "final_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
+                  exit 0
                 else
-                  echo "❌ 项目目录不存在: $PROJECT_DIR"
+                  echo "❌ 网站测试失败，终止部署流程"
+                  echo "test_failed=true" >> $GITHUB_OUTPUT
+                  echo "final_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
+                  exit 1
                 fi
-                
-                # 不直接退出，而是设置失败状态
-                echo "⚠️ 网站测试失败，但继续执行后续步骤"
-                exit 0
+              else
+                echo "✅ 网站测试成功"
+                echo "test_failed=false" >> $GITHUB_OUTPUT
+                echo "final_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
               fi
             else
               echo "❌ 未提供测试URL，跳过测试"
+              echo "test_failed=false" >> $GITHUB_OUTPUT
               exit 0
             fi
 
@@ -310,13 +424,13 @@ jobs:
             
             if [ "$DEPLOY_TYPE" = "backend" ]; then
               # 后端项目检查
-              if [ -f "$APPS_ROOT/$PROJECT/front/index.html" ]; then
+              if [ -f "$APPS_ROOT/$PROJECT/frontend/index.html" ]; then
                 echo "✅ index.html 存在"
-                ls -la $APPS_ROOT/$PROJECT/front/index.html
+                ls -la $APPS_ROOT/$PROJECT/frontend/index.html
               else
                 echo "❌ index.html 不存在"
                 echo "部署目录内容:"
-                ls -la $APPS_ROOT/$PROJECT/front/ || echo "目录不存在"
+                ls -la $APPS_ROOT/$PROJECT/frontend/ || echo "目录不存在"
               fi
             else
               # 静态项目检查
@@ -333,5 +447,17 @@ jobs:
       - name: 设置输出
         id: set-outputs
         run: |
-          echo "test_success=true" >> $GITHUB_OUTPUT
-          echo "✅ 网站测试完成"
+          # 检查测试结果
+          if [ "${{ steps.website-test.outputs.test_failed }}" = "true" ]; then
+            echo "test_success=false" >> $GITHUB_OUTPUT
+            echo "❌ 网站测试失败 - 状态码: ${{ steps.website-test.outputs.final_status }}"
+            
+            # 根据配置决定是否继续
+            if [ "${{ inputs.continue_on_test_failure }}" != "true" ]; then
+              echo "🚨 测试失败且未配置继续执行，终止工作流"
+              exit 1
+            fi
+          else
+            echo "test_success=true" >> $GITHUB_OUTPUT
+            echo "✅ 网站测试完成"
+          fi

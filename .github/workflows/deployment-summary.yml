@@ -97,6 +97,77 @@ jobs:
           echo "- 测试网站(静态): ${{ inputs.test_website_static_result || 'skipped' }}"
           echo "- 测试网站(后端): ${{ inputs.test_website_backend_result || 'skipped' }}"
           echo ""
+          
+          # 检查关键步骤是否成功
+          CRITICAL_FAILURES=()
+          
+          if [ "${{ inputs.parse_secrets_result }}" = "failure" ]; then
+            CRITICAL_FAILURES+=("解析密钥失败")
+          fi
+          
+          if [ "${{ inputs.validate_artifact_result }}" = "failure" ]; then
+            CRITICAL_FAILURES+=("验证构建产物失败")
+          fi
+          
+          if [ "${{ inputs.deploy_project_result }}" = "failure" ]; then
+            CRITICAL_FAILURES+=("部署项目失败")
+          fi
+          
+          if [ "${{ inputs.configure_nginx_result }}" = "failure" ]; then
+            CRITICAL_FAILURES+=("配置Nginx失败")
+          fi
+          
+          if [ "${{ inputs.deploy_type }}" = "backend" ] && [ "${{ inputs.start_service_result }}" = "failure" ]; then
+            CRITICAL_FAILURES+=("启动服务失败")
+          fi
+          
+          # 检查测试结果
+          TEST_FAILURE=""
+          if [ "${{ inputs.deploy_type }}" = "backend" ] && [ "${{ inputs.test_website_backend_result }}" = "failure" ]; then
+            TEST_FAILURE="后端网站测试失败"
+          elif [ "${{ inputs.deploy_type }}" = "static" ] && [ "${{ inputs.test_website_static_result }}" = "failure" ]; then
+            TEST_FAILURE="静态网站测试失败"
+          fi
+          
+          # 显示结果
+          if [ ${#CRITICAL_FAILURES[@]} -gt 0 ]; then
+            echo "🚨 部署失败 - 关键步骤失败:"
+            for failure in "${CRITICAL_FAILURES[@]}"; do
+              echo "  - $failure"
+            done
+            echo ""
+            echo "❌ 部署失败，请检查上述错误并重新部署"
+            exit 1
+          elif [ -n "$TEST_FAILURE" ]; then
+            echo "⚠️ 部署部分成功 - $TEST_FAILURE"
+            echo ""
+            echo "🔍 可能的原因:"
+            if [ "${{ inputs.deploy_type }}" = "backend" ]; then
+              echo "1. 后端服务启动失败"
+              echo "2. 端口配置错误"
+              echo "3. 依赖安装不完整"
+              echo "4. 环境变量配置错误"
+              echo "5. PM2进程管理问题"
+            else
+              echo "1. 静态文件部署不完整"
+              echo "2. Nginx配置错误"
+              echo "3. 域名解析问题"
+              echo "4. SSL证书问题"
+            fi
+            echo ""
+            echo "💡 建议:"
+            echo "- 检查服务器日志获取详细错误信息"
+            echo "- 验证服务是否正常启动"
+            echo "- 确认网络和防火墙配置"
+            echo ""
+            echo "✅ 项目文件已部署，但服务可能未正常运行"
+          else
+            echo "✅ 所有步骤执行成功"
+            echo ""
+            echo "🎉 部署完全成功！"
+          fi
+          
+          echo ""
           echo "🔗 访问信息:"
           echo "- 域名: redamancy.com.cn"
           if [ "${{ inputs.deploy_path }}" != "" ]; then
@@ -106,9 +177,23 @@ jobs:
             echo "- 测试URL: ${{ inputs.test_url }}"
           fi
           echo ""
-          echo "📝 部署完成通知:"
-          echo "✅ 项目 ${{ inputs.project }} 已成功部署到服务器"
-          if [ "${{ inputs.test_url }}" != "" ]; then
-            echo "🌐 可通过 ${{ inputs.test_url }} 访问"
+          
+          if [ ${#CRITICAL_FAILURES[@]} -gt 0 ]; then
+            echo "📝 部署失败通知:"
+            echo "❌ 项目 ${{ inputs.project }} 部署失败"
+            echo "请检查上述错误信息并重新部署"
+          elif [ -n "$TEST_FAILURE" ]; then
+            echo "📝 部署部分成功通知:"
+            echo "⚠️ 项目 ${{ inputs.project }} 已部署但测试失败"
+            echo "请检查服务状态和配置"
+            if [ "${{ inputs.test_url }}" != "" ]; then
+              echo "🌐 测试URL: ${{ inputs.test_url }}"
+            fi
+          else
+            echo "📝 部署完成通知:"
+            echo "✅ 项目 ${{ inputs.project }} 已成功部署到服务器"
+            if [ "${{ inputs.test_url }}" != "" ]; then
+              echo "🌐 可通过 ${{ inputs.test_url }} 访问"
+            fi
           fi
           echo "=========================================="
