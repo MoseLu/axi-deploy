@@ -244,10 +244,46 @@ jobs:
             file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
             echo "✅ 构建产物解压成功，包含 $file_count 个文件"
           else
-            echo "❌ 构建产物下载失败"
+            echo "📝 未找到标准构建产物，检查当前目录内容..."
             echo "📁 当前目录内容:"
             ls -la
-            exit 1
+            
+            # 检查是否有其他构建产物文件
+            if [ -d "backend" ] || [ -d "frontend" ] || [ -f "package.json" ] || [ -f "index.html" ]; then
+              echo "✅ 发现项目文件，创建标准构建产物目录..."
+              mkdir -p "dist-${{ inputs.project }}"
+              
+              # 移动所有项目文件到构建产物目录
+              if [ -d "backend" ]; then
+                mv backend "dist-${{ inputs.project }}/"
+              fi
+              if [ -d "frontend" ]; then
+                mv frontend "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "package.json" ]; then
+                mv package.json "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "index.html" ]; then
+                mv index.html "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "ecosystem.config.js" ]; then
+                mv ecosystem.config.js "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "deploy.sh" ]; then
+                mv deploy.sh "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "start.sh" ]; then
+                mv start.sh "dist-${{ inputs.project }}/"
+              fi
+              
+              file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+              echo "✅ 构建产物重新组织完成，包含 $file_count 个文件"
+              echo "📁 构建产物内容:"
+              ls -la "dist-${{ inputs.project }}/"
+            else
+              echo "❌ 构建产物下载失败，无法找到有效的项目文件"
+              exit 1
+            fi
           fi
           
           # 最终验证
@@ -562,7 +598,13 @@ jobs:
         run: |
           echo "❌ 部署失败，开始自动回滚..."
           
+          # 创建临时SSH密钥文件
+          echo "${{ inputs.server_key }}" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+            -i /tmp/deploy_key \
+            -p ${{ inputs.server_port }} \
             ${{ inputs.server_user }}@${{ inputs.server_host }} << 'EOF'
             
             PROJECT="${{ inputs.project }}"
