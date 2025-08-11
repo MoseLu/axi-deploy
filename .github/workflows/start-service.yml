@@ -197,6 +197,32 @@ jobs:
                   npm install -g pm2 || echo 'PM2 安装失败'
                 fi
                 
+                # 详细诊断信息
+                echo '🔍 诊断信息:'
+                echo '- 当前目录: \$(pwd)'
+                echo '- 文件列表:'
+                ls -la
+                echo '- backend 目录内容:'
+                ls -la backend/ || echo 'backend 目录不存在'
+                echo '- 检查启动脚本:'
+                if [ -f 'backend/test-server.js' ]; then
+                  echo '✅ backend/test-server.js 存在'
+                  ls -la backend/test-server.js
+                  echo '- 文件内容前10行:'
+                  head -10 backend/test-server.js
+                else
+                  echo '❌ backend/test-server.js 不存在'
+                fi
+                echo '- 检查依赖:'
+                if [ -d 'node_modules' ]; then
+                  echo '✅ node_modules 存在'
+                  ls -la node_modules/express/ || echo '❌ express 依赖不存在'
+                else
+                  echo '❌ node_modules 不存在'
+                fi
+                echo '- 检查 ecosystem.config.js:'
+                cat ecosystem.config.js
+                
                 # 停止现有进程（如果存在）
                 pm2 stop dashboard-backend 2>/dev/null || echo '没有现有进程需要停止'
                 pm2 delete dashboard-backend 2>/dev/null || echo '没有现有进程需要删除'
@@ -204,6 +230,12 @@ jobs:
                 # 使用 PM2 启动
                 echo '📋 使用 PM2 启动服务...'
                 pm2 start ecosystem.config.js
+                
+                # 检查启动结果
+                echo '📋 检查 PM2 状态...'
+                pm2 status
+                echo '📋 检查 PM2 日志...'
+                pm2 logs dashboard-backend --lines 10 --nostream || echo '无法获取日志'
                 
                 # 保存 PM2 配置
                 pm2 save
