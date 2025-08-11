@@ -502,7 +502,77 @@ jobs:
             fi
           fi
 
-      - name: 上传构建产物到服务器
+      - name: 直接部署到服务器
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🚀 开始部署项目: ${{ inputs.project }}"
+            
+            # 标准化目录结构
+            APPS_ROOT="${{ inputs.apps_root || '/srv/apps' }}"
+            STATIC_ROOT="${{ inputs.static_root || '/srv/static' }}"
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_PATH=""
+            
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              # 后端项目部署到应用目录
+              DEPLOY_PATH="$APPS_ROOT/$PROJECT"
+              echo "📁 后端项目部署到: $DEPLOY_PATH"
+            else
+              # 静态项目部署到静态文件目录
+              DEPLOY_PATH="$STATIC_ROOT/$PROJECT"
+              echo "📁 静态项目部署到: $DEPLOY_PATH"
+            fi
+            
+            # 创建部署目录
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} $DEPLOY_PATH
+            
+            # 创建项目专用备份目录
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/apps"
+            else
+              BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/static"
+            fi
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            echo "📁 创建项目备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 备份旧部署（如果存在）
+            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
+              echo "📋 备份旧部署目录: $DEPLOY_PATH"
+              BACKUP_NAME="$PROJECT_BACKUP_DIR/$PROJECT.backup.$(date +%Y%m%d_%H%M%S)"
+              sudo cp -r $DEPLOY_PATH $BACKUP_NAME
+              echo "✅ 旧部署目录已备份到: $BACKUP_NAME"
+              
+              # 清理旧的备份文件，只保留最近5个
+              echo "🧹 清理旧的备份文件..."
+              BACKUP_FILES=$(ls -t "$PROJECT_BACKUP_DIR"/$PROJECT.backup.* 2>/dev/null | tail -n +6)
+              if [ -n "$BACKUP_FILES" ]; then
+                echo "🗑️ 删除旧的备份文件:"
+                echo "$BACKUP_FILES" | xargs -r sudo rm -rf
+                echo "✅ 旧备份文件已清理，保留最近5个备份"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+            else
+              echo "📋 没有旧部署需要备份"
+            fi
+            
+            # 清理目标部署目录（避免残留文件）
+            echo "🧹 清理目标部署目录..."
+            sudo rm -rf $DEPLOY_PATH/*
+            sudo mkdir -p $DEPLOY_PATH
+            sudo chown deploy:deploy $DEPLOY_PATH
+            echo "✅ 部署目录已清理并重新创建"
+
+      - name: 上传构建产物到部署目录
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ inputs.server_host }}
@@ -510,19 +580,18 @@ jobs:
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
           source: "./dist-${{ inputs.project }}/"
-          target: "/tmp/"
+          target: "${{ inputs.deploy_type == 'backend' && format('{0}/apps/{1}', inputs.apps_root || '/srv/apps', inputs.project) || format('{0}/static/{1}', inputs.static_root || '/srv/static', inputs.project) }}"
           strip_components: 0
 
-
-
-      - name: 移动构建产物到部署目录（自动重试）
-        uses: nick-fields/retry@v3
+      - name: 验证部署结果
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 5
-          command: |
-            echo "📁 移动构建产物到部署目录..."
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔍 验证部署结果..."
             
             PROJECT="${{ inputs.project }}"
             
@@ -533,64 +602,8 @@ jobs:
               DEPLOY_PATH="${{ inputs.static_root || '/srv/static' }}/$PROJECT"
             fi
             
-            # 检查临时目录中的构建产物
-            echo "📁 检查 /tmp 目录内容:"
-            ls -la /tmp/
+            echo "📁 检查部署目录: $DEPLOY_PATH"
             
-            # 查找构建产物目录
-            TEMP_SOURCE=""
-            if [ -d "/tmp/dist-$PROJECT" ]; then
-              TEMP_SOURCE="/tmp/dist-$PROJECT"
-            elif [ -d "/tmp/dist" ]; then
-              TEMP_SOURCE="/tmp/dist"
-            else
-              echo "🔍 查找可能的构建产物目录..."
-              for dir in /tmp/*; do
-                if [ -d "$dir" ] && [[ "$dir" != /tmp/.ICE-unix ]] && [[ "$dir" != /tmp/.X11-unix ]] && [[ "$dir" != /tmp/.XIM-unix ]] && [[ "$dir" != /tmp/.font-unix ]] && [[ "$dir" != /tmp/snap-private-tmp ]] && [[ "$dir" != /tmp/systemd-private-* ]]; then
-                  echo "📁 发现目录: $dir"
-                  TEMP_SOURCE="$dir"
-                  break
-                fi
-              done
-            fi
-            
-            if [ -z "$TEMP_SOURCE" ] || [ ! -d "$TEMP_SOURCE" ]; then
-              echo "🚨 未找到构建产物目录"
-              echo "📁 /tmp 目录内容:"
-              ls -la /tmp/
-              exit 1
-            fi
-            
-            echo "📁 找到构建产物目录: $TEMP_SOURCE"
-            echo "📁 构建产物内容:"
-            ls -la "$TEMP_SOURCE/"
-            
-            # 统计文件数量
-            FILE_COUNT=$(find "$TEMP_SOURCE" -type f | wc -l)
-            echo "📊 构建产物文件数量: $FILE_COUNT"
-            
-            if [ "$FILE_COUNT" -eq 0 ]; then
-              echo "🚨 构建产物为空"
-              exit 1
-            fi
-            
-            # 移动构建产物到部署目录
-            echo "📁 移动构建产物到部署目录: $DEPLOY_PATH"
-            sudo cp -r "$TEMP_SOURCE"/* "$DEPLOY_PATH/"
-            sudo chown -R ${{ inputs.run_user || 'deploy' }}:${{ inputs.run_user || 'deploy' }} "$DEPLOY_PATH"
-            
-            echo "✅ 构建产物已成功部署到: $DEPLOY_PATH"
-            echo "📁 部署目录内容:"
-            ls -la "$DEPLOY_PATH/"
-            echo "📊 部署文件数量: $(find "$DEPLOY_PATH" -type f | wc -l)"
-            
-            # 清理临时文件
-            echo "🧹 清理临时文件..."
-            sudo rm -rf "$TEMP_SOURCE"
-            echo "✅ 临时文件已清理"
-            
-            # 最终验证
-            echo "🔍 最终验证部署结果..."
             if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
               final_file_count=$(find "$DEPLOY_PATH" -type f | wc -l)
               echo "✅ 部署验证通过"
@@ -598,7 +611,7 @@ jobs:
               ls -la $DEPLOY_PATH/
               echo "📊 最终文件数量: $final_file_count"
               if [ "$final_file_count" -gt 0 ]; then
-                echo "✅ 部署成功，无需重试"
+                echo "✅ 部署成功"
                 exit 0
               else
                 echo "❌ 部署后目录为空"
