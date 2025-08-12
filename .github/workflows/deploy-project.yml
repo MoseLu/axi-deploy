@@ -96,6 +96,30 @@ jobs:
           echo "DEPLOY_START_TIME=$(date +%s)" >> $GITHUB_ENV
           echo "🚀 部署开始时间: $(date)"
           
+          # 发送部署开始通知到WebSocket
+          echo "📤 发送部署开始通知..."
+          NOTIFICATION_DATA=$(cat <<EOF
+          {
+            "type": "step_started",
+            "project": "${{ inputs.project }}",
+            "deployment_id": "${{ inputs.run_id }}",
+            "step_name": "部署验证",
+            "step_status": "started",
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "workflow_name": "deploy-project",
+            "workflow_id": "${{ github.run_id }}",
+            "logs": "开始验证部署参数",
+            "duration": 0
+          }
+          EOF
+          )
+          
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: axi-deploy-websocket/1.0" \
+            -d "$NOTIFICATION_DATA" \
+            "https://redamancy.com.cn/project-dashboard/api/webhooks/deployment" || echo "⚠️ WebSocket通知发送失败"
+          
           # 验证部署类型
           DEPLOY_TYPE="${{ inputs.deploy_type }}"
           if [ "$DEPLOY_TYPE" != "backend" ] && [ "$DEPLOY_TYPE" != "static" ]; then
@@ -635,7 +659,8 @@ jobs:
               ls -la "$DIST_SUBDIR/"
               
               # 检查dist-目录下是否有正确的项目文件
-              if [ -f "$DIST_SUBDIR/package.json" ] || [ -f "$DIST_SUBDIR/ecosystem.config.js" ] || [ -d "$DIST_SUBDIR/backend" ] || [ -d "$DIST_SUBDIR/frontend" ]; then
+              # 对于静态项目，检查是否有index.html或其他静态文件
+              if [ -f "$DIST_SUBDIR/package.json" ] || [ -f "$DIST_SUBDIR/ecosystem.config.js" ] || [ -d "$DIST_SUBDIR/backend" ] || [ -d "$DIST_SUBDIR/frontend" ] || [ -f "$DIST_SUBDIR/index.html" ] || [ -d "$DIST_SUBDIR/assets" ] || [ -d "$DIST_SUBDIR/_assets" ]; then
                 echo "✅ dist-目录包含正确的项目文件，正在修复目录结构..."
                 
                 # 创建临时目录
@@ -692,6 +717,25 @@ jobs:
               echo "✅ frontend 目录存在"
             else
               echo "❌ frontend 目录不存在"
+            fi
+            
+            # 检查静态项目文件
+            if [ -f "$DEPLOY_PATH/index.html" ]; then
+              echo "✅ index.html 存在"
+            else
+              echo "❌ index.html 不存在"
+            fi
+            
+            if [ -d "$DEPLOY_PATH/assets" ]; then
+              echo "✅ assets 目录存在"
+            else
+              echo "❌ assets 目录不存在"
+            fi
+            
+            if [ -d "$DEPLOY_PATH/_assets" ]; then
+              echo "✅ _assets 目录存在"
+            else
+              echo "❌ _assets 目录不存在"
             fi
             
             # 设置正确的权限
@@ -832,15 +876,20 @@ jobs:
           # 构建通知数据
           NOTIFICATION_DATA=$(cat <<EOF
           {
+            "type": "deployment_completed",
             "project": "${{ inputs.project }}",
+            "deployment_id": "${{ inputs.run_id }}",
             "status": "success",
             "duration": $DEPLOY_DURATION,
             "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "workflow_name": "deploy-project",
+            "workflow_id": "${{ github.run_id }}",
             "sourceRepo": "${{ inputs.source_repo }}",
-            "runId": "${{ inputs.run_id }}",
             "deployType": "${{ inputs.deploy_type }}",
             "serverHost": "${{ inputs.server_host }}",
-            "logs": "部署成功，耗时 ${DEPLOY_DURATION} 秒"
+            "logs": "部署成功，耗时 ${DEPLOY_DURATION} 秒",
+            "started_at": "$(date -d @$DEPLOY_START_TIME -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "completed_at": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
           }
           EOF
           )
@@ -890,15 +939,20 @@ jobs:
           # 构建通知数据
           NOTIFICATION_DATA=$(cat <<EOF
           {
+            "type": "deployment_completed",
             "project": "${{ inputs.project }}",
+            "deployment_id": "${{ inputs.run_id }}",
             "status": "failed",
             "duration": $DEPLOY_DURATION,
             "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "workflow_name": "deploy-project",
+            "workflow_id": "${{ github.run_id }}",
             "sourceRepo": "${{ inputs.source_repo }}",
-            "runId": "${{ inputs.run_id }}",
             "deployType": "${{ inputs.deploy_type }}",
             "serverHost": "${{ inputs.server_host }}",
-            "errorMessage": "部署失败，请查看 GitHub Actions 日志"
+            "errorMessage": "部署失败，请查看 GitHub Actions 日志",
+            "started_at": "$(date -d @$DEPLOY_START_TIME -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "completed_at": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
           }
           EOF
           )
