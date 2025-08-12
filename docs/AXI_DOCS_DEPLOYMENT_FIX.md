@@ -27,7 +27,92 @@ VitePress 构建后的产物位于 `docs/.vitepress/dist/` 目录，包含：
 
 ## 解决方案
 
-### 1. 更新 scp-action 版本
+### 1. 使用压缩包确保目录结构完整
+由于 `actions/upload-artifact` 和 `gh run download` 在处理复杂目录结构时可能存在问题，我们采用压缩包方案：
+
+#### 1.1 构建时创建压缩包
+在 axi-docs 构建工作流中创建 tar.gz 压缩包：
+
+```yaml
+- name: 准备上传目录
+  run: |
+    echo "🔧 准备上传目录..."
+    # 确保构建产物目录存在且不为空
+    if [ ! -d "docs/.vitepress/dist" ]; then
+      echo "❌ 构建产物目录不存在"
+      exit 1
+    fi
+    
+    # 检查构建产物是否为空
+    if [ -z "$(ls -A docs/.vitepress/dist)" ]; then
+      echo "❌ 构建产物目录为空"
+      exit 1
+    fi
+    
+    echo "✅ 构建产物准备完成"
+    echo "构建产物内容:"
+    ls -la docs/.vitepress/dist/
+    
+    # 创建压缩包以确保目录结构完整
+    echo "📦 创建构建产物压缩包..."
+    tar -czf dist-axi-docs.tar.gz -C docs/.vitepress dist
+    
+    echo "✅ 压缩包创建完成"
+    echo "📊 压缩包大小: $(du -h dist-axi-docs.tar.gz | cut -f1)"
+    echo "📁 压缩包内容预览:"
+    tar -tzf dist-axi-docs.tar.gz | head -20
+
+- name: 上传产物
+  uses: actions/upload-artifact@v4
+  with:
+    name: dist-axi-docs
+    path: |
+      docs/.vitepress/dist/
+      dist-axi-docs.tar.gz
+    retention-days: 1
+    if-no-files-found: error
+```
+
+#### 1.2 部署时优先使用压缩包
+在 axi-deploy 部署工作流中优先解压压缩包：
+
+```yaml
+- name: 下载构建产物
+  run: |
+    # 下载构建产物
+    echo "⬇️ 开始下载构建产物..."
+    gh run download ${{ inputs.run_id }} \
+      --name "dist-${{ inputs.project }}" \
+      --dir . \
+      --repo ${{ inputs.source_repo }}
+    
+    # 验证下载结果
+    echo "🔍 验证下载结果..."
+    if [ -f "dist-${{ inputs.project }}.tar.gz" ]; then
+      echo "✅ 构建产物压缩包下载成功"
+      echo "📦 解压构建产物压缩包..."
+      tar -xzf "dist-${{ inputs.project }}.tar.gz"
+      
+      # 检查解压后的目录结构
+      if [ -d "dist" ]; then
+        echo "✅ 压缩包解压成功，重命名目录..."
+        mv dist "dist-${{ inputs.project }}"
+        file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+        echo "✅ 构建产物解压成功，包含 $file_count 个文件"
+      else
+        echo "❌ 压缩包解压后未找到预期的 dist 目录"
+        exit 1
+      fi
+    elif [ -d "dist-${{ inputs.project }}" ]; then
+      file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+      echo "✅ 构建产物下载成功，包含 $file_count 个文件"
+    else
+      echo "❌ 构建产物下载失败"
+      exit 1
+    fi
+```
+
+### 2. 更新 scp-action 版本
 将 `appleboy/scp-action@v0.1.4` 更新到 `appleboy/scp-action@v1.0.0`：
 
 ```yaml
@@ -105,10 +190,12 @@ VitePress 构建后的产物位于 `docs/.vitepress/dist/` 目录，包含：
 ## 修改文件
 
 ### 1. 主要修改
-- `axi-deploy/.github/workflows/deploy-project.yml` - 更新 scp-action 版本并添加验证步骤
+- `axi-docs/.github/workflows/axi-docs_deploy.yml` - 添加压缩包创建和上传
+- `axi-deploy/.github/workflows/deploy-project.yml` - 更新 scp-action 版本，添加压缩包解压逻辑和验证步骤
 
 ### 2. 新增文件
-- `axi-deploy/scripts/test-axi-docs-deploy.sh` - 测试脚本
+- `axi-deploy/scripts/test-axi-docs-deploy.sh` - 原始测试脚本
+- `axi-deploy/scripts/test-tar-deploy.sh` - 压缩包方案测试脚本
 - `axi-deploy/docs/AXI_DOCS_DEPLOYMENT_FIX.md` - 本文档
 
 ## 验证方法

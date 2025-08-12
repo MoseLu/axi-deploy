@@ -261,7 +261,22 @@ jobs:
           
           # 验证下载结果
           echo "🔍 验证下载结果..."
-          if [ -d "dist-${{ inputs.project }}" ]; then
+          if [ -f "dist-${{ inputs.project }}.tar.gz" ]; then
+            echo "✅ 构建产物压缩包下载成功"
+            echo "📦 解压构建产物压缩包..."
+            tar -xzf "dist-${{ inputs.project }}.tar.gz"
+            
+            # 检查解压后的目录结构
+            if [ -d "dist" ]; then
+              echo "✅ 压缩包解压成功，重命名目录..."
+              mv dist "dist-${{ inputs.project }}"
+              file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+              echo "✅ 构建产物解压成功，包含 $file_count 个文件"
+            else
+              echo "❌ 压缩包解压后未找到预期的 dist 目录"
+              exit 1
+            fi
+          elif [ -d "dist-${{ inputs.project }}" ]; then
             file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
             echo "✅ 构建产物下载成功，包含 $file_count 个文件"
           elif [ -f "dist-${{ inputs.project }}.zip" ]; then
@@ -333,6 +348,16 @@ jobs:
           echo "当前目录: $(pwd)"
           echo "当前目录内容:"
           ls -la ./
+          echo ""
+          
+          # 检查是否有压缩包
+          if [ -f "dist-${{ inputs.project }}.tar.gz" ]; then
+            echo "✅ 找到压缩包: dist-${{ inputs.project }}.tar.gz"
+            echo "📊 压缩包大小: $(du -h dist-${{ inputs.project }}.tar.gz | cut -f1)"
+            echo "📁 压缩包内容预览:"
+            tar -tzf "dist-${{ inputs.project }}.tar.gz" | head -20
+          fi
+          
           echo ""
           echo "🔍 检查构建产物目录..."
           if [ -d "./dist-${{ inputs.project }}" ]; then
