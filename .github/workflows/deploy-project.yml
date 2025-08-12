@@ -274,6 +274,8 @@ jobs:
               echo "✅ 构建产物解压成功，包含 $file_count 个文件"
             else
               echo "❌ 压缩包解压后未找到预期的 dist 目录"
+              echo "📁 解压后目录内容:"
+              ls -la
               exit 1
             fi
           elif [ -d "dist-${{ inputs.project }}" ]; then
@@ -284,6 +286,12 @@ jobs:
             unzip -q "dist-${{ inputs.project }}.zip"
             file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
             echo "✅ 构建产物解压成功，包含 $file_count 个文件"
+          elif [ -d "docs" ] && [ -d "docs/.vitepress" ] && [ -d "docs/.vitepress/dist" ]; then
+            echo "✅ 发现 VitePress 构建产物目录结构"
+            echo "📦 移动构建产物到标准位置..."
+            mv docs/.vitepress/dist "dist-${{ inputs.project }}"
+            file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+            echo "✅ 构建产物移动成功，包含 $file_count 个文件"
           else
             echo "📝 未找到标准构建产物，检查当前目录内容..."
             echo "📁 当前目录内容:"
