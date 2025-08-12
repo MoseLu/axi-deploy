@@ -617,8 +617,33 @@ jobs:
             find . -type d -name "*${{ inputs.project }}*" 2>/dev/null || echo "未找到相关目录"
           fi
 
+      - name: 准备目标目录
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "📤 准备目标目录..."
+            
+            # 确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              DEPLOY_PATH="${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}"
+            else
+              DEPLOY_PATH="${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}"
+            fi
+            
+            echo "📁 目标部署路径: $DEPLOY_PATH"
+            
+            # 确保目标目录存在
+            sudo mkdir -p "$DEPLOY_PATH"
+            sudo chown deploy:deploy "$DEPLOY_PATH"
+            
+            echo "✅ 目标目录准备完成"
+
       - name: 上传构建产物到部署目录
-        uses: appleboy/scp-action@v0.1.4
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ inputs.server_host }}
           username: ${{ inputs.server_user }}
@@ -626,6 +651,61 @@ jobs:
           port: ${{ inputs.server_port }}
           source: "./dist-${{ inputs.project }}/"
           target: "${{ inputs.deploy_type == 'backend' && format('{0}/{1}', inputs.apps_root || '/srv/apps', inputs.project) || format('{0}/{1}', inputs.static_root || '/srv/static', inputs.project) }}"
+          strip_components: 0
+          overwrite: true
+
+      - name: 验证上传结果
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔍 验证上传结果..."
+            
+            # 确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              DEPLOY_PATH="${{ inputs.apps_root || '/srv/apps' }}/${{ inputs.project }}"
+            else
+              DEPLOY_PATH="${{ inputs.static_root || '/srv/static' }}/${{ inputs.project }}"
+            fi
+            
+            echo "📁 检查部署目录: $DEPLOY_PATH"
+            
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "✅ 部署目录存在"
+              echo "📁 部署目录内容:"
+              ls -la "$DEPLOY_PATH/"
+              
+              # 检查关键文件
+              if [ -f "$DEPLOY_PATH/index.html" ]; then
+                echo "✅ index.html 存在"
+              else
+                echo "❌ index.html 不存在"
+              fi
+              
+              if [ -d "$DEPLOY_PATH/assets" ]; then
+                echo "✅ assets 目录存在"
+                echo "📊 assets 目录文件数量: $(find "$DEPLOY_PATH/assets" -type f | wc -l)"
+              else
+                echo "❌ assets 目录不存在"
+              fi
+              
+              # 统计总文件数
+              total_files=$(find "$DEPLOY_PATH" -type f | wc -l)
+              echo "📊 总文件数量: $total_files"
+              
+              if [ "$total_files" -lt 10 ]; then
+                echo "⚠️ 文件数量过少，可能存在上传问题"
+                exit 1
+              else
+                echo "✅ 文件数量正常"
+              fi
+            else
+              echo "❌ 部署目录不存在"
+              exit 1
+            fi
 
       - name: 修复目录结构
         uses: appleboy/ssh-action@v1.0.3

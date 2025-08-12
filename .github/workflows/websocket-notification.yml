@@ -1,0 +1,353 @@
+name: WebSocket Deployment Notification
+
+on:
+  workflow_run:
+    workflows: ["deploy-project", "main-deployment"]
+    types: [requested, in_progress, completed]
+  workflow_dispatch:
+    inputs:
+      project:
+        description: '项目名称'
+        required: true
+        type: string
+      deployment_id:
+        description: '部署ID'
+        required: true
+        type: string
+      step_name:
+        description: '步骤名称'
+        required: true
+        type: string
+      step_status:
+        description: '步骤状态'
+        required: true
+        type: choice
+        options:
+          - started
+          - running
+          - completed
+          - failed
+          - retrying
+      logs:
+        description: '步骤日志'
+        required: false
+        type: string
+      duration:
+        description: '步骤耗时（秒）'
+        required: false
+        type: number
+
+env:
+  DASHBOARD_WS_URL: "https://redamancy.com.cn/project-dashboard/api/websocket/notify"
+  DASHBOARD_API_URL: "https://redamancy.com.cn/project-dashboard/api/webhooks/deployment"
+
+jobs:
+  notify-deployment-step:
+    name: 通知部署步骤
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 检查工作流运行状态
+        id: check-workflow
+        if: github.event.workflow_run
+        run: |
+          echo "工作流运行ID: ${{ github.event.workflow_run.id }}"
+          echo "工作流状态: ${{ github.event.workflow_run.conclusion }}"
+          echo "工作流名称: ${{ github.event.workflow_run.name }}"
+          
+          # 设置环境变量
+          echo "workflow_id=${{ github.event.workflow_run.id }}" >> $GITHUB_ENV
+          echo "workflow_status=${{ github.event.workflow_run.conclusion }}" >> $GITHUB_ENV
+          echo "workflow_name=${{ github.event.workflow_run.name }}" >> $GITHUB_ENV
+          
+          # 从工作流名称中提取项目信息
+          if [[ "${{ github.event.workflow_run.name }}" == *"deploy-project"* ]]; then
+            echo "deployment_type=project" >> $GITHUB_ENV
+          elif [[ "${{ github.event.workflow_run.name }}" == *"main-deployment"* ]]; then
+            echo "deployment_type=main" >> $GITHUB_ENV
+          else
+            echo "deployment_type=unknown" >> $GITHUB_ENV
+          fi
+
+      - name: 获取工作流运行详情
+        id: get-workflow-details
+        if: github.event.workflow_run
+        run: |
+          # 获取工作流运行的详细信息
+          WORKFLOW_DETAILS=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }})
+          
+          # 提取项目名称（从工作流输入中）
+          PROJECT_NAME=$(echo "$WORKFLOW_DETAILS" | jq -r '.inputs.project // "unknown"')
+          echo "project_name=$PROJECT_NAME" >> $GITHUB_ENV
+          
+          # 提取运行ID
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          echo "run_id=$RUN_ID" >> $GITHUB_ENV
+          
+          # 提取开始时间
+          START_TIME=$(echo "$WORKFLOW_DETAILS" | jq -r '.created_at')
+          echo "start_time=$START_TIME" >> $GITHUB_ENV
+          
+          echo "项目名称: $PROJECT_NAME"
+          echo "运行ID: $RUN_ID"
+          echo "开始时间: $START_TIME"
+
+      - name: 通知步骤开始
+        id: notify-step-started
+        run: |
+          # 构建通知数据
+          NOTIFICATION_DATA=$(cat <<EOF
+          {
+            "type": "step_started",
+            "project": "${{ env.project_name || inputs.project }}",
+            "deployment_id": "${{ env.run_id || inputs.deployment_id }}",
+            "step_name": "${{ github.job || inputs.step_name }}",
+            "step_status": "started",
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "workflow_name": "${{ env.workflow_name || github.workflow }}",
+            "workflow_id": "${{ env.workflow_id || github.run_id }}",
+            "logs": "步骤开始执行",
+            "duration": 0
+          }
+          EOF
+          )
+          
+          echo "📤 发送步骤开始通知..."
+          echo "数据: $NOTIFICATION_DATA"
+          
+          # 发送通知
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: axi-deploy-websocket/1.0" \
+            -d "$NOTIFICATION_DATA" \
+            "$DASHBOARD_API_URL" || echo "⚠️ 通知发送失败"
+
+      - name: 监控工作流步骤
+        id: monitor-steps
+        if: github.event.workflow_run
+        run: |
+          echo "🔍 开始监控工作流步骤..."
+          
+          # 获取工作流运行的作业列表
+          JOBS=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/jobs)
+          
+          # 解析每个作业的状态
+          echo "$JOBS" | jq -r '.jobs[] | "\(.name)|\(.status)|\(.conclusion)|\(.started_at)|\(.completed_at)"' | while IFS='|' read -r job_name status conclusion started_at completed_at; do
+            echo "作业: $job_name, 状态: $status, 结论: $conclusion"
+            
+            # 计算耗时
+            if [[ "$started_at" != "null" && "$completed_at" != "null" ]]; then
+              START_EPOCH=$(date -d "$started_at" +%s)
+              END_EPOCH=$(date -d "$completed_at" +%s)
+              DURATION=$((END_EPOCH - START_EPOCH))
+            else
+              DURATION=0
+            fi
+            
+            # 构建步骤通知数据
+            STEP_DATA=$(cat <<EOF
+            {
+              "type": "step_completed",
+              "project": "${{ env.project_name }}",
+              "deployment_id": "${{ env.run_id }}",
+              "step_name": "$job_name",
+              "step_status": "$conclusion",
+              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+              "workflow_name": "${{ env.workflow_name }}",
+              "workflow_id": "${{ env.workflow_id }}",
+              "logs": "作业 $job_name 已完成，状态: $conclusion",
+              "duration": $DURATION,
+              "started_at": "$started_at",
+              "completed_at": "$completed_at"
+            }
+            EOF
+            )
+            
+            # 发送步骤完成通知
+            curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -H "User-Agent: axi-deploy-websocket/1.0" \
+              -d "$STEP_DATA" \
+              "$DASHBOARD_API_URL" || echo "⚠️ 步骤通知发送失败"
+          done
+
+      - name: 通知部署完成
+        id: notify-deployment-completed
+        if: github.event.workflow_run && github.event.workflow_run.conclusion
+        run: |
+          # 计算总耗时
+          START_TIME="${{ env.start_time }}"
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          
+          if [[ "$START_TIME" != "" ]]; then
+            START_EPOCH=$(date -d "$START_TIME" +%s)
+            END_EPOCH=$(date -d "$END_TIME" +%s)
+            TOTAL_DURATION=$((END_EPOCH - START_EPOCH))
+          else
+            TOTAL_DURATION=0
+          fi
+          
+          # 构建完成通知数据
+          COMPLETION_DATA=$(cat <<EOF
+          {
+            "type": "deployment_completed",
+            "project": "${{ env.project_name }}",
+            "deployment_id": "${{ env.run_id }}",
+            "status": "${{ github.event.workflow_run.conclusion }}",
+            "timestamp": "$END_TIME",
+            "workflow_name": "${{ env.workflow_name }}",
+            "workflow_id": "${{ env.workflow_id }}",
+            "logs": "部署工作流已完成，状态: ${{ github.event.workflow_run.conclusion }}",
+            "duration": $TOTAL_DURATION,
+            "started_at": "$START_TIME",
+            "completed_at": "$END_TIME"
+          }
+          EOF
+          )
+          
+          echo "📤 发送部署完成通知..."
+          echo "数据: $COMPLETION_DATA"
+          
+          # 发送完成通知
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: axi-deploy-websocket/1.0" \
+            -d "$COMPLETION_DATA" \
+            "$DASHBOARD_API_URL" || echo "⚠️ 完成通知发送失败"
+
+      - name: 手动通知步骤
+        id: manual-notify
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # 构建手动通知数据
+          MANUAL_DATA=$(cat <<EOF
+          {
+            "type": "step_manual",
+            "project": "${{ inputs.project }}",
+            "deployment_id": "${{ inputs.deployment_id }}",
+            "step_name": "${{ inputs.step_name }}",
+            "step_status": "${{ inputs.step_status }}",
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "workflow_name": "${{ github.workflow }}",
+            "workflow_id": "${{ github.run_id }}",
+            "logs": "${{ inputs.logs || '手动触发的步骤通知' }}",
+            "duration": ${{ inputs.duration || 0 }}
+          }
+          EOF
+          )
+          
+          echo "📤 发送手动步骤通知..."
+          echo "数据: $MANUAL_DATA"
+          
+          # 发送手动通知
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: axi-deploy-websocket/1.0" \
+            -d "$MANUAL_DATA" \
+            "$DASHBOARD_API_URL" || echo "⚠️ 手动通知发送失败"
+
+  # 实时日志流监控
+  stream-logs:
+    name: 实时日志流
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run
+    
+    steps:
+      - name: 设置日志流
+        run: |
+          echo "📊 开始实时日志流监控..."
+          
+          # 获取工作流运行ID
+          WORKFLOW_RUN_ID="${{ github.event.workflow_run.id }}"
+          
+          # 创建日志流标识
+          LOG_STREAM_ID="deployment_${WORKFLOW_RUN_ID}_$(date +%s)"
+          echo "log_stream_id=$LOG_STREAM_ID" >> $GITHUB_ENV
+          
+          echo "日志流ID: $LOG_STREAM_ID"
+
+      - name: 监控实时日志
+        run: |
+          echo "🔍 监控工作流实时日志..."
+          
+          # 获取工作流日志
+          gh run view ${{ github.event.workflow_run.id }} --log > workflow_logs.txt
+          
+          # 解析日志并发送到WebSocket
+          while IFS= read -r line; do
+            # 构建日志通知数据
+            LOG_DATA=$(cat <<EOF
+            {
+              "type": "log_entry",
+              "project": "${{ env.project_name }}",
+              "deployment_id": "${{ env.run_id }}",
+              "log_stream_id": "${{ env.log_stream_id }}",
+              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+              "level": "info",
+              "message": "$(echo "$line" | jq -R -s .)",
+              "source": "workflow"
+            }
+            EOF
+            )
+            
+            # 发送日志条目
+            curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -H "User-Agent: axi-deploy-websocket/1.0" \
+              -d "$LOG_DATA" \
+              "$DASHBOARD_API_URL" || true
+              
+            # 避免发送过快
+            sleep 0.1
+          done < workflow_logs.txt
+
+  # 性能指标收集
+  collect-metrics:
+    name: 收集性能指标
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run
+    
+    steps:
+      - name: 收集部署指标
+        run: |
+          echo "📈 收集部署性能指标..."
+          
+          # 获取工作流运行详情
+          WORKFLOW_DETAILS=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }})
+          
+          # 提取性能指标
+          START_TIME=$(echo "$WORKFLOW_DETAILS" | jq -r '.created_at')
+          END_TIME=$(echo "$WORKFLOW_DETAILS" | jq -r '.updated_at')
+          DURATION=$(echo "$WORKFLOW_DETAILS" | jq -r '.run_duration // 0')
+          
+          # 构建指标数据
+          METRICS_DATA=$(cat <<EOF
+          {
+            "type": "metrics_update",
+            "project": "${{ env.project_name }}",
+            "deployment_id": "${{ env.run_id }}",
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
+            "metrics": {
+              "total_duration": $DURATION,
+              "start_time": "$START_TIME",
+              "end_time": "$END_TIME",
+              "status": "${{ github.event.workflow_run.conclusion }}",
+              "steps_count": 0,
+              "successful_steps": 0,
+              "failed_steps": 0
+            }
+          }
+          EOF
+          )
+          
+          echo "📊 性能指标:"
+          echo "总耗时: ${DURATION}秒"
+          echo "开始时间: $START_TIME"
+          echo "结束时间: $END_TIME"
+          
+          # 发送指标更新
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: axi-deploy-websocket/1.0" \
+            -d "$METRICS_DATA" \
+            "$DASHBOARD_API_URL" || echo "⚠️ 指标更新发送失败"
