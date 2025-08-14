@@ -224,8 +224,20 @@ jobs:
                 START_CMD=\"${{ inputs.start_cmd }}\"
                 CMD_NAME=\$(echo \"\$START_CMD\" | awk \"{print \\\$1}\")
                 
+                # 检查是否有 start.sh 脚本（优先使用）
+                if [ -f \"start.sh\" ]; then
+                  echo \"📋 发现 start.sh 脚本，使用启动脚本...\"
+                  
+                  # 确保脚本有执行权限
+                  chmod +x start.sh
+                  
+                  # 执行启动脚本
+                  echo \"📋 执行启动脚本: ./start.sh\"
+                  ./start.sh
+                  
+                  echo \"✅ 启动脚本执行完成\"
                 # 检查是否有 ecosystem.config.js 文件（PM2 项目）
-                if [ -f \"ecosystem.config.js\" ]; then
+                elif [ -f \"ecosystem.config.js\" ]; then
                   echo \"📋 发现 PM2 配置文件，使用 PM2 启动...\"
                   
                   # 检查 PM2 是否安装
@@ -345,8 +357,32 @@ jobs:
                     echo "❌ 端口 $SERVICE_PORT 未监听"
                   fi
                   
-                  # 如果不是最后一次验证，等待后重试
+                  # 如果不是最后一次验证，先重启服务再重试验证
                   if [ $VALIDATION_ATTEMPTS -lt $MAX_VALIDATION_ATTEMPTS ]; then
+                    echo "🔄 服务验证失败，尝试重启服务..."
+                    
+                    # 重启服务
+                    RESTART_RESULT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key_validation -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
+                      cd ${{ inputs.apps_root }}/${{ inputs.project }}
+                      echo '🔄 重启服务...'
+                      
+                      # 停止现有服务
+                      pm2 stop ${{ inputs.project }} 2>/dev/null || true
+                      pm2 delete ${{ inputs.project }} 2>/dev/null || true
+                      
+                      # 重新启动服务
+                      ${{ inputs.start_cmd }}
+                      
+                      echo '✅ 服务重启完成'
+                    " 2>/dev/null || echo "RESTART_FAILED")
+                    
+                    if echo "$RESTART_RESULT" | grep -q "RESTART_FAILED"; then
+                      echo "❌ 服务重启失败"
+                    else
+                      echo "✅ 服务重启成功，等待服务启动..."
+                      sleep 10
+                    fi
+                    
                     echo "⏳ 等待 5 秒后重试验证..."
                     sleep 5
                   fi
