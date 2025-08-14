@@ -243,13 +243,13 @@ jobs:
               
               # 生成路由配置文件
               echo '📝 生成路由配置文件: \$ROUTE_CONF'
-              sudo tee \"\$ROUTE_CONF\" > /dev/null << EOF
+              sudo tee \"\$ROUTE_CONF\" > /dev/null << 'CONFIG_EOF'
               # 项目: \$PROJECT
               # 生成时间: \$(date)
               # 部署类型: \$DEPLOY_TYPE
               
               \$CLEANED_CONFIG
-              EOF
+              CONFIG_EOF
               
               echo '✅ 路由配置文件已生成'
               echo '📋 配置文件内容:'
