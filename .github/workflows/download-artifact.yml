@@ -1,0 +1,176 @@
+name: Download Artifact
+
+description: "下载构建产物 - 从 GitHub Actions 下载项目的构建产物"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      source_repo:
+        required: true
+        type: string
+        description: "源仓库 (owner/repo)"
+      run_id:
+        required: true
+        type: string
+        description: "构建运行ID"
+      deploy_center_pat:
+        required: false
+        type: string
+        description: "GitHub Token用于下载构建产物（可选，默认使用GITHUB_TOKEN）"
+    outputs:
+      download_success:
+        description: "下载是否成功"
+        value: ${{ jobs.download.outputs.download_success }}
+      artifact_path:
+        description: "构建产物路径"
+        value: ${{ jobs.download.outputs.artifact_path }}
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    outputs:
+      download_success: ${{ steps.set-outputs.outputs.download_success }}
+      artifact_path: ${{ steps.set-outputs.outputs.artifact_path }}
+    
+    steps:
+      - name: 验证输入参数
+        run: |
+          echo "🔍 验证输入参数..."
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 运行ID: ${{ inputs.run_id }}"
+          
+          # 记录下载开始时间
+          echo "DEPLOY_START_TIME=$(date +%s)" >> $GITHUB_ENV
+          
+          echo "✅ 输入参数验证通过"
+
+      - name: 调试运行ID
+        run: |
+          echo "🔍 调试运行ID..."
+          echo "运行ID: ${{ inputs.run_id }}"
+          echo "运行ID长度: ${#{{ inputs.run_id }}}"
+          
+          # 验证运行ID格式
+          if [[ ! "${{ inputs.run_id }}" =~ ^[0-9]+$ ]]; then
+            echo "❌ 运行ID格式错误: ${{ inputs.run_id }}"
+            exit 1
+          fi
+          
+          echo "✅ 运行ID格式正确"
+
+      - name: 调试下载参数
+        run: |
+          echo "🔍 调试下载参数..."
+          echo "- 源仓库: ${{ inputs.source_repo }}"
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 运行ID: ${{ inputs.run_id }}"
+          echo "- PAT长度: ${#{{ inputs.deploy_center_pat }}}"
+          
+          # 解析源仓库
+          REPO_OWNER=$(echo "${{ inputs.source_repo }}" | cut -d'/' -f1)
+          REPO_NAME=$(echo "${{ inputs.source_repo }}" | cut -d'/' -f2)
+          
+          echo "- 仓库所有者: $REPO_OWNER"
+          echo "- 仓库名称: $REPO_NAME"
+          
+          # 设置环境变量
+          echo "REPO_OWNER=$REPO_OWNER" >> $GITHUB_ENV
+          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
+
+      - name: 测试PAT权限
+        run: |
+          echo "🔍 测试 PAT 权限..."
+          
+          # 选择使用的 Token
+          if [ -n "${{ inputs.deploy_center_pat }}" ]; then
+            echo "📋 使用提供的 PAT"
+            TOKEN="${{ inputs.deploy_center_pat }}"
+          else
+            echo "📋 使用默认 GITHUB_TOKEN"
+            TOKEN="${{ github.token }}"
+          fi
+          
+          # 测试 API 访问
+          echo "🔍 测试 GitHub API 访问..."
+          RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}" 2>/dev/null)
+          
+          if echo "$RESPONSE" | grep -q '"id"'; then
+            echo "✅ GitHub API 访问成功"
+          else
+            echo "❌ GitHub API 访问失败"
+            echo "响应: $RESPONSE"
+            exit 1
+          fi
+          
+          # 测试 Actions API 访问
+          echo "🔍 测试 Actions API 访问..."
+          ACTIONS_RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}" 2>/dev/null)
+          
+          if echo "$ACTIONS_RESPONSE" | grep -q '"id"'; then
+            echo "✅ Actions API 访问成功"
+            RUN_STATUS=$(echo "$ACTIONS_RESPONSE" | jq -r '.status // "unknown"')
+            RUN_CONCLUSION=$(echo "$ACTIONS_RESPONSE" | jq -r '.conclusion // "unknown"')
+            echo "- 运行状态: $RUN_STATUS"
+            echo "- 运行结论: $RUN_CONCLUSION"
+          else
+            echo "❌ Actions API 访问失败"
+            echo "响应: $ACTIONS_RESPONSE"
+            exit 1
+          fi
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ inputs.project }}
+          path: ./artifacts
+          github-token: ${{ inputs.deploy_center_pat || github.token }}
+
+      - name: 验证下载结果
+        id: verify-download
+        run: |
+          echo "🔍 验证下载结果..."
+          
+          if [ -d "./artifacts" ]; then
+            echo "✅ 构建产物目录存在"
+            echo "📁 构建产物内容:"
+            ls -la ./artifacts/
+            
+            # 检查是否有文件
+            FILE_COUNT=$(find ./artifacts -type f | wc -l)
+            echo "📊 文件数量: $FILE_COUNT"
+            
+            if [ "$FILE_COUNT" -gt 0 ]; then
+              echo "✅ 构建产物下载成功"
+              echo "download_success=true" >> $GITHUB_OUTPUT
+              echo "artifact_path=./artifacts" >> $GITHUB_OUTPUT
+            else
+              echo "❌ 构建产物目录为空"
+              echo "download_success=false" >> $GITHUB_OUTPUT
+              echo "artifact_path=" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          else
+            echo "❌ 构建产物目录不存在"
+            echo "download_success=false" >> $GITHUB_OUTPUT
+            echo "artifact_path=" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          echo "✅ 构建产物下载完成"
+          echo "- 下载成功: ${{ steps.verify-download.outputs.download_success }}"
+          echo "- 产物路径: ${{ steps.verify-download.outputs.artifact_path }}"

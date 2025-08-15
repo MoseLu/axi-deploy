@@ -1,0 +1,318 @@
+name: MySQL Backup
+
+description: "MySQL 数据库备份 - 为使用 MySQL 数据库的后端项目提供备份机制"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+      apps_root:
+        required: false
+        type: string
+        description: "应用目录路径"
+        default: "/srv/apps"
+      backup_root:
+        required: false
+        type: string
+        description: "备份根目录"
+        default: "/srv/backups"
+      mysql_config:
+        required: false
+        type: string
+        description: "MySQL 配置（base64 编码的 JSON）"
+    outputs:
+      backup_success:
+        description: "备份是否成功"
+        value: ${{ jobs.backup.outputs.backup_success }}
+      backup_path:
+        description: "备份路径"
+        value: ${{ jobs.backup.outputs.backup_path }}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      backup_success: ${{ steps.set-outputs.outputs.backup_success }}
+      backup_path: ${{ steps.set-outputs.outputs.backup_path }}
+    
+    steps:
+      - name: 验证输入参数
+        run: |
+          echo "🔍 验证输入参数..."
+          echo "- 项目: ${{ inputs.project }}"
+          echo "- 服务器: ${{ inputs.server_host }}:${{ inputs.server_port }}"
+          echo "- 用户: ${{ inputs.server_user }}"
+          
+          if [ -z "${{ inputs.mysql_config }}" ]; then
+            echo "📋 未提供 MySQL 配置，跳过数据库备份"
+            echo "backup_success=true" >> $GITHUB_OUTPUT
+            echo "backup_path=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "✅ 输入参数验证通过"
+
+      - name: 解析 MySQL 配置
+        id: parse-mysql-config
+        run: |
+          if [ -n "${{ inputs.mysql_config }}" ]; then
+            echo "🔍 解析 MySQL 配置..."
+            MYSQL_CONFIG_JSON=$(echo "${{ inputs.mysql_config }}" | base64 -d)
+            echo "📄 MySQL 配置: $MYSQL_CONFIG_JSON"
+            
+            # 提取各个参数
+            MYSQL_HOST=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.mysql_host // "localhost"')
+            MYSQL_PORT=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.mysql_port // "3306"')
+            MYSQL_USER=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.mysql_user // "root"')
+            MYSQL_PASSWORD=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.mysql_password // ""')
+            DATABASE_NAME=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.database_name // ""')
+            BACKUP_METHOD=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.backup_method // "mysqldump"')
+            BACKUP_RETENTION_DAYS=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.backup_retention_days // "30"')
+            
+            echo "mysql_host=$MYSQL_HOST" >> $GITHUB_OUTPUT
+            echo "mysql_port=$MYSQL_PORT" >> $GITHUB_OUTPUT
+            echo "mysql_user=$MYSQL_USER" >> $GITHUB_OUTPUT
+            echo "mysql_password=$MYSQL_PASSWORD" >> $GITHUB_OUTPUT
+            echo "database_name=$DATABASE_NAME" >> $GITHUB_OUTPUT
+            echo "backup_method=$BACKUP_METHOD" >> $GITHUB_OUTPUT
+            echo "backup_retention_days=$BACKUP_RETENTION_DAYS" >> $GITHUB_OUTPUT
+            
+            echo "✅ MySQL 配置解析完成"
+          else
+            echo "📋 未提供 MySQL 配置，跳过数据库备份"
+            echo "mysql_host=localhost" >> $GITHUB_OUTPUT
+            echo "mysql_port=3306" >> $GITHUB_OUTPUT
+            echo "mysql_user=root" >> $GITHUB_OUTPUT
+            echo "mysql_password=" >> $GITHUB_OUTPUT
+            echo "database_name=" >> $GITHUB_OUTPUT
+            echo "backup_method=mysqldump" >> $GITHUB_OUTPUT
+            echo "backup_retention_days=30" >> $GITHUB_OUTPUT
+          fi
+
+      - name: MySQL 数据库备份
+        if: inputs.mysql_config != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🗄️ 开始 MySQL 数据库备份..."
+            
+            # 解析 MySQL 配置
+            MYSQL_HOST="${{ steps.parse-mysql-config.outputs.mysql_host }}"
+            MYSQL_PORT="${{ steps.parse-mysql-config.outputs.mysql_port }}"
+            MYSQL_USER="${{ steps.parse-mysql-config.outputs.mysql_user }}"
+            MYSQL_PASSWORD="${{ steps.parse-mysql-config.outputs.mysql_password }}"
+            DATABASE_NAME="${{ steps.parse-mysql-config.outputs.database_name }}"
+            BACKUP_METHOD="${{ steps.parse-mysql-config.outputs.backup_method }}"
+            BACKUP_RETENTION_DAYS="${{ steps.parse-mysql-config.outputs.backup_retention_days }}"
+            PROJECT="${{ inputs.project }}"
+            APPS_ROOT="${{ inputs.apps_root }}"
+            BACKUP_ROOT="${{ inputs.backup_root }}"
+            
+            echo "📋 MySQL 配置:"
+            echo "- 主机: $MYSQL_HOST:$MYSQL_PORT"
+            echo "- 用户: $MYSQL_USER"
+            echo "- 数据库: $DATABASE_NAME"
+            echo "- 备份方法: $BACKUP_METHOD"
+            echo "- 保留天数: $BACKUP_RETENTION_DAYS"
+            
+            # 检查 MySQL 连接
+            echo "🔍 检查 MySQL 连接..."
+            echo "🔍 密码长度: ${#MYSQL_PASSWORD}"
+            
+            # 尝试从服务器配置中获取密码
+            echo "🔍 尝试从服务器配置获取 MySQL 密码..."
+            SERVER_PASSWORD=""
+            
+            # 检查 init-database.sh 中的密码
+            if [ -f "/srv/apps/$PROJECT/scripts/init-database.sh" ]; then
+              echo "🔍 检查 init-database.sh 中的密码配置..."
+              SERVER_PASSWORD=$(grep -o 'DB_PASSWORD="[^"]*"' "/srv/apps/$PROJECT/scripts/init-database.sh" | cut -d'"' -f2)
+              if [ -n "$SERVER_PASSWORD" ]; then
+                echo "✅ 从 init-database.sh 获取到密码"
+              fi
+            fi
+            
+            # 检查配置文件中的密码
+            if [ -z "$SERVER_PASSWORD" ] && [ -f "/srv/apps/$PROJECT/config/config.yaml" ]; then
+              echo "🔍 检查 config.yaml 中的密码配置..."
+              SERVER_PASSWORD=$(grep -A5 "database:" "/srv/apps/$PROJECT/config/config.yaml" | grep "password:" | awk '{print $2}' | tr -d "'" | tr -d '"')
+              if [ -n "$SERVER_PASSWORD" ]; then
+                echo "✅ 从 config.yaml 获取到密码"
+              fi
+            fi
+            
+            # 尝试不同的连接方式
+            if [ -n "$MYSQL_PASSWORD" ]; then
+              echo "🔍 尝试使用传递的密码连接..."
+              if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
+                echo "✅ MySQL 连接成功（使用传递的密码）"
+                MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD"
+                MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD"
+              elif [ -n "$SERVER_PASSWORD" ]; then
+                echo "🔍 尝试使用服务器配置密码连接..."
+                if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$SERVER_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
+                  echo "✅ MySQL 连接成功（使用服务器配置密码）"
+                  MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  # 创建临时密码文件（更安全的方式）
+                  echo "[client]" > /tmp/mysql.cnf
+                  echo "password=$SERVER_PASSWORD" >> /tmp/mysql.cnf
+                  chmod 600 /tmp/mysql.cnf
+                  MYSQL_CMD="mysql --defaults-extra-file=/tmp/mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  MYSQLDUMP_CMD="mysqldump --defaults-extra-file=/tmp/mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                else
+                  echo "❌ 使用服务器配置密码连接失败，尝试无密码连接..."
+                  if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
+                    echo "✅ MySQL 连接成功（无密码）"
+                    MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                    MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  else
+                    echo "❌ MySQL 连接失败，跳过备份"
+                    exit 0
+                  fi
+                fi
+              else
+                echo "❌ 使用传递的密码连接失败，尝试无密码连接..."
+                if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
+                  echo "✅ MySQL 连接成功（无密码）"
+                  MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                else
+                  echo "❌ MySQL 连接失败，跳过备份"
+                  exit 0
+                fi
+              fi
+            elif [ -n "$SERVER_PASSWORD" ]; then
+              echo "🔍 尝试使用服务器配置密码连接..."
+              if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$SERVER_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
+                echo "✅ MySQL 连接成功（使用服务器配置密码）"
+                MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                # 创建临时密码文件（更安全的方式）
+                echo "[client]" > /tmp/mysql.cnf
+                echo "password=$SERVER_PASSWORD" >> /tmp/mysql.cnf
+                chmod 600 /tmp/mysql.cnf
+                MYSQL_CMD="mysql --defaults-extra-file=/tmp/mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                MYSQLDUMP_CMD="mysqldump --defaults-extra-file=/tmp/mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+              else
+                echo "❌ 使用服务器配置密码连接失败，尝试无密码连接..."
+                if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
+                  echo "✅ MySQL 连接成功（无密码）"
+                  MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                else
+                  echo "❌ MySQL 连接失败，跳过备份"
+                  exit 0
+                fi
+              fi
+            else
+              echo "🔍 尝试无密码连接..."
+              if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
+                echo "✅ MySQL 连接成功（无密码）"
+                MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+              else
+                echo "❌ MySQL 连接失败，跳过备份"
+                exit 0
+              fi
+            fi
+            
+            # 创建备份目录
+            BACKUP_DIR="$BACKUP_ROOT/$PROJECT/mysql"
+            sudo mkdir -p "$BACKUP_DIR"
+            sudo chown -R $USER:$USER "$BACKUP_DIR"
+            
+            # 执行备份
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            BACKUP_FILE="$BACKUP_DIR/${DATABASE_NAME}_${TIMESTAMP}.sql"
+            
+            echo "📦 执行数据库备份..."
+            if [ "$BACKUP_METHOD" = "mysqldump" ]; then
+              $MYSQLDUMP_CMD \
+                --single-transaction --routines --triggers --events \
+                "$DATABASE_NAME" > "$BACKUP_FILE"
+            else
+              echo "❌ 不支持的备份方法: $BACKUP_METHOD"
+              exit 1
+            fi
+            
+            if [ $? -eq 0 ]; then
+              echo "✅ 数据库备份成功: $BACKUP_FILE"
+              
+              # 压缩备份文件
+              gzip "$BACKUP_FILE"
+              echo "📦 备份文件已压缩: ${BACKUP_FILE}.gz"
+              
+              # 清理旧备份
+              echo "🧹 清理过期备份文件..."
+              find "$BACKUP_DIR" -name "*.sql.gz" -mtime +$BACKUP_RETENTION_DAYS -delete
+              echo "✅ 过期备份文件已清理"
+              
+              # 设置定时备份任务
+              if [ -n "$MYSQL_PASSWORD" ]; then
+                CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
+              elif [ -n "$SERVER_PASSWORD" ]; then
+                # 创建定时任务使用的密码文件
+                echo "[client]" > /tmp/cron_mysql.cnf
+                echo "password=$SERVER_PASSWORD" >> /tmp/cron_mysql.cnf
+                chmod 600 /tmp/cron_mysql.cnf
+                CRON_JOB="0 2 * * * mysqldump --defaults-extra-file=/tmp/cron_mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
+              else
+                CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
+              fi
+              
+              # 检查是否已存在定时任务
+              if ! crontab -l 2>/dev/null | grep -q "$DATABASE_NAME"; then
+                echo "⏰ 设置定时备份任务..."
+                (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+                echo "✅ 定时备份任务已设置"
+              else
+                echo "📋 定时备份任务已存在"
+              fi
+            else
+              echo "❌ 数据库备份失败"
+              exit 1
+            fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          if [ -n "${{ inputs.mysql_config }}" ]; then
+            echo "backup_success=true" >> $GITHUB_OUTPUT
+            echo "backup_path=${{ inputs.backup_root }}/${{ inputs.project }}/mysql" >> $GITHUB_OUTPUT
+            echo "✅ MySQL 备份完成"
+            echo "- backup_success: true"
+            echo "- backup_path: ${{ inputs.backup_root }}/${{ inputs.project }}/mysql"
+          else
+            echo "backup_success=true" >> $GITHUB_OUTPUT
+            echo "backup_path=" >> $GITHUB_OUTPUT
+            echo "✅ 跳过 MySQL 备份"
+            echo "- backup_success: true"
+            echo "- backup_path: (跳过)"
+          fi
