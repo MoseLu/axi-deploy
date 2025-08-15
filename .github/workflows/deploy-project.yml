@@ -1129,8 +1129,8 @@ jobs:
                   echo "[client]" > /tmp/mysql.cnf
                   echo "password=$SERVER_PASSWORD" >> /tmp/mysql.cnf
                   chmod 600 /tmp/mysql.cnf
-                  MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --defaults-extra-file=/tmp/mysql.cnf"
-                  MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --defaults-extra-file=/tmp/mysql.cnf"
+                  MYSQL_CMD="mysql --defaults-extra-file=/tmp/mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  MYSQLDUMP_CMD="mysqldump --defaults-extra-file=/tmp/mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
                 else
                   echo "❌ 使用服务器配置密码连接失败，尝试无密码连接..."
                   if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
@@ -1161,8 +1161,8 @@ jobs:
                 echo "[client]" > /tmp/mysql.cnf
                 echo "password=$SERVER_PASSWORD" >> /tmp/mysql.cnf
                 chmod 600 /tmp/mysql.cnf
-                MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --defaults-extra-file=/tmp/mysql.cnf"
-                MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --defaults-extra-file=/tmp/mysql.cnf"
+                MYSQL_CMD="mysql --defaults-extra-file=/tmp/mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                MYSQLDUMP_CMD="mysqldump --defaults-extra-file=/tmp/mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
               else
                 echo "❌ 使用服务器配置密码连接失败，尝试无密码连接..."
                 if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
@@ -1225,7 +1225,7 @@ jobs:
                 echo "[client]" > /tmp/cron_mysql.cnf
                 echo "password=$SERVER_PASSWORD" >> /tmp/cron_mysql.cnf
                 chmod 600 /tmp/cron_mysql.cnf
-                CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --defaults-extra-file=/tmp/cron_mysql.cnf --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
+                CRON_JOB="0 2 * * * mysqldump --defaults-extra-file=/tmp/cron_mysql.cnf -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
               else
                 CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
               fi
