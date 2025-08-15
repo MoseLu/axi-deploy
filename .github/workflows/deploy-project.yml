@@ -134,6 +134,51 @@ jobs:
           fi
           
           echo "✅ GitHub API 访问成功"
+          
+          # 获取运行信息
+          echo "🔍 获取运行信息..."
+          RUN_INFO=$(curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}" 2>/dev/null)
+          
+          if echo "$RUN_INFO" | grep -q '"id"'; then
+            RUN_STATUS=$(echo "$RUN_INFO" | jq -r '.status // "unknown"')
+            RUN_CONCLUSION=$(echo "$RUN_INFO" | jq -r '.conclusion // "unknown"')
+            echo "✅ 运行信息获取成功"
+            echo "- 运行状态: $RUN_STATUS"
+            echo "- 运行结论: $RUN_CONCLUSION"
+          else
+            echo "❌ 运行信息获取失败"
+            echo "响应: $RUN_INFO"
+            exit 1
+          fi
+          
+          # 获取构建产物列表
+          echo "🔍 获取构建产物列表..."
+          ARTIFACTS_RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}/artifacts" 2>/dev/null)
+          
+          if echo "$ARTIFACTS_RESPONSE" | grep -q '"artifacts"'; then
+            echo "✅ 构建产物列表获取成功"
+            echo "📋 可用的构建产物:"
+            echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "  - \(.name) (大小: \(.size_in_bytes) bytes, 过期时间: \(.expires_at))"'
+            
+            # 检查是否有我们需要的构建产物
+            EXPECTED_ARTIFACT="dist-${{ inputs.project }}"
+            echo "🔍 查找构建产物: $EXPECTED_ARTIFACT"
+            
+            if echo "$ARTIFACTS_RESPONSE" | jq -e --arg name "$EXPECTED_ARTIFACT" '.artifacts[] | select(.name == $name)' > /dev/null; then
+              echo "✅ 找到目标构建产物: $EXPECTED_ARTIFACT"
+            else
+              echo "❌ 未找到目标构建产物: $EXPECTED_ARTIFACT"
+              echo "📋 可用的构建产物名称:"
+              echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[].name'
+              exit 1
+            fi
+          else
+            echo "❌ 构建产物列表获取失败"
+            echo "响应: $ARTIFACTS_RESPONSE"
+            exit 1
+          fi
 
       - name: 下载构建产物文件
         uses: actions/download-artifact@v4
