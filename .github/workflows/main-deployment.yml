@@ -48,6 +48,10 @@ on:
         required: false
         type: string
         default: ""
+      mysql_config:
+        description: 'MySQL 配置（base64 编码的 JSON）'
+        required: false
+        type: string
       skip_init:
         description: '跳过服务器初始化步骤'
         required: false
@@ -107,6 +111,8 @@ jobs:
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
       # GitHub Token (可选)
       deploy_center_pat: ${{ needs.parse-secrets.outputs.deploy_center_pat || '' }}
+      # MySQL 配置（可选）
+      mysql_config: ${{ inputs.mysql_config || '' }}
 
   # 步骤5: 配置Nginx（可选）
   configure-nginx:
