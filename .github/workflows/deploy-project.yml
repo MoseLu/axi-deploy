@@ -1092,15 +1092,71 @@ jobs:
             echo "🔍 检查 MySQL 连接..."
             echo "🔍 密码长度: ${#MYSQL_PASSWORD}"
             
+            # 尝试从服务器配置中获取密码
+            echo "🔍 尝试从服务器配置获取 MySQL 密码..."
+            SERVER_PASSWORD=""
+            
+            # 检查 init-database.sh 中的密码
+            if [ -f "/srv/apps/$PROJECT/scripts/init-database.sh" ]; then
+              echo "🔍 检查 init-database.sh 中的密码配置..."
+              SERVER_PASSWORD=$(grep -o 'DB_PASSWORD="[^"]*"' "/srv/apps/$PROJECT/scripts/init-database.sh" | cut -d'"' -f2)
+              if [ -n "$SERVER_PASSWORD" ]; then
+                echo "✅ 从 init-database.sh 获取到密码"
+              fi
+            fi
+            
+            # 检查配置文件中的密码
+            if [ -z "$SERVER_PASSWORD" ] && [ -f "/srv/apps/$PROJECT/config/config.yaml" ]; then
+              echo "🔍 检查 config.yaml 中的密码配置..."
+              SERVER_PASSWORD=$(grep -A5 "database:" "/srv/apps/$PROJECT/config/config.yaml" | grep "password:" | awk '{print $2}' | tr -d "'" | tr -d '"')
+              if [ -n "$SERVER_PASSWORD" ]; then
+                echo "✅ 从 config.yaml 获取到密码"
+              fi
+            fi
+            
             # 尝试不同的连接方式
             if [ -n "$MYSQL_PASSWORD" ]; then
-              echo "🔍 尝试使用密码连接..."
+              echo "🔍 尝试使用传递的密码连接..."
               if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
-                echo "✅ MySQL 连接成功（使用密码）"
+                echo "✅ MySQL 连接成功（使用传递的密码）"
                 MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD"
                 MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD"
+              elif [ -n "$SERVER_PASSWORD" ]; then
+                echo "🔍 尝试使用服务器配置密码连接..."
+                if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$SERVER_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
+                  echo "✅ MySQL 连接成功（使用服务器配置密码）"
+                  MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$SERVER_PASSWORD"
+                  MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$SERVER_PASSWORD"
+                else
+                  echo "❌ 使用服务器配置密码连接失败，尝试无密码连接..."
+                  if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
+                    echo "✅ MySQL 连接成功（无密码）"
+                    MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                    MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  else
+                    echo "❌ MySQL 连接失败，跳过备份"
+                    exit 0
+                  fi
+                fi
               else
-                echo "❌ 使用密码连接失败，尝试无密码连接..."
+                echo "❌ 使用传递的密码连接失败，尝试无密码连接..."
+                if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
+                  echo "✅ MySQL 连接成功（无密码）"
+                  MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                else
+                  echo "❌ MySQL 连接失败，跳过备份"
+                  exit 0
+                fi
+              fi
+            elif [ -n "$SERVER_PASSWORD" ]; then
+              echo "🔍 尝试使用服务器配置密码连接..."
+              if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$SERVER_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
+                echo "✅ MySQL 连接成功（使用服务器配置密码）"
+                MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$SERVER_PASSWORD"
+                MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$SERVER_PASSWORD"
+              else
+                echo "❌ 使用服务器配置密码连接失败，尝试无密码连接..."
                 if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
                   echo "✅ MySQL 连接成功（无密码）"
                   MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
@@ -1156,6 +1212,8 @@ jobs:
               # 设置定时备份任务
               if [ -n "$MYSQL_PASSWORD" ]; then
                 CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
+              elif [ -n "$SERVER_PASSWORD" ]; then
+                CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$SERVER_PASSWORD --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
               else
                 CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
               fi
