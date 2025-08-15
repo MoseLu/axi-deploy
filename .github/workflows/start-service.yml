@@ -224,12 +224,106 @@ jobs:
                 START_CMD=\"${{ inputs.start_cmd }}\"
                 CMD_NAME=\$(echo \"\$START_CMD\" | awk \"{print \\\$1}\")
                 
-                # 检查是否有 start.sh 脚本（优先使用）
-                if [ -f \"start.sh\" ]; then
+                # 检查是否有 start-simple.sh 脚本（优先使用简化版）
+                if [ -f \"start-simple.sh\" ]; then
+                  echo \"📋 发现 start-simple.sh 脚本，使用简化启动脚本...\"
+                  
+                  # 确保脚本有执行权限
+                  chmod +x start-simple.sh
+                  
+                  # 检查目录结构，确保在正确的目录中执行
+                  echo \"🔍 检查当前目录结构...\"
+                  echo \"📁 当前目录: \$(pwd)\"
+                  echo \"📁 当前目录内容:\"
+                  ls -la
+                  
+                  # 检查是否存在 package.json 文件
+                  if [ ! -f \"package.json\" ]; then
+                    echo \"⚠️ package.json 不存在，尝试修复目录结构...\"
+                    
+                    # 查找 package.json 文件
+                    PACKAGE_JSON_PATH=\$(find . -name \"package.json\" -type f 2>/dev/null | head -1)
+                    
+                    if [ -n \"\$PACKAGE_JSON_PATH\" ]; then
+                      echo \"🔧 找到 package.json 文件: \$PACKAGE_JSON_PATH\"
+                      
+                      # 获取 package.json 所在的目录
+                      PACKAGE_DIR=\$(dirname \"\$PACKAGE_JSON_PATH\")
+                      
+                      if [ \"\$PACKAGE_DIR\" != \".\" ]; then
+                        echo \"📁 移动 \$PACKAGE_DIR 目录下的所有文件到当前目录...\"
+                        
+                        # 移动 package.json 所在目录下的所有文件到当前目录
+                        mv \"\$PACKAGE_DIR\"/* . 2>/dev/null || true
+                        mv \"\$PACKAGE_DIR\"/.* . 2>/dev/null || true
+                        
+                        # 删除空的目录
+                        rmdir \"\$PACKAGE_DIR\" 2>/dev/null || true
+                        
+                        echo \"✅ 目录结构修复完成\"
+                        echo \"📁 修复后的目录内容:\"
+                        ls -la
+                      fi
+                    else
+                      echo \"❌ 未找到 package.json 文件，无法继续\"
+                      exit 1
+                    fi
+                  else
+                    echo \"✅ package.json 文件存在\"
+                  fi
+                  
+                  # 执行简化启动脚本
+                  echo \"📋 执行简化启动脚本: ./start-simple.sh\"
+                  ./start-simple.sh
+                  
+                  echo \"✅ 简化启动脚本执行完成\"
+                # 检查是否有 start.sh 脚本（备选方案）
+                elif [ -f \"start.sh\" ]; then
                   echo \"📋 发现 start.sh 脚本，使用启动脚本...\"
                   
                   # 确保脚本有执行权限
                   chmod +x start.sh
+                  
+                  # 检查目录结构，确保在正确的目录中执行
+                  echo \"🔍 检查当前目录结构...\"
+                  echo \"📁 当前目录: \$(pwd)\"
+                  echo \"📁 当前目录内容:\"
+                  ls -la
+                  
+                  # 检查是否存在 package.json 文件
+                  if [ ! -f \"package.json\" ]; then
+                    echo \"⚠️ package.json 不存在，尝试修复目录结构...\"
+                    
+                    # 查找 package.json 文件
+                    PACKAGE_JSON_PATH=\$(find . -name \"package.json\" -type f 2>/dev/null | head -1)
+                    
+                    if [ -n \"\$PACKAGE_JSON_PATH\" ]; then
+                      echo \"🔧 找到 package.json 文件: \$PACKAGE_JSON_PATH\"
+                      
+                      # 获取 package.json 所在的目录
+                      PACKAGE_DIR=\$(dirname \"\$PACKAGE_JSON_PATH\")
+                      
+                      if [ \"\$PACKAGE_DIR\" != \".\" ]; then
+                        echo \"📁 移动 \$PACKAGE_DIR 目录下的所有文件到当前目录...\"
+                        
+                        # 移动 package.json 所在目录下的所有文件到当前目录
+                        mv \"\$PACKAGE_DIR\"/* . 2>/dev/null || true
+                        mv \"\$PACKAGE_DIR\"/.* . 2>/dev/null || true
+                        
+                        # 删除空的目录
+                        rmdir \"\$PACKAGE_DIR\" 2>/dev/null || true
+                        
+                        echo \"✅ 目录结构修复完成\"
+                        echo \"📁 修复后的目录内容:\"
+                        ls -la
+                      fi
+                    else
+                      echo \"❌ 未找到 package.json 文件，无法继续\"
+                      exit 1
+                    fi
+                  else
+                    echo \"✅ package.json 文件存在\"
+                  fi
                   
                   # 执行启动脚本
                   echo \"📋 执行启动脚本: ./start.sh\"
