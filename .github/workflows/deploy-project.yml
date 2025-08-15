@@ -1090,11 +1090,36 @@ jobs:
             
             # 检查 MySQL 连接
             echo "🔍 检查 MySQL 连接..."
-            if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
-              echo "✅ MySQL 连接成功"
+            echo "🔍 密码长度: ${#MYSQL_PASSWORD}"
+            
+            # 尝试不同的连接方式
+            if [ -n "$MYSQL_PASSWORD" ]; then
+              echo "🔍 尝试使用密码连接..."
+              if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
+                echo "✅ MySQL 连接成功（使用密码）"
+                MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD"
+                MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD"
+              else
+                echo "❌ 使用密码连接失败，尝试无密码连接..."
+                if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
+                  echo "✅ MySQL 连接成功（无密码）"
+                  MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                  MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                else
+                  echo "❌ MySQL 连接失败，跳过备份"
+                  exit 0
+                fi
+              fi
             else
-              echo "❌ MySQL 连接失败，跳过备份"
-              exit 0
+              echo "🔍 尝试无密码连接..."
+              if mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -e "SELECT 1;" >/dev/null 2>&1; then
+                echo "✅ MySQL 连接成功（无密码）"
+                MYSQL_CMD="mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+                MYSQLDUMP_CMD="mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER"
+              else
+                echo "❌ MySQL 连接失败，跳过备份"
+                exit 0
+              fi
             fi
             
             # 创建备份目录
@@ -1108,7 +1133,7 @@ jobs:
             
             echo "📦 执行数据库备份..."
             if [ "$BACKUP_METHOD" = "mysqldump" ]; then
-              mysqldump -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" \
+              $MYSQLDUMP_CMD \
                 --single-transaction --routines --triggers --events \
                 "$DATABASE_NAME" > "$BACKUP_FILE"
             else
@@ -1129,7 +1154,11 @@ jobs:
               echo "✅ 过期备份文件已清理"
               
               # 设置定时备份任务
-              CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
+              if [ -n "$MYSQL_PASSWORD" ]; then
+                CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
+              else
+                CRON_JOB="0 2 * * * mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER --single-transaction --routines --triggers --events $DATABASE_NAME | gzip > $BACKUP_DIR/${DATABASE_NAME}_\$(date +\\%Y\\%m\\%d_\\%H\\%M\\%S).sql.gz"
+              fi
               
               # 检查是否已存在定时任务
               if ! crontab -l 2>/dev/null | grep -q "$DATABASE_NAME"; then
