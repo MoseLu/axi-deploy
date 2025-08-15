@@ -1060,7 +1060,7 @@ jobs:
 
       - name: MySQL 数据库备份
         if: inputs.deploy_type == 'backend' && inputs.mysql_config != ''
-        uses: ./.github/workflows/mysql-backup.yml
+        uses: ./.github/workflows/mysql-backup.yml@master
         with:
           project: ${{ inputs.project }}
           server_host: ${{ inputs.server_host }}
