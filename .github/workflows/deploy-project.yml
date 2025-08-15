@@ -55,39 +55,11 @@ on:
         type: string
         description: "备份根目录"
         default: "/srv/backups"
-      mysql_host:
+
+      mysql_config:
         required: false
         type: string
-        description: "MySQL 主机地址"
-        default: "localhost"
-      mysql_port:
-        required: false
-        type: string
-        description: "MySQL 端口"
-        default: "3306"
-      mysql_user:
-        required: false
-        type: string
-        description: "MySQL 用户名"
-        default: "root"
-      mysql_password:
-        required: false
-        type: string
-        description: "MySQL 密码"
-      database_name:
-        required: false
-        type: string
-        description: "数据库名称（可选，如果不提供将自动检测）"
-      backup_method:
-        required: false
-        type: string
-        description: "备份方法 (mysqldump/xtrabackup)"
-        default: "mysqldump"
-      backup_retention_days:
-        required: false
-        type: string
-        description: "备份保留天数"
-        default: "30"
+        description: "MySQL 配置（base64 编码的 JSON）"
       run_user:
         required: false
         type: string
@@ -1048,8 +1020,46 @@ jobs:
             fi
           EOF
 
+      - name: 解析 MySQL 配置
+        if: inputs.deploy_type == 'backend' && inputs.mysql_config != ''
+        id: parse-mysql-config
+        run: |
+          if [ -n "${{ inputs.mysql_config }}" ]; then
+            echo "🔍 解析 MySQL 配置..."
+            MYSQL_CONFIG_JSON=$(echo "${{ inputs.mysql_config }}" | base64 -d)
+            echo "📄 MySQL 配置: $MYSQL_CONFIG_JSON"
+            
+            # 提取各个参数
+            MYSQL_HOST=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.mysql_host // "localhost"')
+            MYSQL_PORT=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.mysql_port // "3306"')
+            MYSQL_USER=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.mysql_user // "root"')
+            MYSQL_PASSWORD=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.mysql_password // ""')
+            DATABASE_NAME=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.database_name // ""')
+            BACKUP_METHOD=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.backup_method // "mysqldump"')
+            BACKUP_RETENTION_DAYS=$(echo "$MYSQL_CONFIG_JSON" | jq -r '.backup_retention_days // "30"')
+            
+            echo "mysql_host=$MYSQL_HOST" >> $GITHUB_OUTPUT
+            echo "mysql_port=$MYSQL_PORT" >> $GITHUB_OUTPUT
+            echo "mysql_user=$MYSQL_USER" >> $GITHUB_OUTPUT
+            echo "mysql_password=$MYSQL_PASSWORD" >> $GITHUB_OUTPUT
+            echo "database_name=$DATABASE_NAME" >> $GITHUB_OUTPUT
+            echo "backup_method=$BACKUP_METHOD" >> $GITHUB_OUTPUT
+            echo "backup_retention_days=$BACKUP_RETENTION_DAYS" >> $GITHUB_OUTPUT
+            
+            echo "✅ MySQL 配置解析完成"
+          else
+            echo "📋 未提供 MySQL 配置，跳过数据库备份"
+            echo "mysql_host=localhost" >> $GITHUB_OUTPUT
+            echo "mysql_port=3306" >> $GITHUB_OUTPUT
+            echo "mysql_user=root" >> $GITHUB_OUTPUT
+            echo "mysql_password=" >> $GITHUB_OUTPUT
+            echo "database_name=" >> $GITHUB_OUTPUT
+            echo "backup_method=mysqldump" >> $GITHUB_OUTPUT
+            echo "backup_retention_days=30" >> $GITHUB_OUTPUT
+          fi
+
       - name: MySQL 数据库备份
-        if: inputs.deploy_type == 'backend'
+        if: inputs.deploy_type == 'backend' && inputs.mysql_config != ''
         uses: ./.github/workflows/mysql-backup.yml
         with:
           project: ${{ inputs.project }}
@@ -1059,13 +1069,13 @@ jobs:
           server_port: ${{ inputs.server_port }}
           apps_root: ${{ inputs.apps_root }}
           backup_root: ${{ inputs.backup_root }}
-          mysql_host: ${{ inputs.mysql_host || 'localhost' }}
-          mysql_port: ${{ inputs.mysql_port || '3306' }}
-          mysql_user: ${{ inputs.mysql_user || 'root' }}
-          mysql_password: ${{ inputs.mysql_password || '' }}
-          database_name: ${{ inputs.database_name || '' }}
-          backup_method: ${{ inputs.backup_method || 'mysqldump' }}
-          backup_retention_days: ${{ inputs.backup_retention_days || '30' }}
+          mysql_host: ${{ steps.parse-mysql-config.outputs.mysql_host }}
+          mysql_port: ${{ steps.parse-mysql-config.outputs.mysql_port }}
+          mysql_user: ${{ steps.parse-mysql-config.outputs.mysql_user }}
+          mysql_password: ${{ steps.parse-mysql-config.outputs.mysql_password }}
+          database_name: ${{ steps.parse-mysql-config.outputs.database_name }}
+          backup_method: ${{ steps.parse-mysql-config.outputs.backup_method }}
+          backup_retention_days: ${{ steps.parse-mysql-config.outputs.backup_retention_days }}
 
       - name: 设置输出
         id: set-outputs
