@@ -103,35 +103,142 @@ jobs:
           echo "✅ 输入参数验证通过"
 
       - name: 下载构建产物
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ inputs.project }}
-          path: ./artifacts
-          github-token: ${{ inputs.deploy_center_pat || github.token }}
-
-      - name: 验证下载结果
         run: |
+          # 彻底清理旧文件和目录
+          echo "🧹 清理旧文件..."
+          rm -rf dist-${{ inputs.project }}/ || true
+          rm -f dist-${{ inputs.project }}.zip || true
+          rm -rf backend/ || true
+          rm -rf frontend/ || true
+          rm -rf node_modules/ || true
+          rm -f package*.json || true
+          rm -f *.js || true
+          rm -f *.ts || true
+          rm -f deploy.sh || true
+          rm -f start.sh || true
+          
+          # 确保工作目录干净
+          echo "📁 当前工作目录内容:"
+          ls -la
+          
+          # 下载构建产物
+          echo "⬇️ 开始下载构建产物..."
+          gh run download ${{ inputs.run_id }} \
+            --name "dist-${{ inputs.project }}" \
+            --dir . \
+            --repo ${{ inputs.source_repo }}
+          
+          # 验证下载结果
           echo "🔍 验证下载结果..."
           
-          if [ -d "./artifacts" ]; then
-            echo "✅ 构建产物目录存在"
-            echo "📁 构建产物内容:"
-            ls -la ./artifacts/
+          # 检查是否有 deployment.tar.gz 文件（axi-star-cloud 等项目的格式）
+          if [ -f "deployment.tar.gz" ]; then
+            echo "✅ 发现 deployment.tar.gz 文件，解压到标准目录..."
+            mkdir -p "dist-${{ inputs.project }}"
+            tar -xzf deployment.tar.gz -C "dist-${{ inputs.project }}"
+            file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+            echo "✅ deployment.tar.gz 解压成功，包含 $file_count 个文件"
+            echo "📁 解压后内容:"
+            ls -la "dist-${{ inputs.project }}/"
+          elif [ -f "dist-${{ inputs.project }}.tar.gz" ]; then
+            echo "✅ 构建产物压缩包下载成功"
+            echo "📦 解压构建产物压缩包..."
+            tar -xzf "dist-${{ inputs.project }}.tar.gz"
             
-            # 检查是否有文件
-            FILE_COUNT=$(find ./artifacts -type f | wc -l)
-            echo "📊 文件数量: $FILE_COUNT"
-            
-            if [ "$FILE_COUNT" -gt 0 ]; then
-              echo "✅ 构建产物下载成功"
+            # 检查解压后的目录结构
+            if [ -d "dist" ]; then
+              echo "✅ 压缩包解压成功，重命名目录..."
+              mv dist "dist-${{ inputs.project }}"
+              file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+              echo "✅ 构建产物解压成功，包含 $file_count 个文件"
             else
-              echo "❌ 构建产物目录为空"
+              echo "❌ 压缩包解压后未找到预期的 dist 目录"
+              echo "📁 解压后目录内容:"
+              ls -la
               exit 1
             fi
+          elif [ -d "dist-${{ inputs.project }}" ]; then
+            file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+            echo "✅ 构建产物下载成功，包含 $file_count 个文件"
+          elif [ -f "dist-${{ inputs.project }}.zip" ]; then
+            echo "✅ 构建产物压缩包下载成功"
+            unzip -q "dist-${{ inputs.project }}.zip"
+            file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+            echo "✅ 构建产物解压成功，包含 $file_count 个文件"
+          elif [ -d "docs" ] && [ -d "docs/.vitepress" ] && [ -d "docs/.vitepress/dist" ]; then
+            echo "✅ 发现 VitePress 构建产物目录结构"
+            echo "📦 移动构建产物到标准位置..."
+            mv docs/.vitepress/dist "dist-${{ inputs.project }}"
+            file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+            echo "✅ 构建产物移动成功，包含 $file_count 个文件"
           else
-            echo "❌ 构建产物目录不存在"
+            echo "📝 未找到标准构建产物，检查当前目录内容..."
+            echo "📁 当前目录内容:"
+            ls -la
+            
+            # 检查是否有其他构建产物文件
+            if [ -d "backend" ] || [ -d "frontend" ] || [ -f "package.json" ] || [ -f "index.html" ] || [ -f "star-cloud-linux" ] || [ -d "front" ]; then
+              echo "✅ 发现项目文件，创建标准构建产物目录..."
+              mkdir -p "dist-${{ inputs.project }}"
+              
+              # 移动所有项目文件到构建产物目录
+              if [ -d "backend" ]; then
+                mv backend "dist-${{ inputs.project }}/"
+              fi
+              if [ -d "frontend" ]; then
+                mv frontend "dist-${{ inputs.project }}/"
+              fi
+              if [ -d "front" ]; then
+                mv front "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "package.json" ]; then
+                mv package.json "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "index.html" ]; then
+                mv index.html "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "ecosystem.config.js" ]; then
+                mv ecosystem.config.js "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "deploy.sh" ]; then
+                mv deploy.sh "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "start.sh" ]; then
+                mv start.sh "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "star-cloud-linux" ]; then
+                mv star-cloud-linux "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "star-cloud.service" ]; then
+                mv star-cloud.service "dist-${{ inputs.project }}/"
+              fi
+              if [ -d "config" ]; then
+                mv config "dist-${{ inputs.project }}/"
+              fi
+              
+              file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+              echo "✅ 构建产物重新组织完成，包含 $file_count 个文件"
+              echo "📁 构建产物内容:"
+              ls -la "dist-${{ inputs.project }}/"
+            else
+              echo "❌ 构建产物下载失败，无法找到有效的项目文件"
+              echo "📁 当前目录内容:"
+              ls -la
+              exit 1
+            fi
+          fi
+          
+          # 最终验证
+          if [ ! -d "dist-${{ inputs.project }}" ] || [ "$(find "dist-${{ inputs.project }}" -type f | wc -l)" -eq 0 ]; then
+            echo "❌ 构建产物验证失败，目录为空或不存在"
+            echo "📁 当前目录内容:"
+            ls -la
             exit 1
           fi
+          
+          echo "✅ 构建产物验证通过"
+        env:
+          GH_TOKEN: ${{ inputs.deploy_center_pat || github.token }}
 
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1.0.3
@@ -203,15 +310,16 @@ jobs:
             echo "✅ 目标目录已准备就绪"
 
       - name: 上传构建产物到部署目录
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ inputs.server_host }}
           username: ${{ inputs.server_user }}
           key: ${{ inputs.server_key }}
           port: ${{ inputs.server_port }}
-          source: "./artifacts/*"
-          target: "${{ inputs.deploy_type == 'backend' && inputs.apps_root || inputs.static_root }}/${{ inputs.project }}/"
+          source: "./dist-${{ inputs.project }}/"
+          target: "${{ inputs.deploy_type == 'backend' && format('{0}/{1}', inputs.apps_root || '/srv/apps', inputs.project) || format('{0}/{1}', inputs.static_root || '/srv/static', inputs.project) }}"
           strip_components: 0
+          overwrite: true
 
       - name: 验证部署结果
         uses: appleboy/ssh-action@v1.0.3
@@ -224,54 +332,31 @@ jobs:
             echo "🔍 验证部署结果..."
             
             PROJECT="${{ inputs.project }}"
-            DEPLOY_TYPE="${{ inputs.deploy_type }}"
             
-            if [ "$DEPLOY_TYPE" = "backend" ]; then
-              DEPLOY_PATH="${{ inputs.apps_root }}/$PROJECT"
+            # 根据部署类型确定部署路径
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              DEPLOY_PATH="${{ inputs.apps_root || '/srv/apps' }}/$PROJECT"
             else
-              DEPLOY_PATH="${{ inputs.static_root }}/$PROJECT"
+              DEPLOY_PATH="${{ inputs.static_root || '/srv/static' }}/$PROJECT"
             fi
             
-            echo "📁 最终部署路径: $DEPLOY_PATH"
+            echo "📁 检查部署目录: $DEPLOY_PATH"
             
-            if [ -d "$DEPLOY_PATH" ]; then
-              echo "✅ 部署目录存在"
-              echo "📁 部署内容:"
-              ls -la "$DEPLOY_PATH"
-              
-              # 检查是否有 deployment.tar.gz
-              if [ -f "$DEPLOY_PATH/deployment.tar.gz" ]; then
-                echo "📦 发现 deployment.tar.gz，正在解压..."
-                cd "$DEPLOY_PATH"
-                tar -xzf deployment.tar.gz
-                rm -f deployment.tar.gz
-                echo "✅ deployment.tar.gz 已解压"
-              fi
-              
-              # 设置正确的权限
-              sudo chown -R ${{ inputs.run_user }}:${{ inputs.run_user }} "$DEPLOY_PATH"
-              sudo chmod -R 755 "$DEPLOY_PATH"
-              
-              # 检查关键文件
-              if [ "$DEPLOY_TYPE" = "backend" ]; then
-                # 后端项目检查
-                if [ -f "$DEPLOY_PATH/star-cloud-linux" ] || [ -f "$DEPLOY_PATH/main" ] || [ -f "$DEPLOY_PATH/package.json" ]; then
-                  echo "✅ 后端项目关键文件存在"
-                else
-                  echo "⚠️ 后端项目关键文件缺失"
-                fi
+            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH)" ]; then
+              final_file_count=$(find "$DEPLOY_PATH" -type f | wc -l)
+              echo "✅ 部署验证通过"
+              echo "📁 部署目录内容:"
+              ls -la $DEPLOY_PATH/
+              echo "📊 最终文件数量: $final_file_count"
+              if [ "$final_file_count" -gt 0 ]; then
+                echo "✅ 部署成功"
+                exit 0
               else
-                # 静态项目检查
-                if [ -f "$DEPLOY_PATH/index.html" ] || [ -d "$DEPLOY_PATH/dist" ]; then
-                  echo "✅ 静态项目关键文件存在"
-                else
-                  echo "⚠️ 静态项目关键文件缺失"
-                fi
+                echo "❌ 部署后目录为空"
+                exit 1
               fi
-              
-              echo "✅ 部署验证完成"
             else
-              echo "❌ 部署目录不存在"
+              echo "🚨 部署验证失败"
               exit 1
             fi
 
@@ -467,13 +552,13 @@ jobs:
         id: set-outputs
         run: |
           if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
-            DEPLOY_PATH="${{ inputs.apps_root }}/${{ inputs.project }}"
+            DEPLOY_PATH="/srv/apps/${{ inputs.project }}"
           else
-            DEPLOY_PATH="${{ inputs.static_root }}/${{ inputs.project }}"
+            DEPLOY_PATH="/srv/static/${{ inputs.project }}"
           fi
           
           echo "deploy_success=true" >> $GITHUB_OUTPUT
           echo "deploy_path=$DEPLOY_PATH" >> $GITHUB_OUTPUT
-          echo "✅ 部署完成"
+          echo "✅ 输出已设置"
           echo "- deploy_success: true"
           echo "- deploy_path: $DEPLOY_PATH"
