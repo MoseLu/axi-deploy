@@ -1,6 +1,6 @@
 name: Deploy Project
 
-description: "项目部署 - 简化的项目部署工作流，集成各个功能模块"
+description: "项目部署 - 部署项目到目标服务器"
 
 on:
   workflow_call:
@@ -102,7 +102,6 @@ jobs:
           
           echo "✅ 输入参数验证通过"
 
-      # 步骤1: 下载构建产物
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
@@ -134,9 +133,7 @@ jobs:
             exit 1
           fi
 
-      # 步骤2: 部署到服务器
       - name: 部署到服务器
-        id: deploy-to-server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ inputs.server_host }}
@@ -278,9 +275,7 @@ jobs:
               exit 1
             fi
 
-      # 步骤3: MySQL 数据库备份（仅后端项目）
       - name: MySQL 数据库备份
-        id: mysql-backup
         if: inputs.deploy_type == 'backend' && inputs.mysql_config != ''
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -467,44 +462,6 @@ jobs:
               echo "❌ 数据库备份失败"
               exit 1
             fi
-
-      # 步骤4: 部署通知
-      - name: 部署通知
-        run: |
-          echo "📢 部署完成通知..."
-          
-          PROJECT="${{ inputs.project }}"
-          SOURCE_REPO="${{ inputs.source_repo }}"
-          RUN_ID="${{ inputs.run_id }}"
-          DEPLOY_TYPE="${{ inputs.deploy_type }}"
-          SERVER_HOST="${{ inputs.server_host }}"
-          SERVER_PORT="${{ inputs.server_port }}"
-          
-          # 计算部署时间
-          DEPLOY_END_TIME=$(date +%s)
-          DEPLOY_DURATION=$((DEPLOY_END_TIME - DEPLOY_START_TIME))
-          
-          # 确定部署路径
-          if [ "$DEPLOY_TYPE" = "backend" ]; then
-            DEPLOY_PATH="${{ inputs.apps_root }}/$PROJECT"
-          else
-            DEPLOY_PATH="${{ inputs.static_root }}/$PROJECT"
-          fi
-          
-          echo "🎉 部署结果摘要 🎉"
-          echo "================================"
-          echo "项目: $PROJECT"
-          echo "状态: ✅ 成功"
-          echo "类型: $DEPLOY_TYPE"
-          echo "服务器: $SERVER_HOST:$SERVER_PORT"
-          echo "路径: $DEPLOY_PATH"
-          echo "耗时: ${DEPLOY_DURATION}秒"
-          if [ "${{ inputs.deploy_type }}" == "backend" ] && [ -n "${{ inputs.mysql_config }}" ]; then
-            echo "备份: ✅ 成功 (${{ inputs.backup_root }}/$PROJECT/mysql)"
-          else
-            echo "备份: ⏭️ 跳过"
-          fi
-          echo "================================"
 
       - name: 设置输出
         id: set-outputs
