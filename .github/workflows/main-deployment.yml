@@ -84,7 +84,14 @@ jobs:
             MYSQL_CONFIG=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.mysql_config // ""')
             SKIP_INIT=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.skip_init // false')
             
-            echo "nginx_config=$NGINX_CONFIG" >> $GITHUB_OUTPUT
+            # 将 Nginx 配置转换为 base64 编码，避免多行文本问题
+            if [ -n "$NGINX_CONFIG" ]; then
+              NGINX_CONFIG_B64=$(echo "$NGINX_CONFIG" | base64 -w 0)
+            else
+              NGINX_CONFIG_B64=""
+            fi
+            
+            echo "nginx_config=$NGINX_CONFIG_B64" >> $GITHUB_OUTPUT
             echo "test_url=$TEST_URL" >> $GITHUB_OUTPUT
             echo "start_cmd=$START_CMD" >> $GITHUB_OUTPUT
             echo "service_port=$SERVICE_PORT" >> $GITHUB_OUTPUT

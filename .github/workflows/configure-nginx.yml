@@ -238,7 +238,20 @@ jobs:
                 fi
               else
                 echo '📝 使用提供的Nginx配置...'
-                CLEANED_CONFIG='${{ inputs.nginx_config }}'
+                # 检查是否是 base64 编码的配置
+                NGINX_CONFIG='${{ inputs.nginx_config }}'
+                if [ -n "$NGINX_CONFIG" ]; then
+                  # 尝试解码 base64 配置
+                  if echo "$NGINX_CONFIG" | base64 -d > /dev/null 2>&1; then
+                    echo '🔍 检测到 base64 编码的 Nginx 配置，正在解码...'
+                    CLEANED_CONFIG=$(echo "$NGINX_CONFIG" | base64 -d)
+                  else
+                    echo '📝 使用原始 Nginx 配置...'
+                    CLEANED_CONFIG="$NGINX_CONFIG"
+                  fi
+                else
+                  CLEANED_CONFIG=""
+                fi
               fi
               
               # 生成路由配置文件
