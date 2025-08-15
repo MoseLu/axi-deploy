@@ -186,28 +186,35 @@ jobs:
           name: dist-${{ inputs.project }}
           path: ./artifacts
           github-token: ${{ inputs.deploy_center_pat || github.token }}
+        continue-on-error: true
 
-      - name: 验证下载结果
+      - name: 检查下载结果
         run: |
-          echo "🔍 验证下载结果..."
+          echo "🔍 检查下载结果..."
           
-          if [ -d "./artifacts" ]; then
-            echo "✅ 构建产物目录存在"
+          if [ -d "./artifacts" ] && [ "$(find ./artifacts -type f | wc -l)" -gt 0 ]; then
+            echo "✅ 构建产物下载成功"
             echo "📁 构建产物内容:"
             ls -la ./artifacts/
-            
-            # 检查是否有文件
-            FILE_COUNT=$(find ./artifacts -type f | wc -l)
-            echo "📊 文件数量: $FILE_COUNT"
-            
-            if [ "$FILE_COUNT" -gt 0 ]; then
-              echo "✅ 构建产物下载成功"
-            else
-              echo "❌ 构建产物目录为空"
-              exit 1
-            fi
           else
-            echo "❌ 构建产物目录不存在"
+            echo "❌ 构建产物下载失败"
+            echo ""
+            echo "🔍 可能的原因:"
+            echo "1. 构建产物已过期（默认保留7天）"
+            echo "2. 构建产物名称不匹配"
+            echo "3. 构建运行失败或未完成"
+            echo "4. 权限不足"
+            echo ""
+            echo "📋 建议解决方案:"
+            echo "1. 重新触发构建: 在 ${{ inputs.source_repo }} 仓库中重新运行构建工作流"
+            echo "2. 检查构建状态: 访问 https://github.com/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}"
+            echo "3. 验证构建产物名称: 确保构建产物名称为 'dist-${{ inputs.project }}'"
+            echo "4. 检查权限: 确保部署中心有访问源仓库的权限"
+            echo ""
+            echo "🔗 相关链接:"
+            echo "- 构建运行: https://github.com/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}"
+            echo "- 构建产物: https://github.com/${{ inputs.source_repo }}/actions/runs/${{ inputs.run_id }}/artifacts"
+            echo ""
             exit 1
           fi
 
