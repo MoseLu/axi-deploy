@@ -261,7 +261,17 @@ jobs:
           
           # 验证下载结果
           echo "🔍 验证下载结果..."
-          if [ -f "dist-${{ inputs.project }}.tar.gz" ]; then
+          
+          # 检查是否有 deployment.tar.gz 文件（axi-star-cloud 等项目的格式）
+          if [ -f "deployment.tar.gz" ]; then
+            echo "✅ 发现 deployment.tar.gz 文件，解压到标准目录..."
+            mkdir -p "dist-${{ inputs.project }}"
+            tar -xzf deployment.tar.gz -C "dist-${{ inputs.project }}"
+            file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
+            echo "✅ deployment.tar.gz 解压成功，包含 $file_count 个文件"
+            echo "📁 解压后内容:"
+            ls -la "dist-${{ inputs.project }}/"
+          elif [ -f "dist-${{ inputs.project }}.tar.gz" ]; then
             echo "✅ 构建产物压缩包下载成功"
             echo "📦 解压构建产物压缩包..."
             tar -xzf "dist-${{ inputs.project }}.tar.gz"
@@ -298,7 +308,7 @@ jobs:
             ls -la
             
             # 检查是否有其他构建产物文件
-            if [ -d "backend" ] || [ -d "frontend" ] || [ -f "package.json" ] || [ -f "index.html" ]; then
+            if [ -d "backend" ] || [ -d "frontend" ] || [ -f "package.json" ] || [ -f "index.html" ] || [ -f "star-cloud-linux" ] || [ -d "front" ]; then
               echo "✅ 发现项目文件，创建标准构建产物目录..."
               mkdir -p "dist-${{ inputs.project }}"
               
@@ -308,6 +318,9 @@ jobs:
               fi
               if [ -d "frontend" ]; then
                 mv frontend "dist-${{ inputs.project }}/"
+              fi
+              if [ -d "front" ]; then
+                mv front "dist-${{ inputs.project }}/"
               fi
               if [ -f "package.json" ]; then
                 mv package.json "dist-${{ inputs.project }}/"
@@ -324,6 +337,15 @@ jobs:
               if [ -f "start.sh" ]; then
                 mv start.sh "dist-${{ inputs.project }}/"
               fi
+              if [ -f "star-cloud-linux" ]; then
+                mv star-cloud-linux "dist-${{ inputs.project }}/"
+              fi
+              if [ -f "star-cloud.service" ]; then
+                mv star-cloud.service "dist-${{ inputs.project }}/"
+              fi
+              if [ -d "config" ]; then
+                mv config "dist-${{ inputs.project }}/"
+              fi
               
               file_count=$(find "dist-${{ inputs.project }}" -type f | wc -l)
               echo "✅ 构建产物重新组织完成，包含 $file_count 个文件"
@@ -331,6 +353,8 @@ jobs:
               ls -la "dist-${{ inputs.project }}/"
             else
               echo "❌ 构建产物下载失败，无法找到有效的项目文件"
+              echo "📁 当前目录内容:"
+              ls -la
               exit 1
             fi
           fi
@@ -366,12 +390,20 @@ jobs:
             tar -tzf "dist-${{ inputs.project }}.tar.gz" | head -20
           fi
           
+          if [ -f "deployment.tar.gz" ]; then
+            echo "✅ 找到部署压缩包: deployment.tar.gz"
+            echo "📊 压缩包大小: $(du -h deployment.tar.gz | cut -f1)"
+            echo "📁 压缩包内容预览:"
+            tar -tzf deployment.tar.gz | head -20
+          fi
+          
           echo ""
           echo "🔍 检查构建产物目录..."
           if [ -d "./dist-${{ inputs.project }}" ]; then
             echo "✅ 找到构建产物目录"
             echo "📁 构建产物内容:"
             ls -la "./dist-${{ inputs.project }}/"
+            echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
           else
             echo "📝 构建产物目录不存在，检查当前目录内容..."
             echo "📁 当前目录内容:"
@@ -380,35 +412,6 @@ jobs:
             echo "🔍 所有文件和目录:"
             find . -type f -maxdepth 2
             find . -type d -maxdepth 2
-            
-            # 检查是否有压缩包
-            if [ -f "deployment.tar.gz" ]; then
-              echo "✅ 发现部署压缩包，正在解压..."
-              mkdir -p "./dist-${{ inputs.project }}"
-              tar -xzf deployment.tar.gz -C "./dist-${{ inputs.project }}"
-              echo "✅ 部署压缩包解压完成"
-              echo "📁 构建产物内容:"
-              ls -la "./dist-${{ inputs.project }}/"
-              echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
-            # 检查当前目录是否包含构建产物文件
-            elif [ -f "index.html" ] || [ -f "package.json" ] || [ -d "assets" ]; then
-              echo "✅ 发现构建产物文件在当前目录，创建标准目录结构..."
-              mkdir -p "./dist-${{ inputs.project }}"
-              # 移动所有文件到构建产物目录（除了隐藏文件）
-              find . -maxdepth 1 -type f ! -name ".*" -exec mv {} "./dist-${{ inputs.project }}/" \;
-              find . -maxdepth 1 -type d ! -name "." ! -name ".*" -exec mv {} "./dist-${{ inputs.project }}/" \;
-              echo "✅ 构建产物已移动到标准目录: ./dist-${{ inputs.project }}"
-              echo "📁 构建产物内容:"
-              ls -la "./dist-${{ inputs.project }}/"
-              echo "📊 文件数量: $(find "./dist-${{ inputs.project }}" -type f | wc -l)"
-            else
-              echo "❌ 构建产物下载失败，无法继续部署"
-              echo "🔍 期望的文件:"
-              echo "- ./dist-${{ inputs.project }}/ (目录)"
-              echo "- deployment.tar.gz (压缩包)"
-              echo "- index.html, package.json, assets/ (静态文件)"
-              exit 1
-            fi
           fi
 
       - name: 调试SSH参数
