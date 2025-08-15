@@ -27,36 +27,14 @@ on:
         options:
           - static
           - backend
-      nginx_config:
-        description: 'Nginx配置（可选）'
-        required: false
-        type: string
-      test_url:
-        description: '测试URL（可选）'
-        required: false
-        type: string
-      start_cmd:
-        description: '启动命令（后端项目）'
-        required: false
-        type: string
       deploy_secrets:
         description: '部署密钥 (JSON格式或base64编码的JSON: {"SERVER_HOST":"host","SERVER_PORT":"port","SERVER_USER":"user","SERVER_KEY":"key","DEPLOY_CENTER_PAT":"pat"})，DEPLOY_CENTER_PAT可选，默认使用内置Token'
         required: true
         type: string
-      service_port:
-        description: '服务端口（可选，默认从配置文件获取）'
+      deploy_config:
+        description: '部署配置 (base64编码的JSON: {"nginx_config":"...","test_url":"...","start_cmd":"...","service_port":"...","mysql_config":"...","skip_init":false})'
         required: false
         type: string
-        default: ""
-      mysql_config:
-        description: 'MySQL 配置（base64 编码的 JSON）'
-        required: false
-        type: string
-      skip_init:
-        description: '跳过服务器初始化步骤'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   # 步骤1: 验证构建产物可用性
@@ -78,10 +56,56 @@ jobs:
       # 部署密钥 (JSON格式或base64编码的JSON)
       deploy_secrets: ${{ inputs.deploy_secrets }}
 
+  # 步骤2.5: 解析部署配置
+  parse-deploy-config:
+    needs: [validate-artifact]
+    runs-on: ubuntu-latest
+    outputs:
+      nginx_config: ${{ steps.parse-config.outputs.nginx_config }}
+      test_url: ${{ steps.parse-config.outputs.test_url }}
+      start_cmd: ${{ steps.parse-config.outputs.start_cmd }}
+      service_port: ${{ steps.parse-config.outputs.service_port }}
+      mysql_config: ${{ steps.parse-config.outputs.mysql_config }}
+      skip_init: ${{ steps.parse-config.outputs.skip_init }}
+    steps:
+      - name: 解析部署配置
+        id: parse-config
+        run: |
+          if [ -n "${{ inputs.deploy_config }}" ]; then
+            echo "🔍 解析部署配置..."
+            DEPLOY_CONFIG_JSON=$(echo "${{ inputs.deploy_config }}" | base64 -d)
+            echo "📄 部署配置: $DEPLOY_CONFIG_JSON"
+            
+            # 提取各个参数
+            NGINX_CONFIG=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.nginx_config // ""')
+            TEST_URL=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.test_url // ""')
+            START_CMD=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.start_cmd // ""')
+            SERVICE_PORT=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.service_port // ""')
+            MYSQL_CONFIG=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.mysql_config // ""')
+            SKIP_INIT=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.skip_init // false')
+            
+            echo "nginx_config=$NGINX_CONFIG" >> $GITHUB_OUTPUT
+            echo "test_url=$TEST_URL" >> $GITHUB_OUTPUT
+            echo "start_cmd=$START_CMD" >> $GITHUB_OUTPUT
+            echo "service_port=$SERVICE_PORT" >> $GITHUB_OUTPUT
+            echo "mysql_config=$MYSQL_CONFIG" >> $GITHUB_OUTPUT
+            echo "skip_init=$SKIP_INIT" >> $GITHUB_OUTPUT
+            
+            echo "✅ 部署配置解析完成"
+          else
+            echo "📋 未提供部署配置，使用默认值"
+            echo "nginx_config=" >> $GITHUB_OUTPUT
+            echo "test_url=" >> $GITHUB_OUTPUT
+            echo "start_cmd=" >> $GITHUB_OUTPUT
+            echo "service_port=" >> $GITHUB_OUTPUT
+            echo "mysql_config=" >> $GITHUB_OUTPUT
+            echo "skip_init=false" >> $GITHUB_OUTPUT
+          fi
+
   # 步骤3: 服务器初始化（可选，使用可复用工作流）
   server-init:
-    needs: [parse-secrets, validate-artifact]
-    if: ${{ inputs.skip_init != 'true' }}
+    needs: [parse-secrets, validate-artifact, parse-deploy-config]
+    if: ${{ needs.parse-deploy-config.outputs.skip_init != 'true' }}
     uses: MoseLu/axi-deploy/.github/workflows/server-init.yml@master
     with:
       # 服务器配置
@@ -93,7 +117,7 @@ jobs:
 
   # 步骤4: 部署项目
   deploy-project:
-    needs: [parse-secrets, validate-artifact]
+    needs: [parse-secrets, validate-artifact, parse-deploy-config]
     uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
     with:
       # 项目名称
@@ -112,12 +136,12 @@ jobs:
       # GitHub Token (可选)
       deploy_center_pat: ${{ needs.parse-secrets.outputs.deploy_center_pat || '' }}
       # MySQL 配置（可选）
-      mysql_config: ${{ inputs.mysql_config || '' }}
+      mysql_config: ${{ needs.parse-deploy-config.outputs.mysql_config || '' }}
 
   # 步骤5: 配置Nginx（可选）
   configure-nginx:
-    needs: [parse-secrets, deploy-project]
-    if: ${{ inputs.nginx_config != '' }}
+    needs: [parse-secrets, deploy-project, parse-deploy-config]
+    if: ${{ needs.parse-deploy-config.outputs.nginx_config != '' }}
     uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       # 项目名称
@@ -130,22 +154,22 @@ jobs:
       # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
       # Nginx配置
-      nginx_config: ${{ inputs.nginx_config }}
+      nginx_config: ${{ needs.parse-deploy-config.outputs.nginx_config }}
 
   # 步骤6: 启动服务（可选，仅后端项目）
   start-service:
-    needs: [parse-secrets, deploy-project, configure-nginx]
-    if: ${{ inputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
+    needs: [parse-secrets, deploy-project, configure-nginx, parse-deploy-config]
+    if: ${{ needs.parse-deploy-config.outputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
     uses: MoseLu/axi-deploy/.github/workflows/start-service.yml@master
     with:
       # 项目名称
       project: ${{ inputs.project }}
       # 启动命令
-      start_cmd: ${{ inputs.start_cmd }}
+      start_cmd: ${{ needs.parse-deploy-config.outputs.start_cmd }}
       # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
       # 服务端口（从配置文件获取）
-      service_port: ${{ inputs.service_port || '' }}
+      service_port: ${{ needs.parse-deploy-config.outputs.service_port || '' }}
       # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
@@ -154,14 +178,14 @@ jobs:
 
   # 步骤7: 测试网站 - 静态项目（可选）
   test-website-static:
-    needs: [parse-secrets, deploy-project, configure-nginx]
-    if: ${{ inputs.test_url != '' && inputs.deploy_type == 'static' }}
+    needs: [parse-secrets, deploy-project, configure-nginx, parse-deploy-config]
+    if: ${{ needs.parse-deploy-config.outputs.test_url != '' && inputs.deploy_type == 'static' }}
     uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
       # 项目名称
       project: ${{ inputs.project }}
       # 测试URL
-      test_url: ${{ inputs.test_url }}
+      test_url: ${{ needs.parse-deploy-config.outputs.test_url }}
       # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
       # 服务器配置
@@ -176,14 +200,14 @@ jobs:
 
   # 步骤8: 测试网站 - 后端项目（可选）
   test-website-backend:
-    needs: [parse-secrets, deploy-project, configure-nginx, start-service]
-    if: ${{ inputs.test_url != '' && inputs.deploy_type == 'backend' }}
+    needs: [parse-secrets, deploy-project, configure-nginx, start-service, parse-deploy-config]
+    if: ${{ needs.parse-deploy-config.outputs.test_url != '' && inputs.deploy_type == 'backend' }}
     uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
     with:
       # 项目名称
       project: ${{ inputs.project }}
       # 测试URL
-      test_url: ${{ inputs.test_url }}
+      test_url: ${{ needs.parse-deploy-config.outputs.test_url }}
       # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
       # 服务器配置
@@ -198,7 +222,7 @@ jobs:
 
   # 步骤9: 部署完成总结
   deployment-summary:
-    needs: [parse-secrets, server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website-static, test-website-backend]
+    needs: [parse-secrets, server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website-static, test-website-backend, parse-deploy-config]
     if: always()
     uses: MoseLu/axi-deploy/.github/workflows/deployment-summary.yml@master
     with:
@@ -208,7 +232,7 @@ jobs:
       source_repo: ${{ inputs.source_repo }}
       run_id: ${{ inputs.run_id }}
       # 测试信息
-      test_url: ${{ inputs.test_url }}
+      test_url: ${{ needs.parse-deploy-config.outputs.test_url }}
       # 部署路径
       deploy_path: ${{ needs.deploy-project.outputs.deploy_path || '' }}
       # 各步骤执行结果
