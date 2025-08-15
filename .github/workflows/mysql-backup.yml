@@ -1,0 +1,599 @@
+name: MySQL Database Backup
+
+description: "MySQL 数据库备份 - 为使用 MySQL 数据库的后端项目提供备份机制"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      server_host:
+        required: true
+        type: string
+        description: "服务器地址"
+      server_user:
+        required: true
+        type: string
+        description: "服务器用户"
+      server_key:
+        required: true
+        type: string
+        description: "服务器密钥"
+      server_port:
+        required: true
+        type: string
+        description: "服务器端口"
+      apps_root:
+        required: false
+        type: string
+        description: "应用目录路径"
+        default: "/srv/apps"
+      backup_root:
+        required: false
+        type: string
+        description: "备份根目录"
+        default: "/srv/backups"
+      mysql_host:
+        required: false
+        type: string
+        description: "MySQL 主机地址"
+        default: "localhost"
+      mysql_port:
+        required: false
+        type: string
+        description: "MySQL 端口"
+        default: "3306"
+      mysql_user:
+        required: false
+        type: string
+        description: "MySQL 用户名"
+        default: "root"
+      mysql_password:
+        required: false
+        type: string
+        description: "MySQL 密码"
+      database_name:
+        required: false
+        type: string
+        description: "数据库名称（可选，如果不提供将自动检测）"
+      backup_method:
+        required: false
+        type: string
+        description: "备份方法 (mysqldump/xtrabackup)"
+        default: "mysqldump"
+      backup_retention_days:
+        required: false
+        type: string
+        description: "备份保留天数"
+        default: "30"
+    outputs:
+      backup_success:
+        description: "备份是否成功"
+        value: ${{ jobs.mysql-backup.outputs.backup_success }}
+      backup_path:
+        description: "备份路径"
+        value: ${{ jobs.mysql-backup.outputs.backup_path }}
+      database_detected:
+        description: "是否检测到数据库"
+        value: ${{ jobs.mysql-backup.outputs.database_detected }}
+
+jobs:
+  mysql-backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # 备份可能需要较长时间
+    outputs:
+      backup_success: ${{ steps.set-outputs.outputs.backup_success }}
+      backup_path: ${{ steps.set-outputs.outputs.backup_path }}
+      database_detected: ${{ steps.set-outputs.outputs.database_detected }}
+    
+    steps:
+      - name: 检查 MySQL 数据库备份需求
+        id: check-mysql-backup
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔍 检查 MySQL 数据库备份需求..."
+            
+            PROJECT="${{ inputs.project }}"
+            DEPLOY_PATH="${{ inputs.apps_root || '/srv/apps' }}/$PROJECT"
+            
+            # 检查项目目录是否存在
+            if [ ! -d "$DEPLOY_PATH" ]; then
+              echo "❌ 项目目录不存在: $DEPLOY_PATH"
+              echo "database_detected=false" >> $GITHUB_OUTPUT
+              echo "backup_success=true" >> $GITHUB_OUTPUT
+              echo "backup_path=" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            # 检查是否使用 MySQL 数据库
+            MYSQL_DETECTED=false
+            DATABASE_NAME=""
+            
+            # 方法1: 检查配置文件中的数据库配置
+            echo "🔍 检查项目配置文件..."
+            
+            # 检查常见的配置文件
+            CONFIG_FILES=(
+              "$DEPLOY_PATH/config/database.yml"
+              "$DEPLOY_PATH/config/database.yaml"
+              "$DEPLOY_PATH/config/config.yml"
+              "$DEPLOY_PATH/config/config.yaml"
+              "$DEPLOY_PATH/config/production.yml"
+              "$DEPLOY_PATH/config/production.yaml"
+              "$DEPLOY_PATH/config/development.yml"
+              "$DEPLOY_PATH/config/development.yaml"
+              "$DEPLOY_PATH/.env"
+              "$DEPLOY_PATH/.env.production"
+              "$DEPLOY_PATH/.env.development"
+              "$DEPLOY_PATH/backend/config/database.yml"
+              "$DEPLOY_PATH/backend/config/database.yaml"
+              "$DEPLOY_PATH/backend/config/config.yml"
+              "$DEPLOY_PATH/backend/config/config.yaml"
+              "$DEPLOY_PATH/backend/.env"
+              "$DEPLOY_PATH/backend/.env.production"
+              "$DEPLOY_PATH/backend/.env.development"
+            )
+            
+            for config_file in "${CONFIG_FILES[@]}"; do
+              if [ -f "$config_file" ]; then
+                echo "📄 检查配置文件: $config_file"
+                
+                # 检查是否包含 MySQL 相关配置
+                if grep -qi "mysql\|mariadb" "$config_file" 2>/dev/null; then
+                  echo "✅ 发现 MySQL 配置: $config_file"
+                  MYSQL_DETECTED=true
+                  
+                  # 尝试提取数据库名称
+                  if [ -z "$DATABASE_NAME" ]; then
+                    # 从配置文件中提取数据库名称
+                    EXTRACTED_DB=$(grep -i "database\|db_name\|dbname" "$config_file" | grep -v "^#" | head -1 | sed 's/.*[:=]\s*//' | tr -d '"' | tr -d "'" | tr -d ' ')
+                    if [ -n "$EXTRACTED_DB" ]; then
+                      DATABASE_NAME="$EXTRACTED_DB"
+                      echo "📊 从配置文件提取到数据库名称: $DATABASE_NAME"
+                    fi
+                  fi
+                  break
+                fi
+              fi
+            done
+            
+            # 方法2: 检查 package.json 中的依赖
+            if [ -f "$DEPLOY_PATH/package.json" ]; then
+              echo "📄 检查 package.json 依赖..."
+              if grep -qi "mysql\|mariadb" "$DEPLOY_PATH/package.json" 2>/dev/null; then
+                echo "✅ 发现 MySQL 相关依赖"
+                MYSQL_DETECTED=true
+              fi
+            fi
+            
+            # 方法3: 检查 Go 项目的 go.mod
+            if [ -f "$DEPLOY_PATH/go.mod" ]; then
+              echo "📄 检查 go.mod 依赖..."
+              if grep -qi "mysql\|mariadb" "$DEPLOY_PATH/go.mod" 2>/dev/null; then
+                echo "✅ 发现 MySQL 相关依赖"
+                MYSQL_DETECTED=true
+              fi
+            fi
+            
+            # 方法4: 检查是否有数据库初始化脚本
+            DB_SCRIPTS=(
+              "$DEPLOY_PATH/scripts/init-database.sh"
+              "$DEPLOY_PATH/backend/scripts/init-database.sh"
+              "$DEPLOY_PATH/database/init.sql"
+              "$DEPLOY_PATH/backend/database/init.sql"
+              "$DEPLOY_PATH/migrations/"
+              "$DEPLOY_PATH/backend/migrations/"
+            )
+            
+            for script in "${DB_SCRIPTS[@]}"; do
+              if [ -f "$script" ] || [ -d "$script" ]; then
+                echo "📄 发现数据库脚本: $script"
+                if grep -qi "mysql\|mariadb" "$script" 2>/dev/null; then
+                  echo "✅ 脚本中包含 MySQL 相关配置"
+                  MYSQL_DETECTED=true
+                fi
+              fi
+            done
+            
+            # 输出检测结果
+            if [ "$MYSQL_DETECTED" = true ]; then
+              echo "✅ 检测到 MySQL 数据库使用"
+              echo "database_detected=true" >> $GITHUB_OUTPUT
+              
+              # 如果没有从配置文件提取到数据库名称，使用项目名称作为默认值
+              if [ -z "$DATABASE_NAME" ]; then
+                DATABASE_NAME="${PROJECT}_db"
+                echo "📊 使用默认数据库名称: $DATABASE_NAME"
+              fi
+              
+              echo "database_name=$DATABASE_NAME" >> $GITHUB_OUTPUT
+            else
+              echo "❌ 未检测到 MySQL 数据库使用"
+              echo "database_detected=false" >> $GITHUB_OUTPUT
+              echo "backup_success=true" >> $GITHUB_OUTPUT
+              echo "backup_path=" >> $GITHUB_OUTPUT
+            fi
+
+      - name: 检查现有备份机制
+        id: check-existing-backup
+        if: steps.check-mysql-backup.outputs.database_detected == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔍 检查现有备份机制..."
+            
+            PROJECT="${{ inputs.project }}"
+            BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/databases"
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            
+            # 检查是否存在数据库备份目录
+            if [ -d "$PROJECT_BACKUP_DIR" ]; then
+              echo "📁 发现现有数据库备份目录: $PROJECT_BACKUP_DIR"
+              
+              # 检查是否有备份文件
+              BACKUP_FILES=$(find "$PROJECT_BACKUP_DIR" -name "*.sql" -o -name "*.tar.gz" -o -name "*.backup" 2>/dev/null | wc -l)
+              if [ "$BACKUP_FILES" -gt 0 ]; then
+                echo "✅ 发现 $BACKUP_FILES 个现有备份文件"
+                echo "existing_backup=true" >> $GITHUB_OUTPUT
+              else
+                echo "📋 备份目录存在但无备份文件"
+                echo "existing_backup=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "📋 未发现现有数据库备份目录"
+              echo "existing_backup=false" >> $GITHUB_OUTPUT
+            fi
+            
+            # 检查是否有定时备份任务
+            echo "🔍 检查定时备份任务..."
+            CRON_JOBS=$(crontab -l 2>/dev/null | grep -i "$PROJECT.*backup\|backup.*$PROJECT" || echo "")
+            if [ -n "$CRON_JOBS" ]; then
+              echo "✅ 发现定时备份任务:"
+              echo "$CRON_JOBS"
+              echo "cron_backup=true" >> $GITHUB_OUTPUT
+            else
+              echo "📋 未发现定时备份任务"
+              echo "cron_backup=false" >> $GITHUB_OUTPUT
+            fi
+
+      - name: 设置 MySQL 备份环境
+        id: setup-mysql-backup
+        if: steps.check-mysql-backup.outputs.database_detected == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🔧 设置 MySQL 备份环境..."
+            
+            PROJECT="${{ inputs.project }}"
+            BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/databases"
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            
+            # 创建数据库备份目录
+            echo "📁 创建数据库备份目录: $PROJECT_BACKUP_DIR"
+            sudo mkdir -p "$PROJECT_BACKUP_DIR"
+            sudo chown ${{ inputs.server_user || 'deploy' }}:${{ inputs.server_user || 'deploy' }} "$PROJECT_BACKUP_DIR"
+            sudo chmod 755 "$PROJECT_BACKUP_DIR"
+            
+            # 检查 MySQL 客户端工具
+            echo "🔍 检查 MySQL 工具..."
+            
+            # 检查 mysqldump
+            if command -v mysqldump >/dev/null 2>&1; then
+              echo "✅ mysqldump 已安装"
+              MYSQLDUMP_AVAILABLE=true
+            else
+              echo "❌ mysqldump 未安装，尝试安装..."
+              if command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update
+                sudo apt-get install -y mysql-client
+              elif command -v yum >/dev/null 2>&1; then
+                sudo yum install -y mysql
+              elif command -v dnf >/dev/null 2>&1; then
+                sudo dnf install -y mysql
+              else
+                echo "❌ 无法安装 MySQL 客户端工具"
+                MYSQLDUMP_AVAILABLE=false
+              fi
+            fi
+            
+            # 检查 xtrabackup
+            if command -v xtrabackup >/dev/null 2>&1; then
+              echo "✅ xtrabackup 已安装"
+              XTRABACKUP_AVAILABLE=true
+            else
+              echo "📋 xtrabackup 未安装（可选工具）"
+              XTRABACKUP_AVAILABLE=false
+            fi
+            
+            # 设置备份方法
+            BACKUP_METHOD="${{ inputs.backup_method || 'mysqldump' }}"
+            if [ "$BACKUP_METHOD" = "xtrabackup" ] && [ "$XTRABACKUP_AVAILABLE" = false ]; then
+              echo "⚠️ xtrabackup 不可用，回退到 mysqldump"
+              BACKUP_METHOD="mysqldump"
+            fi
+            
+            if [ "$BACKUP_METHOD" = "mysqldump" ] && [ "$MYSQLDUMP_AVAILABLE" = false ]; then
+              echo "❌ 无法设置 MySQL 备份环境"
+              exit 1
+            fi
+            
+            echo "✅ MySQL 备份环境设置完成"
+            echo "backup_method=$BACKUP_METHOD" >> $GITHUB_OUTPUT
+
+      - name: 执行 MySQL 数据库备份
+        id: execute-mysql-backup
+        if: steps.check-mysql-backup.outputs.database_detected == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "📋 执行 MySQL 数据库备份..."
+            
+            PROJECT="${{ inputs.project }}"
+            BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/databases"
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            BACKUP_METHOD="${{ inputs.backup_method || 'mysqldump' }}"
+            
+            # MySQL 连接参数
+            MYSQL_HOST="${{ inputs.mysql_host || 'localhost' }}"
+            MYSQL_PORT="${{ inputs.mysql_port || '3306' }}"
+            MYSQL_USER="${{ inputs.mysql_user || 'root' }}"
+            MYSQL_PASSWORD="${{ inputs.mysql_password || '' }}"
+            
+            # 数据库名称
+            if [ -n "${{ inputs.database_name }}" ]; then
+              DATABASE_NAME="${{ inputs.database_name }}"
+            else
+              DATABASE_NAME="${PROJECT}_db"
+            fi
+            
+            # 生成备份文件名
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            
+            if [ "$BACKUP_METHOD" = "mysqldump" ]; then
+              echo "📋 使用 mysqldump 进行备份..."
+              
+              BACKUP_FILE="$PROJECT_BACKUP_DIR/${DATABASE_NAME}_${TIMESTAMP}.sql"
+              
+              # 构建 mysqldump 命令
+              MYSQLDUMP_CMD="mysqldump"
+              MYSQLDUMP_CMD="$MYSQLDUMP_CMD -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER"
+              
+              if [ -n "$MYSQL_PASSWORD" ]; then
+                MYSQLDUMP_CMD="$MYSQLDUMP_CMD -p$MYSQL_PASSWORD"
+              fi
+              
+              MYSQLDUMP_CMD="$MYSQLDUMP_CMD --single-transaction --routines --triggers --events"
+              MYSQLDUMP_CMD="$MYSQLDUMP_CMD --add-drop-database --create-options"
+              MYSQLDUMP_CMD="$MYSQLDUMP_CMD --databases $DATABASE_NAME"
+              MYSQLDUMP_CMD="$MYSQLDUMP_CMD > $BACKUP_FILE"
+              
+              echo "🔧 执行备份命令: $MYSQLDUMP_CMD"
+              
+              # 执行备份
+              if eval $MYSQLDUMP_CMD; then
+                echo "✅ mysqldump 备份成功: $BACKUP_FILE"
+                
+                # 压缩备份文件
+                gzip "$BACKUP_FILE"
+                BACKUP_FILE="${BACKUP_FILE}.gz"
+                echo "✅ 备份文件已压缩: $BACKUP_FILE"
+                
+                # 显示备份文件信息
+                BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+                echo "📊 备份文件大小: $BACKUP_SIZE"
+                
+                echo "backup_file=$BACKUP_FILE" >> $GITHUB_OUTPUT
+                echo "backup_size=$BACKUP_SIZE" >> $GITHUB_OUTPUT
+              else
+                echo "❌ mysqldump 备份失败"
+                exit 1
+              fi
+              
+            elif [ "$BACKUP_METHOD" = "xtrabackup" ]; then
+              echo "📋 使用 xtrabackup 进行备份..."
+              
+              BACKUP_DIR="$PROJECT_BACKUP_DIR/${DATABASE_NAME}_${TIMESTAMP}"
+              BACKUP_ARCHIVE="$PROJECT_BACKUP_DIR/${DATABASE_NAME}_${TIMESTAMP}.tar.gz"
+              
+              # 构建 xtrabackup 命令
+              XTRABACKUP_CMD="xtrabackup"
+              XTRABACKUP_CMD="$XTRABACKUP_CMD --backup"
+              XTRABACKUP_CMD="$XTRABACKUP_CMD --target-dir=$BACKUP_DIR"
+              XTRABACKUP_CMD="$XTRABACKUP_CMD --host=$MYSQL_HOST"
+              XTRABACKUP_CMD="$XTRABACKUP_CMD --port=$MYSQL_PORT"
+              XTRABACKUP_CMD="$XTRABACKUP_CMD --user=$MYSQL_USER"
+              
+              if [ -n "$MYSQL_PASSWORD" ]; then
+                XTRABACKUP_CMD="$XTRABACKUP_CMD --password=$MYSQL_PASSWORD"
+              fi
+              
+              echo "🔧 执行备份命令: $XTRABACKUP_CMD"
+              
+              # 执行备份
+              if eval $XTRABACKUP_CMD; then
+                echo "✅ xtrabackup 备份成功: $BACKUP_DIR"
+                
+                # 压缩备份目录
+                tar -czf "$BACKUP_ARCHIVE" -C "$PROJECT_BACKUP_DIR" "$(basename $BACKUP_DIR)"
+                echo "✅ 备份目录已压缩: $BACKUP_ARCHIVE"
+                
+                # 删除临时备份目录
+                rm -rf "$BACKUP_DIR"
+                
+                # 显示备份文件信息
+                BACKUP_SIZE=$(du -h "$BACKUP_ARCHIVE" | cut -f1)
+                echo "📊 备份文件大小: $BACKUP_SIZE"
+                
+                echo "backup_file=$BACKUP_ARCHIVE" >> $GITHUB_OUTPUT
+                echo "backup_size=$BACKUP_SIZE" >> $GITHUB_OUTPUT
+              else
+                echo "❌ xtrabackup 备份失败"
+                exit 1
+              fi
+            fi
+            
+            echo "✅ MySQL 数据库备份完成"
+
+      - name: 设置定时备份任务
+        id: setup-cron-backup
+        if: steps.check-mysql-backup.outputs.database_detected == 'true' && steps.check-existing-backup.outputs.cron_backup == 'false'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "⏰ 设置定时备份任务..."
+            
+            PROJECT="${{ inputs.project }}"
+            BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/databases"
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            
+            # 创建备份脚本
+            BACKUP_SCRIPT="$PROJECT_BACKUP_DIR/backup.sh"
+            
+            cat > "$BACKUP_SCRIPT" << 'EOF'
+            #!/bin/bash
+            
+            # MySQL 数据库自动备份脚本
+            PROJECT="${{ inputs.project }}"
+            BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/databases"
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            
+            # MySQL 连接参数
+            MYSQL_HOST="${{ inputs.mysql_host || 'localhost' }}"
+            MYSQL_PORT="${{ inputs.mysql_port || '3306' }}"
+            MYSQL_USER="${{ inputs.mysql_user || 'root' }}"
+            MYSQL_PASSWORD="${{ inputs.mysql_password || '' }}"
+            
+            # 数据库名称
+            if [ -n "${{ inputs.database_name }}" ]; then
+              DATABASE_NAME="${{ inputs.database_name }}"
+            else
+              DATABASE_NAME="${PROJECT}_db"
+            fi
+            
+            # 备份方法
+            BACKUP_METHOD="${{ inputs.backup_method || 'mysqldump' }}"
+            
+            # 创建备份目录
+            mkdir -p "$PROJECT_BACKUP_DIR"
+            
+            # 生成备份文件名
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            
+            # 执行备份
+            if [ "$BACKUP_METHOD" = "mysqldump" ]; then
+              BACKUP_FILE="$PROJECT_BACKUP_DIR/${DATABASE_NAME}_${TIMESTAMP}.sql"
+              
+              MYSQLDUMP_CMD="mysqldump -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER"
+              if [ -n "$MYSQL_PASSWORD" ]; then
+                MYSQLDUMP_CMD="$MYSQLDUMP_CMD -p$MYSQL_PASSWORD"
+              fi
+              MYSQLDUMP_CMD="$MYSQLDUMP_CMD --single-transaction --routines --triggers --events --add-drop-database --create-options --databases $DATABASE_NAME > $BACKUP_FILE"
+              
+              if eval $MYSQLDUMP_CMD; then
+                gzip "$BACKUP_FILE"
+                echo "$(date): 自动备份成功 - ${BACKUP_FILE}.gz" >> "$PROJECT_BACKUP_DIR/backup.log"
+              else
+                echo "$(date): 自动备份失败" >> "$PROJECT_BACKUP_DIR/backup.log"
+              fi
+            fi
+            
+            # 清理旧备份文件（保留指定天数）
+            RETENTION_DAYS="${{ inputs.backup_retention_days || '30' }}"
+            find "$PROJECT_BACKUP_DIR" -name "*.sql.gz" -mtime +$RETENTION_DAYS -delete 2>/dev/null
+            find "$PROJECT_BACKUP_DIR" -name "*.tar.gz" -mtime +$RETENTION_DAYS -delete 2>/dev/null
+            EOF
+            
+            # 设置脚本权限
+            chmod +x "$BACKUP_SCRIPT"
+            echo "✅ 备份脚本已创建: $BACKUP_SCRIPT"
+            
+            # 添加定时任务（每天凌晨 2 点执行备份）
+            CRON_JOB="0 2 * * * $BACKUP_SCRIPT"
+            
+            # 获取当前用户的 crontab
+            CURRENT_CRON=$(crontab -l 2>/dev/null || echo "")
+            
+            # 检查是否已存在该项目的定时任务
+            if echo "$CURRENT_CRON" | grep -q "$PROJECT.*backup\|backup.*$PROJECT"; then
+              echo "⚠️ 已存在该项目的定时备份任务"
+            else
+              # 添加新的定时任务
+              (echo "$CURRENT_CRON"; echo "$CRON_JOB") | crontab -
+              echo "✅ 定时备份任务已添加: $CRON_JOB"
+            fi
+            
+            echo "cron_setup=true" >> $GITHUB_OUTPUT
+
+      - name: 清理旧备份文件
+        id: cleanup-old-backups
+        if: steps.check-mysql-backup.outputs.database_detected == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ inputs.server_host }}
+          username: ${{ inputs.server_user }}
+          key: ${{ inputs.server_key }}
+          port: ${{ inputs.server_port }}
+          script: |
+            echo "🧹 清理旧备份文件..."
+            
+            PROJECT="${{ inputs.project }}"
+            BACKUP_ROOT="${{ inputs.backup_root || '/srv/backups' }}/databases"
+            PROJECT_BACKUP_DIR="$BACKUP_ROOT/$PROJECT"
+            RETENTION_DAYS="${{ inputs.backup_retention_days || '30' }}"
+            
+            if [ -d "$PROJECT_BACKUP_DIR" ]; then
+              # 清理超过保留天数的备份文件
+              OLD_BACKUPS=$(find "$PROJECT_BACKUP_DIR" -name "*.sql.gz" -mtime +$RETENTION_DAYS 2>/dev/null | wc -l)
+              OLD_BACKUPS=$((OLD_BACKUPS + $(find "$PROJECT_BACKUP_DIR" -name "*.tar.gz" -mtime +$RETENTION_DAYS 2>/dev/null | wc -l)))
+              
+              if [ "$OLD_BACKUPS" -gt 0 ]; then
+                echo "🗑️ 删除 $OLD_BACKUPS 个旧备份文件..."
+                find "$PROJECT_BACKUP_DIR" -name "*.sql.gz" -mtime +$RETENTION_DAYS -delete 2>/dev/null
+                find "$PROJECT_BACKUP_DIR" -name "*.tar.gz" -mtime +$RETENTION_DAYS -delete 2>/dev/null
+                echo "✅ 旧备份文件清理完成"
+              else
+                echo "📋 没有需要清理的旧备份文件"
+              fi
+              
+              # 显示当前备份文件统计
+              TOTAL_BACKUPS=$(find "$PROJECT_BACKUP_DIR" -name "*.sql.gz" -o -name "*.tar.gz" 2>/dev/null | wc -l)
+              echo "📊 当前备份文件数量: $TOTAL_BACKUPS"
+            fi
+
+      - name: 设置输出
+        id: set-outputs
+        run: |
+          if [ "${{ steps.check-mysql-backup.outputs.database_detected }}" = "true" ]; then
+            echo "backup_success=true" >> $GITHUB_OUTPUT
+            echo "backup_path=${{ inputs.backup_root || '/srv/backups' }}/databases/${{ inputs.project }}" >> $GITHUB_OUTPUT
+            echo "database_detected=true" >> $GITHUB_OUTPUT
+            echo "✅ MySQL 数据库备份完成"
+          else
+            echo "backup_success=true" >> $GITHUB_OUTPUT
+            echo "backup_path=" >> $GITHUB_OUTPUT
+            echo "database_detected=false" >> $GITHUB_OUTPUT
+            echo "✅ 无需 MySQL 数据库备份"
+          fi

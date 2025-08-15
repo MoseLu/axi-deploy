@@ -55,6 +55,39 @@ on:
         type: string
         description: "备份根目录"
         default: "/srv/backups"
+      mysql_host:
+        required: false
+        type: string
+        description: "MySQL 主机地址"
+        default: "localhost"
+      mysql_port:
+        required: false
+        type: string
+        description: "MySQL 端口"
+        default: "3306"
+      mysql_user:
+        required: false
+        type: string
+        description: "MySQL 用户名"
+        default: "root"
+      mysql_password:
+        required: false
+        type: string
+        description: "MySQL 密码"
+      database_name:
+        required: false
+        type: string
+        description: "数据库名称（可选，如果不提供将自动检测）"
+      backup_method:
+        required: false
+        type: string
+        description: "备份方法 (mysqldump/xtrabackup)"
+        default: "mysqldump"
+      backup_retention_days:
+        required: false
+        type: string
+        description: "备份保留天数"
+        default: "30"
       run_user:
         required: false
         type: string
@@ -504,6 +537,57 @@ jobs:
               fi
             else
               echo "📋 没有旧部署需要备份"
+            fi
+            
+            # MySQL 数据库备份（仅对后端项目）
+            if [[ "${{ inputs.deploy_type }}" == "backend" ]]; then
+              echo "🗄️ 检查 MySQL 数据库备份需求..."
+              
+              # 检查是否使用 MySQL 数据库
+              MYSQL_DETECTED=false
+              
+              # 检查常见的配置文件
+              CONFIG_FILES=(
+                "$DEPLOY_PATH/config/database.yml"
+                "$DEPLOY_PATH/config/database.yaml"
+                "$DEPLOY_PATH/config/config.yml"
+                "$DEPLOY_PATH/config/config.yaml"
+                "$DEPLOY_PATH/.env"
+                "$DEPLOY_PATH/.env.production"
+                "$DEPLOY_PATH/backend/config/database.yml"
+                "$DEPLOY_PATH/backend/config/database.yaml"
+                "$DEPLOY_PATH/backend/.env"
+                "$DEPLOY_PATH/backend/.env.production"
+              )
+              
+              for config_file in "${CONFIG_FILES[@]}"; do
+                if [ -f "$config_file" ]; then
+                  if grep -qi "mysql\|mariadb" "$config_file" 2>/dev/null; then
+                    echo "✅ 发现 MySQL 配置: $config_file"
+                    MYSQL_DETECTED=true
+                    break
+                  fi
+                fi
+              done
+              
+              # 检查 package.json 或 go.mod
+              if [ -f "$DEPLOY_PATH/package.json" ] && grep -qi "mysql\|mariadb" "$DEPLOY_PATH/package.json" 2>/dev/null; then
+                echo "✅ 发现 MySQL 相关依赖"
+                MYSQL_DETECTED=true
+              fi
+              
+              if [ -f "$DEPLOY_PATH/go.mod" ] && grep -qi "mysql\|mariadb" "$DEPLOY_PATH/go.mod" 2>/dev/null; then
+                echo "✅ 发现 MySQL 相关依赖"
+                MYSQL_DETECTED=true
+              fi
+              
+              if [ "$MYSQL_DETECTED" = true ]; then
+                echo "🗄️ 检测到 MySQL 数据库，将在部署后执行数据库备份"
+                echo "mysql_backup_needed=true" > /tmp/mysql_backup_flag
+              else
+                echo "📋 未检测到 MySQL 数据库，跳过数据库备份"
+                echo "mysql_backup_needed=false" > /tmp/mysql_backup_flag
+              fi
             fi
             
             # 清理目标部署目录（避免残留文件）
@@ -963,6 +1047,25 @@ jobs:
               echo "⚠️ 备份目录不存在: $PROJECT_BACKUP_DIR"
             fi
           EOF
+
+      - name: MySQL 数据库备份
+        if: inputs.deploy_type == 'backend'
+        uses: ./.github/workflows/mysql-backup.yml
+        with:
+          project: ${{ inputs.project }}
+          server_host: ${{ inputs.server_host }}
+          server_user: ${{ inputs.server_user }}
+          server_key: ${{ inputs.server_key }}
+          server_port: ${{ inputs.server_port }}
+          apps_root: ${{ inputs.apps_root }}
+          backup_root: ${{ inputs.backup_root }}
+          mysql_host: ${{ inputs.mysql_host || 'localhost' }}
+          mysql_port: ${{ inputs.mysql_port || '3306' }}
+          mysql_user: ${{ inputs.mysql_user || 'root' }}
+          mysql_password: ${{ inputs.mysql_password || '' }}
+          database_name: ${{ inputs.database_name || '' }}
+          backup_method: ${{ inputs.backup_method || 'mysqldump' }}
+          backup_retention_days: ${{ inputs.backup_retention_days || '30' }}
 
       - name: 设置输出
         id: set-outputs

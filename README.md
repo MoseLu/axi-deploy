@@ -6,6 +6,23 @@ Axi Deploy 是一个统一的部署中心，用于管理多个项目的自动化
 
 ## 最新更新
 
+### 🗄️ MySQL 数据库备份功能 (v4.2)
+
+**新增功能：**
+- ✅ **自动检测**: 智能检测项目是否使用 MySQL 数据库
+- ✅ **双重备份**: 支持 mysqldump 和 xtrabackup 两种备份方式
+- ✅ **定时备份**: 自动设置定时备份任务（默认每天凌晨 2 点）
+- ✅ **智能清理**: 自动清理过期备份文件，可配置保留天数
+- ✅ **安全配置**: 支持自定义 MySQL 连接参数和权限管理
+- ✅ **多项目支持**: 支持 Node.js、Go、Python 等多种后端项目
+
+**备份特性：**
+- 🔍 自动检测 MySQL 配置文件、依赖和数据库名称
+- 📋 支持逻辑备份（mysqldump）和物理备份（xtrabackup）
+- ⏰ 自动设置定时备份任务，无需手动配置
+- 🧹 智能清理过期备份，节省磁盘空间
+- 🔒 安全的密码管理和文件权限设置
+
 ### 🚀 工作流优化重构 (v4.1)
 
 **主要改进：**
@@ -35,29 +52,31 @@ Axi Deploy 是一个统一的部署中心，用于管理多个项目的自动化
     │ 5. configure-nginx.yml (可选)  │ ← 配置Nginx
     │ 6. start-service.yml (可选)    │ ← 启动服务
     │ 7. test-website.yml (可选)     │ ← 测试网站
-    │ 8. deployment-summary.yml      │ ← 部署总结
+    │ 8. mysql-backup.yml (可选)     │ ← MySQL 数据库备份 🆕
+    │ 9. deployment-summary.yml      │ ← 部署总结
     └─────────────────────────────────┘
                 ↓
     ┌─────────────────────────────────┐
     │ 辅助和运维工作流 (可选增强)     │
-    │ 9. download-and-validate.yml   │ ← 下载验证
-    │ 10. backup-deployment.yml      │ ← 备份部署
-    │ 11. rollback.yml               │ ← 部署回滚
-    │ 12. cleanup.yml                │ ← 清理维护
-    │ 13. diagnose.yml               │ ← 问题诊断
-    │ 14. health-check.yml           │ ← 健康检查
-    │ 15. repository_dispatch_handler.yml ← 仓库分发处理
+    │ 10. download-and-validate.yml  │ ← 下载验证
+    │ 11. backup-deployment.yml      │ ← 备份部署
+    │ 12. rollback.yml               │ ← 部署回滚
+    │ 13. cleanup.yml                │ ← 清理维护
+    │ 14. diagnose.yml               │ ← 问题诊断
+    │ 15. health-check.yml           │ ← 健康检查
+    │ 16. repository_dispatch_handler.yml ← 仓库分发处理
     └─────────────────────────────────┘
 ```
 
 **优化详情：**
 - **删除的冗余工作流**：deployment-orchestrator.yml, test-deploy.yml, download-artifact.yml, diagnose-artifact.yml, upload-files.yml
 - **功能增强**：validate-artifact.yml 添加详细诊断功能
-- **优化结果**：从21个工作流减少到16个，减少23.8%
+- **新增功能**：mysql-backup.yml MySQL 数据库自动备份
+- **优化结果**：从21个工作流减少到17个，减少19.0%
 
 ## 工作流分类
 
-### 🎯 核心部署工作流 (MVP必需 - 8个)
+### 🎯 核心部署工作流 (MVP必需 - 9个)
 
 #### 1. `main-deployment.yml` - 主部署工作流
 - **作用**: 整个部署流程的入口点，协调所有部署步骤
@@ -98,6 +117,11 @@ Axi Deploy 是一个统一的部署中心，用于管理多个项目的自动化
 - **作用**: 验证部署后的网站可访问性
 - **功能**: HTTP/HTTPS访问测试、Nginx配置验证、部署文件检查
 - **输出**: test_success
+
+#### 9. `mysql-backup.yml` - MySQL 数据库备份 🆕
+- **作用**: 为使用 MySQL 数据库的后端项目提供自动备份机制
+- **功能**: 自动检测 MySQL 使用、执行数据库备份、设置定时备份任务
+- **输出**: backup_success, backup_path, database_detected
 
 #### 9. `deployment-summary.yml` - 部署完成总结
 - **作用**: 显示部署结果和状态信息
