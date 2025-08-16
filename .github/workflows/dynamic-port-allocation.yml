@@ -227,13 +227,36 @@ jobs:
                      echo "⚠️ Go 配置文件不存在: $config_file"
                    fi
                    
-                   # 更新开发环境配置文件
-                   local dev_config_file="$project_dir/backend/config/config.yaml"
-                   if [ -f "$dev_config_file" ]; then
-                     echo "📝 更新开发环境配置文件: $dev_config_file"
-                     sudo sed -i "s/port: '8080'/port: '$port'/" "$dev_config_file"
-                     echo "✅ 开发环境配置文件已更新: 8080 -> $port"
-                   fi
+                                       # 更新开发环境配置文件
+                    local dev_config_file="$project_dir/backend/config/config.yaml"
+                    if [ -f "$dev_config_file" ]; then
+                      echo "📝 更新开发环境配置文件: $dev_config_file"
+                      sudo sed -i "s/port: '8080'/port: '$port'/" "$dev_config_file"
+                      echo "✅ 开发环境配置文件已更新: 8080 -> $port"
+                    fi
+                    
+                    # 更新 systemd 服务文件
+                    local service_file="$project_dir/star-cloud.service"
+                    if [ -f "$service_file" ]; then
+                      echo "📝 更新 systemd 服务文件: $service_file"
+                      # 备份原服务文件
+                      sudo cp "$service_file" "$service_file.backup.$(date +%Y%m%d_%H%M%S)"
+                      # 添加或更新环境变量
+                      if grep -q "Environment=" "$service_file"; then
+                        # 如果已有 Environment 行，更新或添加端口
+                        if grep -q "SERVICE_PORT=" "$service_file"; then
+                          sudo sed -i "s/SERVICE_PORT=.*/SERVICE_PORT=$port/" "$service_file"
+                        else
+                          sudo sed -i "/Environment=/ s/$/ SERVICE_PORT=$port/" "$service_file"
+                        fi
+                      else
+                        # 如果没有 Environment 行，添加新的
+                        sudo sed -i "/User=deploy/a Environment=SERVICE_PORT=$port" "$service_file"
+                      fi
+                      echo "✅ systemd 服务文件已更新: 添加 SERVICE_PORT=$port"
+                    else
+                      echo "⚠️ systemd 服务文件不存在: $service_file"
+                    fi
                    ;;
                  "axi-project-dashboard")
                    # 更新 Node.js 项目的配置文件
