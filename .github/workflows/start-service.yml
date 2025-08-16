@@ -124,6 +124,58 @@ jobs:
           
           echo "service_port=$SERVICE_PORT" >> $GITHUB_OUTPUT
 
+      - name: 动态端口检查和分配
+        id: port-allocation
+        run: |
+          PROJECT_NAME="${{ inputs.project }}"
+          CURRENT_PORT="${{ steps.get-port.outputs.service_port }}"
+          
+          echo "🔧 动态端口检查和分配..."
+          echo "- 项目: $PROJECT_NAME"
+          echo "- 当前端口: $CURRENT_PORT"
+          
+          # 上传动态端口分配脚本到服务器
+          echo "📤 上传动态端口分配脚本..."
+          scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -P ${{ inputs.server_port }} scripts/dynamic-port-allocator.sh ${{ inputs.server_user }}@${{ inputs.server_host }}:/tmp/
+          
+          # 在服务器上执行端口检查和分配
+          ALLOCATION_RESULT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
+            chmod +x /tmp/dynamic-port-allocator.sh
+            
+            # 检查当前端口是否可用
+            if /tmp/dynamic-port-allocator.sh check '$PROJECT_NAME' 2>/dev/null; then
+              echo 'PORT_AVAILABLE'
+            else
+              echo 'PORT_CONFLICT'
+              # 重新分配端口
+              NEW_PORT=\$(/tmp/dynamic-port-allocator.sh allocate '$PROJECT_NAME' '$CURRENT_PORT' 2>/dev/null)
+              if [ -n \"\$NEW_PORT\" ]; then
+                echo \"NEW_PORT:\$NEW_PORT\"
+              else
+                echo 'ALLOCATION_FAILED'
+              fi
+            fi
+          " 2>/dev/null || echo "SSH_FAILED")
+          
+          if echo "$ALLOCATION_RESULT" | grep -q "PORT_AVAILABLE"; then
+            echo "✅ 端口 $CURRENT_PORT 可用"
+            echo "allocated_port=$CURRENT_PORT" >> $GITHUB_OUTPUT
+            echo "port_status=available" >> $GITHUB_OUTPUT
+          elif echo "$ALLOCATION_RESULT" | grep -q "NEW_PORT:"; then
+            NEW_PORT=$(echo "$ALLOCATION_RESULT" | grep "NEW_PORT:" | cut -d':' -f2)
+            echo "✅ 端口冲突已解决，新分配端口: $NEW_PORT"
+            echo "allocated_port=$NEW_PORT" >> $GITHUB_OUTPUT
+            echo "port_status=reallocated" >> $GITHUB_OUTPUT
+          elif echo "$ALLOCATION_RESULT" | grep -q "ALLOCATION_FAILED"; then
+            echo "❌ 端口分配失败"
+            echo "allocated_port=$CURRENT_PORT" >> $GITHUB_OUTPUT
+            echo "port_status=failed" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ 端口检查失败，使用原端口"
+            echo "allocated_port=$CURRENT_PORT" >> $GITHUB_OUTPUT
+            echo "port_status=unknown" >> $GITHUB_OUTPUT
+          fi
+
       - name: 检查项目目录
         run: |
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
@@ -184,28 +236,77 @@ jobs:
             # 修复服务文件
             SERVICE_FILE=\"${{ inputs.apps_root }}/${{ inputs.project }}/star-cloud.service\"
             if [ -f \"\$SERVICE_FILE\" ]; then
-              if ! grep -q \"SERVICE_PORT=8124\" \"\$SERVICE_FILE\"; then
+              # 使用动态分配的端口
+              DYNAMIC_PORT=\"${{ steps.port-allocation.outputs.allocated_port }}\"
+              if ! grep -q \"SERVICE_PORT=\$DYNAMIC_PORT\" \"\$SERVICE_FILE\"; then
                 echo \"🔧 修复服务文件，添加 SERVICE_PORT 环境变量...\"
                 sudo cp \"\$SERVICE_FILE\" \"\$SERVICE_FILE.backup.\$(date +%Y%m%d_%H%M%S)\"
-                sudo sed -i '/Environment=GIN_MODE=release/a Environment=SERVICE_PORT=8124' \"\$SERVICE_FILE\"
-                echo \"✅ 服务文件已更新\"
+                # 先删除旧的SERVICE_PORT配置（如果存在）
+                sudo sed -i '/Environment=SERVICE_PORT=/d' \"\$SERVICE_FILE\"
+                # 添加新的SERVICE_PORT配置
+                sudo sed -i '/Environment=GIN_MODE=release/a Environment=SERVICE_PORT=\$DYNAMIC_PORT' \"\$SERVICE_FILE\"
+                echo \"✅ 服务文件已更新，端口: \$DYNAMIC_PORT\"
               fi
             fi
             
             # 修复配置文件
             CONFIG_FILE=\"${{ inputs.apps_root }}/${{ inputs.project }}/backend/config/config-prod.yaml\"
             if [ -f \"\$CONFIG_FILE\" ]; then
-              if ! grep -q \"port: '8124'\" \"\$CONFIG_FILE\"; then
-                echo \"🔧 修复配置文件，更新端口为 8124...\"
+              # 使用动态分配的端口
+              DYNAMIC_PORT=\"${{ steps.port-allocation.outputs.allocated_port }}\"
+              if ! grep -q \"port: '\$DYNAMIC_PORT'\" \"\$CONFIG_FILE\"; then
+                echo \"🔧 修复配置文件，更新端口为 \$DYNAMIC_PORT...\"
                 sudo cp \"\$CONFIG_FILE\" \"\$CONFIG_FILE.backup.\$(date +%Y%m%d_%H%M%S)\"
-                sudo sed -i \"s/port: '8080'/port: '8124'/\" \"\$CONFIG_FILE\"
-                echo \"✅ 配置文件已更新\"
+                # 更新端口配置，支持多种格式
+                sudo sed -i \"s/port: '[0-9]*'/port: '\$DYNAMIC_PORT'/\" \"\$CONFIG_FILE\"
+                sudo sed -i \"s/port: [0-9]*/port: \$DYNAMIC_PORT/\" \"\$CONFIG_FILE\"
+                echo \"✅ 配置文件已更新，端口: \$DYNAMIC_PORT\"
               fi
             fi
             
             # 重新加载 systemd 配置
             sudo systemctl daemon-reload
           "
+
+      - name: 更新Nginx配置
+        id: update-nginx
+        run: |
+          PROJECT_NAME="${{ inputs.project }}"
+          ALLOCATED_PORT="${{ steps.port-allocation.outputs.allocated_port }}"
+          PORT_STATUS="${{ steps.port-allocation.outputs.port_status }}"
+          
+          echo "🔧 更新Nginx配置..."
+          echo "- 项目: $PROJECT_NAME"
+          echo "- 分配端口: $ALLOCATED_PORT"
+          echo "- 端口状态: $PORT_STATUS"
+          
+          # 只有在端口重新分配时才更新Nginx配置
+          if [ "$PORT_STATUS" = "reallocated" ]; then
+            echo "📤 上传Nginx配置更新脚本..."
+            scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -P ${{ inputs.server_port }} scripts/update-nginx-config.sh ${{ inputs.server_user }}@${{ inputs.server_host }}:/tmp/
+            
+            # 在服务器上执行Nginx配置更新
+            NGINX_UPDATE_RESULT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
+              chmod +x /tmp/update-nginx-config.sh
+              
+              if /tmp/update-nginx-config.sh update '$PROJECT_NAME' '$ALLOCATED_PORT' 2>/dev/null; then
+                echo 'NGINX_UPDATE_SUCCESS'
+              else
+                echo 'NGINX_UPDATE_FAILED'
+              fi
+            " 2>/dev/null || echo "SSH_FAILED")
+            
+            if echo "$NGINX_UPDATE_RESULT" | grep -q "NGINX_UPDATE_SUCCESS"; then
+              echo "✅ Nginx配置更新成功"
+              echo "nginx_updated=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Nginx配置更新失败"
+              echo "nginx_updated=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "ℹ️ 端口未重新分配，跳过Nginx配置更新"
+            echo "nginx_updated=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: 执行启动命令
         id: start-service
@@ -216,13 +317,13 @@ jobs:
             echo \"🚀 执行启动命令...\"
             echo \"- 项目: ${{ inputs.project }}\"
             echo \"- 启动命令: ${{ inputs.start_cmd }}\"
-            echo \"- 服务端口: ${{ steps.get-port.outputs.service_port }}\"
+            echo \"- 服务端口: ${{ steps.port-allocation.outputs.allocated_port }}\"
             
             # 检查启动脚本
             if [ -f \"start-simple.sh\" ]; then
               echo \"📋 使用简化启动脚本...\"
               chmod +x start-simple.sh
-              SERVICE_PORT=\"${{ steps.get-port.outputs.service_port }}\" ./start-simple.sh
+              SERVICE_PORT=\"${{ steps.port-allocation.outputs.allocated_port }}\" ./start-simple.sh
             elif [ -f \"start.sh\" ]; then
               echo \"📋 使用启动脚本...\"
               chmod +x start.sh
@@ -254,7 +355,7 @@ jobs:
       - name: 验证服务启动
         id: validate-service
         run: |
-          SERVICE_PORT="${{ steps.get-port.outputs.service_port }}"
+          SERVICE_PORT="${{ steps.port-allocation.outputs.allocated_port }}"
           echo "🔍 验证服务启动..."
           echo "- 服务端口: $SERVICE_PORT"
           
