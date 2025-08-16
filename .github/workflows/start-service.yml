@@ -82,34 +82,28 @@ jobs:
           
           echo "✅ 输入参数验证通过"
 
-      - name: 使用重试中心启动服务
-        id: retry-start
+      - name: 创建SSH密钥文件
         run: |
-          # 重试中心核心逻辑
-          MAX_RETRIES=3
-          RETRY_DELAY=10
-          TIMEOUT_MINUTES=15
-          STRATEGY="exponential"
-          STEP_NAME="启动服务"
-          CONTINUE_ON_ERROR=false
-          NOTIFY_ON_FAILURE=true
-          STEP_TYPE="backend_service"
-          
-          # 动态获取项目端口
+          echo '${{ inputs.server_key }}' > /tmp/ssh_key
+          chmod 600 /tmp/ssh_key
+
+      - name: 获取服务端口
+        id: get-port
+        run: |
           PROJECT_NAME="${{ inputs.project }}"
           echo "🔍 获取项目端口配置..."
           
-          # 方法1: 优先从服务器动态端口配置文件获取端口（最高优先级）
+          # 方法1: 优先从服务器动态端口配置文件获取端口
           if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} '[ -f "/srv/port-config.yml" ]' 2>/dev/null; then
             SERVICE_PORT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "grep -A 1 '^  $PROJECT_NAME:' /srv/port-config.yml | grep 'port:' | awk '{print \$2}'" 2>/dev/null)
             if [ -n "$SERVICE_PORT" ]; then
               echo "✅ 从服务器动态端口配置获取端口: $SERVICE_PORT"
             else
-              echo "⚠️  项目 '$PROJECT_NAME' 在服务器端口配置中未找到，尝试其他方法"
+              echo "⚠️ 项目 '$PROJECT_NAME' 在服务器端口配置中未找到，尝试其他方法"
             fi
           fi
           
-          # 方法2: 如果服务器配置中没有找到，从输入参数获取端口
+          # 方法2: 从输入参数获取端口
           if [ -z "$SERVICE_PORT" ] && [ ! -z "${{ inputs.service_port }}" ]; then
             SERVICE_PORT="${{ inputs.service_port }}"
             echo "✅ 从输入参数获取端口: $SERVICE_PORT"
@@ -117,561 +111,213 @@ jobs:
           elif [ -f "port-config.yml" ]; then
             SERVICE_PORT=$(grep -A 1 "^  $PROJECT_NAME:" port-config.yml | grep "port:" | awk '{print $2}')
             if [ -z "$SERVICE_PORT" ]; then
-              echo "⚠️  项目 '$PROJECT_NAME' 在本地端口配置中未找到，使用默认端口8080"
+              echo "⚠️ 项目 '$PROJECT_NAME' 在本地端口配置中未找到，使用默认端口8080"
               SERVICE_PORT="8080"
             else
               echo "✅ 从本地配置文件获取端口: $SERVICE_PORT"
             fi
           # 方法4: 使用默认端口
           else
-            echo "⚠️  端口配置文件不存在，使用默认端口8080"
+            echo "⚠️ 端口配置文件不存在，使用默认端口8080"
             SERVICE_PORT="8080"
           fi
           
-          # 服务验证配置
-          SERVICE_VALIDATION=true
-          HEALTH_ENDPOINT="/health"
-          VALIDATION_TIMEOUT=30
-          
-          # 初始化变量
-          ATTEMPTS=0
-          SUCCESS=false
-          ERROR_MESSAGE=""
-          START_TIME=$(date +%s)
-          
-          echo "🚀 开始执行启动服务重试逻辑"
-          echo "步骤名称: $STEP_NAME"
-          echo "最大重试次数: $MAX_RETRIES"
-          echo "重试间隔: $RETRY_DELAY秒"
-          echo "超时时间: $TIMEOUT_MINUTES分钟"
-          echo "重试策略: $STRATEGY"
-          echo "步骤类型: $STEP_TYPE"
-          echo "服务验证: $SERVICE_VALIDATION"
-          echo "服务端口: $SERVICE_PORT"
-          echo "健康检查端点: $HEALTH_ENDPOINT"
-          
-          # 重试逻辑
-          while [ $ATTEMPTS -le $MAX_RETRIES ]; do
-            ATTEMPTS=$((ATTEMPTS + 1))
-            echo ""
-            echo "🔄 第 $ATTEMPTS 次尝试启动服务..."
+          echo "service_port=$SERVICE_PORT" >> $GITHUB_OUTPUT
+
+      - name: 检查项目目录
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
+            cd ${{ inputs.apps_root }}/${{ inputs.project }}
+            echo \"📁 当前目录: \$(pwd)\"
             
-            # 设置超时
-            TIMEOUT_CMD="timeout ${TIMEOUT_MINUTES}m"
+            if [ ! -d \"${{ inputs.apps_root }}/${{ inputs.project }}\" ]; then
+              echo \"🚨 项目目录不存在: ${{ inputs.apps_root }}/${{ inputs.project }}\"
+              exit 1
+            fi
             
-            # 执行启动服务命令
-            if $TIMEOUT_CMD bash -c "
-              # 创建SSH密钥文件
-              echo '${{ inputs.server_key }}' > /tmp/ssh_key
-              chmod 600 /tmp/ssh_key
+            FILE_COUNT=\$(find \"${{ inputs.apps_root }}/${{ inputs.project }}\" -type f | wc -l)
+            if [ \"\$FILE_COUNT\" -eq 0 ]; then
+              echo \"🚨 项目目录为空: ${{ inputs.apps_root }}/${{ inputs.project }}\"
+              exit 1
+            fi
+            
+            echo \"✅ 项目目录验证通过，文件数量: \$FILE_COUNT\"
+          "
+
+      - name: 检查MySQL服务
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
+            echo \"🔧 检查 MySQL 服务状态...\"
+            
+            if ! systemctl is-active --quiet mysql; then
+              echo \"❌ MySQL 服务未运行，尝试启动...\"
+              sudo systemctl start mysql
+              sleep 5
+            fi
+            
+            if systemctl is-active --quiet mysql; then
+              echo \"✅ MySQL 服务已启动\"
               
-              # 直接通过SSH执行诊断和启动命令
-              ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} '
-                set -e
-                
-                echo \"🚀 执行启动命令...\"
-                echo \"- 项目: ${{ inputs.project }}\"
-                echo \"- 启动命令: ${{ inputs.start_cmd }}\"
-                
-                # 切换到项目目录
-                cd ${{ inputs.apps_root }}/${{ inputs.project }}
-                echo \"📁 当前目录: \$(pwd)\"
-                
-                # 验证项目目录是否存在
-                if [ ! -d \"${{ inputs.apps_root }}/${{ inputs.project }}\" ]; then
-                  echo \"🚨 项目目录不存在: ${{ inputs.apps_root }}/${{ inputs.project }}\"
-                  exit 1
-                fi
-                
-                # 验证项目目录不为空
-                FILE_COUNT=\$(find \"${{ inputs.apps_root }}/${{ inputs.project }}\" -type f | wc -l)
-                if [ \"\$FILE_COUNT\" -eq 0 ]; then
-                  echo \"🚨 项目目录为空: ${{ inputs.apps_root }}/${{ inputs.project }}\"
-                  exit 1
-                fi
-                
-                echo \"✅ 项目目录验证通过，文件数量: \$FILE_COUNT\"
-                
-                # 检查并修复 MySQL 服务
-                echo \"🔧 检查 MySQL 服务状态...\"
-                
-                # 检查 MySQL 服务状态
-                if ! systemctl is-active --quiet mysql; then
-                  echo \"❌ MySQL 服务未运行，尝试启动...\"
-                  sudo systemctl start mysql
-                  sleep 5
-                fi
-                
-                # 检查 MySQL 是否真的在运行
-                if systemctl is-active --quiet mysql; then
-                  echo \"✅ MySQL 服务已启动\"
-                  
-                  # 尝试连接 MySQL
-                  echo \"🔍 测试 MySQL 连接...\"
-                  if mysql -u root -p123456 -e \"SELECT 1;\" 2>/dev/null; then
-                    echo \"✅ MySQL 连接成功\"
-                  else
-                    echo \"⚠️ MySQL 连接失败，尝试其他方法...\"
-                    
-                    # 检查 MySQL 配置
-                    echo \"📋 MySQL 配置信息:\"
-                    sudo systemctl status mysql --no-pager -l || true
-                    
-                    # 尝试重启 MySQL
-                    echo \"🔄 尝试重启 MySQL 服务...\"
-                    sudo systemctl restart mysql
-                    sleep 10
-                    
-                    # 再次测试连接
-                    if mysql -u root -p123456 -e \"SELECT 1;\" 2>/dev/null; then
-                      echo \"✅ MySQL 重启后连接成功\"
-                    else
-                      echo \"❌ MySQL 连接仍然失败，但继续执行...\"
-                    fi
-                  fi
-                else
-                  echo \"❌ MySQL 服务启动失败\"
-                  echo \"📋 MySQL 服务状态:\"
-                  sudo systemctl status mysql --no-pager -l || true
-                  echo \"📋 MySQL 错误日志:\"
-                  sudo journalctl -u mysql --no-pager -n 10 || true
-                fi
-                
-                # 检查并修复服务文件
-                echo \"🔧 检查服务文件配置...\"
-                SERVICE_FILE=\"${{ inputs.apps_root }}/${{ inputs.project }}/star-cloud.service\"
-                if [ -f \"\$SERVICE_FILE\" ]; then
-                  echo \"📋 当前服务文件内容:\"
-                  cat \"\$SERVICE_FILE\"
-                  
-                  # 检查是否包含 SERVICE_PORT 环境变量
-                  if ! grep -q \"SERVICE_PORT=8124\" \"\$SERVICE_FILE\"; then
-                    echo \"🔧 修复服务文件，添加 SERVICE_PORT 环境变量...\"
-                    # 备份原文件
-                    sudo cp \"\$SERVICE_FILE\" \"\$SERVICE_FILE.backup.\$(date +%Y%m%d_%H%M%S)\"
-                    # 添加环境变量
-                    sudo sed -i '/Environment=GIN_MODE=release/a Environment=SERVICE_PORT=8124' \"\$SERVICE_FILE\"
-                    echo \"✅ 服务文件已更新\"
-                    echo \"📋 更新后的服务文件内容:\"
-                    cat \"\$SERVICE_FILE\"
-                  else
-                    echo \"✅ 服务文件已包含正确的环境变量\"
-                  fi
-                  
-                  # 显示服务文件大小
-                  echo \"📊 服务文件大小: \$(wc -c < \"\$SERVICE_FILE\") 字节\"
-                  
-                  # 验证服务文件语法
-                  echo \"🔍 验证服务文件语法...\"
-                  if sudo systemd-analyze verify \"\$SERVICE_FILE\" 2>/dev/null; then
-                    echo \"✅ 服务文件语法正确\"
-                  else
-                    echo \"⚠️ 服务文件语法可能有问题\"
-                  fi
-                else
-                  echo \"⚠️ 服务文件不存在: \$SERVICE_FILE\"
-                fi
-                
-                # 检查并修复配置文件
-                echo \"🔧 检查应用配置文件...\"
-                CONFIG_FILE=\"${{ inputs.apps_root }}/${{ inputs.project }}/backend/config/config-prod.yaml\"
-                if [ -f \"\$CONFIG_FILE\" ]; then
-                  echo \"📋 当前配置文件端口:\"
-                  grep -A 1 \"server:\" \"\$CONFIG_FILE\" | grep \"port:\" || echo \"未找到端口配置\"
-                  
-                  # 检查端口是否为 8124
-                  if ! grep -q \"port: '8124'\" \"\$CONFIG_FILE\"; then
-                    echo \"🔧 修复配置文件，更新端口为 8124...\"
-                    # 备份原文件
-                    sudo cp \"\$CONFIG_FILE\" \"\$CONFIG_FILE.backup.\$(date +%Y%m%d_%H%M%S)\"
-                    # 更新端口
-                    sudo sed -i \"s/port: '8080'/port: '8124'/\" \"\$CONFIG_FILE\"
-                    echo \"✅ 配置文件已更新\"
-                    echo \"📋 更新后的端口配置:\"
-                    grep -A 5 \"server:\" \"\$CONFIG_FILE\"
-                  else
-                    echo \"✅ 配置文件端口已正确设置为 8124\"
-                  fi
-                else
-                  echo \"⚠️ 配置文件不存在: \$CONFIG_FILE\"
-                fi
-                
-                # 重新加载 systemd 配置
-                echo \"🔧 重新加载 systemd 配置...\"
-                sudo systemctl daemon-reload
-                
-                # 详细诊断信息
-                echo \"🔍 诊断信息:\"
-                echo \"- 当前目录: \$(pwd)\"
-                echo \"- 文件列表:\"
-                ls -la
-                echo \"- backend 目录内容:\"
-                ls -la backend/ || echo \"backend 目录不存在\"
-                echo \"- 检查启动脚本:\"
-                if [ -f \"backend/index.js\" ]; then
-                  echo \"✅ backend/index.js 存在\"
-                  ls -la backend/index.js
-                  echo \"- 文件内容前10行:\"
-                  head -10 backend/index.js
-                else
-                  echo \"❌ backend/index.js 不存在\"
-                fi
-                echo \"- 检查依赖:\"
-                if [ -d \"node_modules\" ]; then
-                  echo \"✅ node_modules 存在\"
-                  ls -la node_modules/express/ || echo \"❌ express 依赖不存在\"
-                else
-                  echo \"❌ node_modules 不存在\"
-                fi
-                echo \"- 检查 ecosystem.config.js:\"
-                if [ -f \"ecosystem.config.js\" ]; then
-                  cat ecosystem.config.js
-                else
-                  echo \"❌ ecosystem.config.js 不存在\"
-                fi
-                echo \"- 检查 PM2 是否安装:\"
-                if command -v pm2 &> /dev/null; then
-                  echo \"✅ PM2 已安装: \$(pm2 --version)\"
-                else
-                  echo \"❌ PM2 未安装\"
-                fi
-                echo \"- 检查端口占用:\"
-                netstat -tlnp | grep :8090 || echo \"端口8090未被占用\"
-                
-                # 检查启动命令是否存在
-                START_CMD=\"${{ inputs.start_cmd }}\"
-                CMD_NAME=\$(echo \"\$START_CMD\" | awk \"{print \\\$1}\")
-                
-                # 检查是否有 start-simple.sh 脚本（优先使用简化版）
-                if [ -f \"start-simple.sh\" ]; then
-                  echo \"📋 发现 start-simple.sh 脚本，使用简化启动脚本...\"
-                  
-                  # 确保脚本有执行权限
-                  chmod +x start-simple.sh
-                  
-                  # 检查目录结构，确保在正确的目录中执行
-                  echo \"🔍 检查当前目录结构...\"
-                  echo \"📁 当前目录: \$(pwd)\"
-                  echo \"📁 当前目录内容:\"
-                  ls -la
-                  
-                  # 检查是否存在 package.json 文件
-                  if [ ! -f \"package.json\" ]; then
-                    echo \"⚠️ package.json 不存在，尝试修复目录结构...\"
-                    
-                    # 查找 package.json 文件
-                    PACKAGE_JSON_PATH=\$(find . -name \"package.json\" -type f 2>/dev/null | head -1)
-                    
-                    if [ -n \"\$PACKAGE_JSON_PATH\" ]; then
-                      echo \"🔧 找到 package.json 文件: \$PACKAGE_JSON_PATH\"
-                      
-                      # 获取 package.json 所在的目录
-                      PACKAGE_DIR=\$(dirname \"\$PACKAGE_JSON_PATH\")
-                      
-                      if [ \"\$PACKAGE_DIR\" != \".\" ]; then
-                        echo \"📁 移动 \$PACKAGE_DIR 目录下的所有文件到当前目录...\"
-                        
-                        # 移动 package.json 所在目录下的所有文件到当前目录
-                        mv \"\$PACKAGE_DIR\"/* . 2>/dev/null || true
-                        mv \"\$PACKAGE_DIR\"/.* . 2>/dev/null || true
-                        
-                        # 删除空的目录
-                        rmdir \"\$PACKAGE_DIR\" 2>/dev/null || true
-                        
-                        echo \"✅ 目录结构修复完成\"
-                        echo \"📁 修复后的目录内容:\"
-                        ls -la
-                      fi
-                    else
-                      echo \"❌ 未找到 package.json 文件，无法继续\"
-                      exit 1
-                    fi
-                  else
-                    echo \"✅ package.json 文件存在\"
-                  fi
-                  
-                  # 设置环境变量
-                  export SERVICE_PORT=\"$SERVICE_PORT\"
-                  echo \"🔧 设置环境变量 SERVICE_PORT=$SERVICE_PORT\"
-                  
-                  # 执行简化启动脚本
-                  echo \"📋 执行简化启动脚本: ./start-simple.sh\"
-                  SERVICE_PORT=\"$SERVICE_PORT\" ./start-simple.sh
-                  
-                  echo \"✅ 简化启动脚本执行完成\"
-                # 检查是否有 start.sh 脚本（备选方案）
-                elif [ -f \"start.sh\" ]; then
-                  echo \"📋 发现 start.sh 脚本，使用启动脚本...\"
-                  
-                  # 确保脚本有执行权限
-                  chmod +x start.sh
-                  
-                  # 检查目录结构，确保在正确的目录中执行
-                  echo \"🔍 检查当前目录结构...\"
-                  echo \"📁 当前目录: \$(pwd)\"
-                  echo \"📁 当前目录内容:\"
-                  ls -la
-                  
-                  # 检查是否存在 package.json 文件
-                  if [ ! -f \"package.json\" ]; then
-                    echo \"⚠️ package.json 不存在，尝试修复目录结构...\"
-                    
-                    # 查找 package.json 文件
-                    PACKAGE_JSON_PATH=\$(find . -name \"package.json\" -type f 2>/dev/null | head -1)
-                    
-                    if [ -n \"\$PACKAGE_JSON_PATH\" ]; then
-                      echo \"🔧 找到 package.json 文件: \$PACKAGE_JSON_PATH\"
-                      
-                      # 获取 package.json 所在的目录
-                      PACKAGE_DIR=\$(dirname \"\$PACKAGE_JSON_PATH\")
-                      
-                      if [ \"\$PACKAGE_DIR\" != \".\" ]; then
-                        echo \"📁 移动 \$PACKAGE_DIR 目录下的所有文件到当前目录...\"
-                        
-                        # 移动 package.json 所在目录下的所有文件到当前目录
-                        mv \"\$PACKAGE_DIR\"/* . 2>/dev/null || true
-                        mv \"\$PACKAGE_DIR\"/.* . 2>/dev/null || true
-                        
-                        # 删除空的目录
-                        rmdir \"\$PACKAGE_DIR\" 2>/dev/null || true
-                        
-                        echo \"✅ 目录结构修复完成\"
-                        echo \"📁 修复后的目录内容:\"
-                        ls -la
-                      fi
-                    else
-                      echo \"❌ 未找到 package.json 文件，无法继续\"
-                      exit 1
-                    fi
-                  else
-                    echo \"✅ package.json 文件存在\"
-                  fi
-                  
-                  # 执行启动脚本
-                  echo \"📋 执行启动脚本: ./start.sh\"
-                  ./start.sh
-                  
-                  echo \"✅ 启动脚本执行完成\"
-                # 检查是否有 ecosystem.config.js 文件（PM2 项目）
-                elif [ -f \"ecosystem.config.js\" ]; then
-                  echo \"📋 发现 PM2 配置文件，使用 PM2 启动...\"
-                  
-                  # 检查 PM2 是否安装
-                  if ! command -v pm2 &> /dev/null; then
-                    echo \"🚨 PM2 未安装，尝试安装...\"
-                    npm install -g pm2 || echo \"PM2 安装失败\"
-                  fi
-                  
-                  # 检查并安装依赖
-                  if [ ! -d \"node_modules\" ]; then
-                    echo \"📦 node_modules 不存在，安装依赖...\"
-                    if command -v pnpm &> /dev/null; then
-                      echo \"📦 使用 pnpm 安装依赖...\"
-                      pnpm install --prod --no-frozen-lockfile || echo \"pnpm 安装失败，尝试 npm\"
-                    fi
-                    if [ ! -d \"node_modules\" ] && command -v npm &> /dev/null; then
-                      echo \"📦 使用 npm 安装依赖...\"
-                      npm install --production || echo \"npm 安装失败\"
-                    fi
-                  else
-                    echo \"✅ node_modules 已存在\"
-                  fi
-                  
-                  # 停止现有进程（如果存在）
-                  pm2 stop dashboard-backend 2>/dev/null || echo \"没有现有进程需要停止\"
-                  pm2 delete dashboard-backend 2>/dev/null || echo \"没有现有进程需要删除\"
-                  
-                  # 使用 PM2 启动
-                  echo \"📋 使用 PM2 启动服务...\"
-                  pm2 start ecosystem.config.js
-                  
-                  # 检查启动结果
-                  echo \"📋 检查 PM2 状态...\"
-                  pm2 status
-                  echo \"📋 检查 PM2 日志...\"
-                  pm2 logs dashboard-backend --lines 10 --nostream || echo \"无法获取日志\"
-                  
-                  # 保存 PM2 配置
-                  pm2 save
-                  
-                  echo \"✅ PM2 启动命令执行完成\"
-                else
-                  # 传统启动方式
-                  if ! command -v \"\$CMD_NAME\" &> /dev/null; then
-                    echo \"⚠️ 启动命令不存在: \$CMD_NAME\"
-                    echo \"🔍 尝试查找可执行文件...\"
-                    which \"\$CMD_NAME\" || echo \"未找到可执行文件\"
-                  fi
-                  
-                  # 执行启动命令
-                  echo \"📋 执行启动命令: \$START_CMD\"
-                  \$START_CMD &
-                fi
-                
-                echo \"✅ 启动命令执行完成\"
-              '
-            "; then
-              echo "✅ 命令执行成功！"
-              
-              # 如果启用了服务验证，进行服务验证
-              if [ "$SERVICE_VALIDATION" = "true" ] && [ -n "$SERVICE_PORT" ]; then
-                echo "🔍 开始服务验证..."
-                echo "- 服务端口: $SERVICE_PORT"
-                echo "- 健康检查端点: $HEALTH_ENDPOINT"
-                echo "- 验证超时: $VALIDATION_TIMEOUT秒"
-                
-                # 等待服务启动
-                echo "⏳ 等待服务启动..."
+              if mysql -u root -p123456 -e \"SELECT 1;\" 2>/dev/null; then
+                echo \"✅ MySQL 连接成功\"
+              else
+                echo \"⚠️ MySQL 连接失败，尝试重启...\"
+                sudo systemctl restart mysql
                 sleep 10
                 
-                # 验证服务是否响应
-                VALIDATION_SUCCESS=false
-                VALIDATION_ATTEMPTS=0
-                MAX_VALIDATION_ATTEMPTS=6
-                VALIDATION_TIMEOUT=60  # 验证超时时间（秒）
-                VALIDATION_START_TIME=$(date +%s)
-                
-                while [ $VALIDATION_ATTEMPTS -lt $MAX_VALIDATION_ATTEMPTS ]; do
-                  VALIDATION_ATTEMPTS=$((VALIDATION_ATTEMPTS + 1))
-                  echo "🔍 验证尝试 $VALIDATION_ATTEMPTS/$MAX_VALIDATION_ATTEMPTS..."
-                  
-                  # 检查验证超时
-                  CURRENT_TIME=$(date +%s)
-                  ELAPSED_TIME=$((CURRENT_TIME - VALIDATION_START_TIME))
-                  if [ $ELAPSED_TIME -gt $VALIDATION_TIMEOUT ]; then
-                    echo "⏰ 验证超时（${VALIDATION_TIMEOUT}秒），停止验证"
-                    break
-                  fi
-                  
-                  # 创建SSH密钥文件用于验证
-                  echo '${{ inputs.server_key }}' > /tmp/ssh_key_validation
-                  chmod 600 /tmp/ssh_key_validation
-                  
-                  # 在服务器上执行验证
-                  VALIDATION_RESULT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key_validation -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
-                    # 检查端口是否监听
-                    if netstat -tlnp 2>/dev/null | grep -q ':$SERVICE_PORT'; then
-                      echo 'PORT_LISTENING'
-                      
-                      # 测试健康检查端点
-                      HEALTH_RESPONSE=\$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:$SERVICE_PORT$HEALTH_ENDPOINT' --connect-timeout 5 --max-time 10 2>/dev/null || echo 'connection_failed')
-                      
-                      if [ \"\$HEALTH_RESPONSE\" = \"200\" ]; then
-                        echo 'HEALTH_SUCCESS:\$HEALTH_RESPONSE'
-                      else
-                        echo 'HEALTH_FAILED:\$HEALTH_RESPONSE'
-                      fi
-                    else
-                      echo 'PORT_NOT_LISTENING'
-                    fi
-                  " 2>/dev/null || echo "SSH_FAILED")
-                  
-                  # 解析验证结果
-                  if echo "$VALIDATION_RESULT" | grep -q "PORT_LISTENING"; then
-                    echo "✅ 端口 $SERVICE_PORT 正在监听"
-                    
-                    if echo "$VALIDATION_RESULT" | grep -q "HEALTH_SUCCESS"; then
-                      HEALTH_CODE=$(echo "$VALIDATION_RESULT" | grep "HEALTH_SUCCESS" | cut -d':' -f2)
-                      echo "✅ 健康检查成功 - 状态码: $HEALTH_CODE"
-                      VALIDATION_SUCCESS=true
-                      break
-                    else
-                      HEALTH_CODE=$(echo "$VALIDATION_RESULT" | grep "HEALTH_FAILED" | cut -d':' -f2)
-                      echo "❌ 健康检查失败 - 响应: $HEALTH_CODE"
-                    fi
-                  else
-                    echo "❌ 端口 $SERVICE_PORT 未监听"
-                  fi
-                  
-                  # 如果不是最后一次验证，等待后重试验证（不重启服务）
-                  if [ $VALIDATION_ATTEMPTS -lt $MAX_VALIDATION_ATTEMPTS ]; then
-                    echo "⏳ 等待 5 秒后重试验证..."
-                    sleep 5
-                  fi
-                done
-                
-                if [ "$VALIDATION_SUCCESS" = "true" ]; then
-                  echo "✅ 服务验证成功！"
-                  SUCCESS=true
-                  break
+                if mysql -u root -p123456 -e \"SELECT 1;\" 2>/dev/null; then
+                  echo \"✅ MySQL 重启后连接成功\"
                 else
-                  echo "❌ 服务验证失败"
-                  ERROR_MESSAGE="服务启动成功但验证失败 - 端口:$SERVICE_PORT, 健康检查:$HEALTH_ENDPOINT"
-                  SUCCESS=false
+                  echo \"❌ MySQL 连接仍然失败，但继续执行...\"
                 fi
-              else
-                # 没有启用服务验证，直接认为成功
-                SUCCESS=true
-                break
               fi
             else
-              EXIT_CODE=$?
-              if [ $EXIT_CODE -eq 124 ]; then
-                ERROR_MESSAGE="启动服务超时（${TIMEOUT_MINUTES}分钟）"
-                # 超时可以重试
-                RETRYABLE=true
-              else
-                ERROR_MESSAGE="启动服务失败，退出码: $EXIT_CODE"
-                # 其他错误不重试，因为可能是配置问题
-                RETRYABLE=false
+              echo \"❌ MySQL 服务启动失败\"
+            fi
+          "
+
+      - name: 修复服务配置
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
+            cd ${{ inputs.apps_root }}/${{ inputs.project }}
+            
+            # 修复服务文件
+            SERVICE_FILE=\"${{ inputs.apps_root }}/${{ inputs.project }}/star-cloud.service\"
+            if [ -f \"\$SERVICE_FILE\" ]; then
+              if ! grep -q \"SERVICE_PORT=8124\" \"\$SERVICE_FILE\"; then
+                echo \"🔧 修复服务文件，添加 SERVICE_PORT 环境变量...\"
+                sudo cp \"\$SERVICE_FILE\" \"\$SERVICE_FILE.backup.\$(date +%Y%m%d_%H%M%S)\"
+                sudo sed -i '/Environment=GIN_MODE=release/a Environment=SERVICE_PORT=8124' \"\$SERVICE_FILE\"
+                echo \"✅ 服务文件已更新\"
               fi
-              
-              echo "❌ 启动服务失败: $ERROR_MESSAGE"
-              
-              # 检查是否还有重试机会且错误可重试
-              if [ $ATTEMPTS -le $MAX_RETRIES ] && [ "$RETRYABLE" = "true" ]; then
-                # 计算重试延迟
-                if [ "$STRATEGY" = "exponential" ]; then
-                  DELAY=$((RETRY_DELAY * (2 ** (ATTEMPTS - 1))))
-                elif [ "$STRATEGY" = "adaptive" ]; then
-                  DELAY=$((RETRY_DELAY + ATTEMPTS * 2))
+            fi
+            
+            # 修复配置文件
+            CONFIG_FILE=\"${{ inputs.apps_root }}/${{ inputs.project }}/backend/config/config-prod.yaml\"
+            if [ -f \"\$CONFIG_FILE\" ]; then
+              if ! grep -q \"port: '8124'\" \"\$CONFIG_FILE\"; then
+                echo \"🔧 修复配置文件，更新端口为 8124...\"
+                sudo cp \"\$CONFIG_FILE\" \"\$CONFIG_FILE.backup.\$(date +%Y%m%d_%H%M%S)\"
+                sudo sed -i \"s/port: '8080'/port: '8124'/\" \"\$CONFIG_FILE\"
+                echo \"✅ 配置文件已更新\"
+              fi
+            fi
+            
+            # 重新加载 systemd 配置
+            sudo systemctl daemon-reload
+          "
+
+      - name: 执行启动命令
+        id: start-service
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
+            cd ${{ inputs.apps_root }}/${{ inputs.project }}
+            
+            echo \"🚀 执行启动命令...\"
+            echo \"- 项目: ${{ inputs.project }}\"
+            echo \"- 启动命令: ${{ inputs.start_cmd }}\"
+            echo \"- 服务端口: ${{ steps.get-port.outputs.service_port }}\"
+            
+            # 检查启动脚本
+            if [ -f \"start-simple.sh\" ]; then
+              echo \"📋 使用简化启动脚本...\"
+              chmod +x start-simple.sh
+              SERVICE_PORT=\"${{ steps.get-port.outputs.service_port }}\" ./start-simple.sh
+            elif [ -f \"start.sh\" ]; then
+              echo \"📋 使用启动脚本...\"
+              chmod +x start.sh
+              ./start.sh
+            elif [ -f \"ecosystem.config.js\" ]; then
+              echo \"📋 使用 PM2 启动...\"
+              if ! command -v pm2 &> /dev/null; then
+                npm install -g pm2
+              fi
+              if [ ! -d \"node_modules\" ]; then
+                if command -v pnpm &> /dev/null; then
+                  pnpm install --prod --no-frozen-lockfile
                 else
-                  DELAY=$RETRY_DELAY
+                  npm install --production
                 fi
-                
-                echo "⏳ 等待 $DELAY 秒后重试..."
-                sleep $DELAY
-              else
-                echo "💥 错误不可重试或已达到最大重试次数，停止重试"
-                break
               fi
+              pm2 stop dashboard-backend 2>/dev/null || true
+              pm2 delete dashboard-backend 2>/dev/null || true
+              pm2 start ecosystem.config.js
+              pm2 save
+            else
+              echo \"📋 执行直接启动命令...\"
+              ${{ inputs.start_cmd }} &
+            fi
+            
+            echo \"✅ 启动命令执行完成\"
+          "
+
+      - name: 验证服务启动
+        id: validate-service
+        run: |
+          SERVICE_PORT="${{ steps.get-port.outputs.service_port }}"
+          echo "🔍 验证服务启动..."
+          echo "- 服务端口: $SERVICE_PORT"
+          
+          # 等待服务启动
+          sleep 10
+          
+          # 验证服务是否响应
+          VALIDATION_SUCCESS=false
+          for i in {1..6}; do
+            echo "🔍 验证尝试 $i/6..."
+            
+            VALIDATION_RESULT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "
+              if netstat -tlnp 2>/dev/null | grep -q ':$SERVICE_PORT'; then
+                echo 'PORT_LISTENING'
+                HEALTH_RESPONSE=\$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:$SERVICE_PORT/health' --connect-timeout 5 --max-time 10 2>/dev/null || echo 'connection_failed')
+                if [ \"\$HEALTH_RESPONSE\" = \"200\" ]; then
+                  echo 'HEALTH_SUCCESS'
+                else
+                  echo 'HEALTH_FAILED:\$HEALTH_RESPONSE'
+                fi
+              else
+                echo 'PORT_NOT_LISTENING'
+              fi
+            " 2>/dev/null || echo "SSH_FAILED")
+            
+            if echo "$VALIDATION_RESULT" | grep -q "PORT_LISTENING"; then
+              echo "✅ 端口 $SERVICE_PORT 正在监听"
+              
+              if echo "$VALIDATION_RESULT" | grep -q "HEALTH_SUCCESS"; then
+                echo "✅ 健康检查成功"
+                VALIDATION_SUCCESS=true
+                break
+              else
+                HEALTH_CODE=$(echo "$VALIDATION_RESULT" | grep "HEALTH_FAILED" | cut -d':' -f2)
+                echo "❌ 健康检查失败 - 响应: $HEALTH_CODE"
+              fi
+            else
+              echo "❌ 端口 $SERVICE_PORT 未监听"
+            fi
+            
+            if [ $i -lt 6 ]; then
+              echo "⏳ 等待 5 秒后重试验证..."
+              sleep 5
             fi
           done
           
-          # 计算执行时间
-          END_TIME=$(date +%s)
-          EXECUTION_TIME=$((END_TIME - START_TIME))
-          
-          # 设置输出
-          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
-          echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
-          echo "execution_time=$EXECUTION_TIME" >> $GITHUB_OUTPUT
-          echo "error_message=$ERROR_MESSAGE" >> $GITHUB_OUTPUT
-          
-          # 最终结果
-          if [ "$SUCCESS" = "true" ]; then
-            echo "🎉 启动服务重试逻辑执行完成 - 成功"
+          if [ "$VALIDATION_SUCCESS" = "true" ]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "✅ 服务验证成功！"
           else
-            echo "💥 启动服务重试逻辑执行完成 - 失败"
-            if [ "$CONTINUE_ON_ERROR" = "false" ]; then
-              exit 1
-            fi
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "❌ 服务验证失败"
+            exit 1
           fi
 
       - name: 设置输出
         id: set-outputs
         run: |
-          # 检查重试中心的结果
-          if [ "${{ steps.retry-start.outputs.success }}" = "true" ]; then
+          if [ "${{ steps.validate-service.outputs.success }}" = "true" ]; then
             echo "start_success=true" >> $GITHUB_OUTPUT
             echo "✅ 启动服务成功"
-            echo "重试次数: ${{ steps.retry-start.outputs.attempts }}"
-            echo "执行时间: ${{ steps.retry-start.outputs.execution_time }}秒"
           else
             echo "start_success=false" >> $GITHUB_OUTPUT
             echo "❌ 启动服务失败"
-            echo "错误信息: ${{ steps.retry-start.outputs.error_message }}"
-            echo "重试次数: ${{ steps.retry-start.outputs.attempts }}"
-            echo "执行时间: ${{ steps.retry-start.outputs.execution_time }}秒"
             exit 1
           fi

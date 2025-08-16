@@ -61,7 +61,7 @@ jobs:
     needs: [validate-artifact]
     runs-on: ubuntu-latest
     outputs:
-      nginx_config: ${{ steps.parse-config.outputs.nginx_config }}
+      has_nginx_config: ${{ steps.parse-config.outputs.has_nginx_config }}
       test_url: ${{ steps.parse-config.outputs.test_url }}
       start_cmd: ${{ steps.parse-config.outputs.start_cmd }}
       service_port: ${{ steps.parse-config.outputs.service_port }}
@@ -84,14 +84,15 @@ jobs:
             MYSQL_CONFIG=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.mysql_config // ""')
             SKIP_INIT=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.skip_init // false')
             
-            # 将 Nginx 配置转换为 base64 编码，避免多行文本问题
+            # 检查是否有nginx配置，但不直接输出长配置
             if [ -n "$NGINX_CONFIG" ]; then
-              NGINX_CONFIG_B64=$(echo "$NGINX_CONFIG" | base64 -w 0)
+              echo "has_nginx_config=true" >> $GITHUB_OUTPUT
+              # 将nginx配置保存到文件，避免输出过长
+              echo "$NGINX_CONFIG" > /tmp/nginx_config.txt
             else
-              NGINX_CONFIG_B64=""
+              echo "has_nginx_config=false" >> $GITHUB_OUTPUT
             fi
             
-            echo "nginx_config=$NGINX_CONFIG_B64" >> $GITHUB_OUTPUT
             echo "test_url=$TEST_URL" >> $GITHUB_OUTPUT
             echo "start_cmd=$START_CMD" >> $GITHUB_OUTPUT
             echo "service_port=$SERVICE_PORT" >> $GITHUB_OUTPUT
@@ -101,7 +102,7 @@ jobs:
             echo "✅ 部署配置解析完成"
           else
             echo "📋 未提供部署配置，使用默认值"
-            echo "nginx_config=" >> $GITHUB_OUTPUT
+            echo "has_nginx_config=false" >> $GITHUB_OUTPUT
             echo "test_url=" >> $GITHUB_OUTPUT
             echo "start_cmd=" >> $GITHUB_OUTPUT
             echo "service_port=" >> $GITHUB_OUTPUT
@@ -167,7 +168,7 @@ jobs:
   # 步骤5: 配置Nginx（可选）
   configure-nginx:
     needs: [parse-secrets, deploy-project, parse-deploy-config]
-    if: ${{ needs.parse-deploy-config.outputs.nginx_config != '' }}
+    if: ${{ needs.parse-deploy-config.outputs.has_nginx_config == 'true' }}
     uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       # 项目名称
@@ -179,8 +180,8 @@ jobs:
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
       # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
-      # Nginx配置
-      nginx_config: ${{ needs.parse-deploy-config.outputs.nginx_config }}
+      # Nginx配置（从原始输入中提取nginx_config部分）
+      nginx_config: ${{ inputs.deploy_config }}
 
   # 步骤6: 启动服务（可选，仅后端项目）
   start-service:
