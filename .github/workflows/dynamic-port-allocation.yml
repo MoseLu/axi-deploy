@@ -129,10 +129,26 @@ jobs:
                local start_port=$1
                local end_port=$2
                local preferred_port=$3
+               local project_name=$4
                
                echo "🔍 在端口范围 $start_port-$end_port 中查找可用端口..." >&2
                
-               # 如果指定了首选端口，先检查
+               # 方法1: 优先检查配置文件中的端口
+               if [ -n "$project_name" ] && [ -f "/srv/port-config.yml" ]; then
+                 local config_port=$(grep -A 1 "^  $project_name:" /srv/port-config.yml | grep "port:" | awk '{print $2}')
+                 if [ -n "$config_port" ] && [ "$config_port" -ge "$start_port" ] && [ "$config_port" -le "$end_port" ]; then
+                   echo "🎯 检查配置文件中的端口: $config_port" >&2
+                   if check_port_available "$config_port"; then
+                     echo "✅ 配置文件端口 $config_port 可用" >&2
+                     echo "$config_port"
+                     return 0
+                   else
+                     echo "❌ 配置文件端口 $config_port 不可用，继续查找其他端口" >&2
+                   fi
+                 fi
+               fi
+               
+               # 方法2: 如果指定了首选端口，检查
                if [ -n "$preferred_port" ] && [ "$preferred_port" -ge "$start_port" ] && [ "$preferred_port" -le "$end_port" ]; then
                  echo "🎯 检查首选端口: $preferred_port" >&2
                  if check_port_available "$preferred_port"; then
@@ -144,7 +160,7 @@ jobs:
                  fi
                fi
                
-               # 从起始端口开始查找
+               # 方法3: 从起始端口开始查找
                for port in $(seq "$start_port" "$end_port"); do
                  if check_port_available "$port"; then
                    echo "✅ 找到可用端口: $port" >&2
@@ -193,6 +209,42 @@ jobs:
                fi
                
                echo "✅ 端口配置文件已更新"
+             }
+             
+             # 更新 Nginx 配置函数
+             update_nginx_config() {
+               local project=$1
+               local port=$2
+               
+               echo "🌐 更新 Nginx 配置..."
+               
+               # 查找 Nginx 配置文件
+               local nginx_conf_dir="/www/server/nginx/conf/conf.d/redamancy"
+               local nginx_config_file="$nginx_conf_dir/$project.conf"
+               
+               if [ -f "$nginx_config_file" ]; then
+                 echo "📝 更新 Nginx 配置文件: $nginx_config_file"
+                 # 备份原配置文件
+                 sudo cp "$nginx_config_file" "$nginx_config_file.backup.$(date +%Y%m%d_%H%M%S)"
+                 
+                 # 更新端口（匹配多种可能的格式）
+                 sudo sed -i "s/listen [0-9]*;/listen $port;/g" "$nginx_config_file"
+                 sudo sed -i "s/proxy_pass http:\/\/[^:]*:[0-9]*/proxy_pass http:\/\/127.0.0.1:$port/g" "$nginx_config_file"
+                 
+                 echo "✅ Nginx 配置文件已更新: 端口 -> $port"
+                 
+                 # 测试 Nginx 配置
+                 if sudo nginx -t 2>/dev/null; then
+                   echo "✅ Nginx 配置语法正确"
+                   # 重新加载 Nginx 配置
+                   sudo systemctl reload nginx
+                   echo "✅ Nginx 配置已重新加载"
+                 else
+                   echo "⚠️ Nginx 配置语法错误，请手动检查"
+                 fi
+               else
+                 echo "⚠️ Nginx 配置文件不存在: $nginx_config_file"
+               fi
              }
              
              # 更新应用程序配置文件函数
@@ -296,7 +348,7 @@ jobs:
             echo "- 强制重新分配: $FORCE_REALLOCATE"
             
             # 查找可用端口
-            ALLOCATED_PORT=$(find_available_port "$PORT_START" "$PORT_END" "$PREFERRED_PORT")
+            ALLOCATED_PORT=$(find_available_port "$PORT_START" "$PORT_END" "$PREFERRED_PORT" "$PROJECT_NAME")
             
                          if [ $? -eq 0 ]; then
                echo "🎉 端口分配成功: $ALLOCATED_PORT"
@@ -306,6 +358,9 @@ jobs:
                
                # 更新应用程序配置文件
                update_app_config "$PROJECT_NAME" "$ALLOCATED_PORT"
+               
+               # 更新 Nginx 配置
+               update_nginx_config "$PROJECT_NAME" "$ALLOCATED_PORT"
                
                # 输出结果到临时文件，供后续步骤读取
                echo "$ALLOCATED_PORT" > /tmp/allocated_port.txt
