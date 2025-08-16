@@ -122,9 +122,28 @@ jobs:
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
 
 
-  # 步骤4: 部署项目
-  deploy-project:
+  # 步骤4: 动态端口分配（仅后端项目）
+  dynamic-port-allocation:
     needs: [parse-secrets, validate-artifact, parse-deploy-config]
+    if: ${{ inputs.deploy_type == 'backend' }}
+    uses: ./.github/workflows/dynamic-port-allocation.yml
+    with:
+      # 项目名称
+      project: ${{ inputs.project }}
+      # 服务器配置
+      server_host: ${{ needs.parse-secrets.outputs.server_host }}
+      server_user: ${{ needs.parse-secrets.outputs.server_user }}
+      server_key: ${{ needs.parse-secrets.outputs.server_key }}
+      server_port: ${{ needs.parse-secrets.outputs.server_port }}
+      # 端口范围
+      port_range_start: "8080"
+      port_range_end: "10000"
+      # 首选端口（从配置中获取）
+      preferred_port: ${{ needs.parse-deploy-config.outputs.service_port || '' }}
+
+  # 步骤5: 部署项目
+  deploy-project:
+    needs: [parse-secrets, validate-artifact, parse-deploy-config, dynamic-port-allocation]
     uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
     with:
       # 项目名称
@@ -165,7 +184,7 @@ jobs:
 
   # 步骤6: 启动服务（可选，仅后端项目）
   start-service:
-    needs: [parse-secrets, deploy-project, configure-nginx, parse-deploy-config]
+    needs: [parse-secrets, deploy-project, configure-nginx, parse-deploy-config, dynamic-port-allocation]
     if: ${{ needs.parse-deploy-config.outputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
     uses: MoseLu/axi-deploy/.github/workflows/start-service.yml@master
     with:
@@ -175,8 +194,8 @@ jobs:
       start_cmd: ${{ needs.parse-deploy-config.outputs.start_cmd }}
       # 部署类型
       deploy_type: ${{ inputs.deploy_type }}
-      # 服务端口（从配置文件获取）
-      service_port: ${{ needs.parse-deploy-config.outputs.service_port || '' }}
+      # 服务端口（优先使用动态分配的端口）
+      service_port: ${{ needs.dynamic-port-allocation.outputs.allocated_port || needs.parse-deploy-config.outputs.service_port || '' }}
       # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
