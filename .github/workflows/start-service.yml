@@ -192,6 +192,74 @@ jobs:
                 
                 echo \"✅ 项目目录验证通过，文件数量: \$FILE_COUNT\"
                 
+                # 检查并修复 MySQL 服务
+                echo \"🔧 检查 MySQL 服务状态...\"
+                if ! systemctl is-active --quiet mysql; then
+                  echo \"❌ MySQL 服务未运行，尝试启动...\"
+                  sudo systemctl start mysql
+                  sleep 5
+                fi
+                
+                if systemctl is-active --quiet mysql; then
+                  echo \"✅ MySQL 服务已启动\"
+                else
+                  echo \"❌ MySQL 服务启动失败，但继续执行...\"
+                  echo \"📋 MySQL 服务状态:\"
+                  sudo systemctl status mysql --no-pager -l || true
+                fi
+                
+                # 检查并修复服务文件
+                echo \"🔧 检查服务文件配置...\"
+                SERVICE_FILE=\"${{ inputs.apps_root }}/${{ inputs.project }}/star-cloud.service\"
+                if [ -f \"\$SERVICE_FILE\" ]; then
+                  echo \"📋 当前服务文件内容:\"
+                  cat \"\$SERVICE_FILE\"
+                  
+                  # 检查是否包含 SERVICE_PORT 环境变量
+                  if ! grep -q \"SERVICE_PORT=8124\" \"\$SERVICE_FILE\"; then
+                    echo \"🔧 修复服务文件，添加 SERVICE_PORT 环境变量...\"
+                    # 备份原文件
+                    sudo cp \"\$SERVICE_FILE\" \"\$SERVICE_FILE.backup.\$(date +%Y%m%d_%H%M%S)\"
+                    # 添加环境变量
+                    sudo sed -i '/Environment=GIN_MODE=release/a Environment=SERVICE_PORT=8124' \"\$SERVICE_FILE\"
+                    echo \"✅ 服务文件已更新\"
+                    echo \"📋 更新后的服务文件内容:\"
+                    cat \"\$SERVICE_FILE\"
+                  else
+                    echo \"✅ 服务文件已包含正确的环境变量\"
+                  fi
+                else
+                  echo \"⚠️ 服务文件不存在: \$SERVICE_FILE\"
+                fi
+                
+                # 检查并修复配置文件
+                echo \"🔧 检查应用配置文件...\"
+                CONFIG_FILE=\"${{ inputs.apps_root }}/${{ inputs.project }}/backend/config/config-prod.yaml\"
+                if [ -f \"\$CONFIG_FILE\" ]; then
+                  echo \"📋 当前配置文件端口:\"
+                  grep -A 1 \"server:\" \"\$CONFIG_FILE\" | grep \"port:\" || echo \"未找到端口配置\"
+                  
+                  # 检查端口是否为 8124
+                  if ! grep -q \"port: '8124'\" \"\$CONFIG_FILE\"; then
+                    echo \"🔧 修复配置文件，更新端口为 8124...\"
+                    # 备份原文件
+                    sudo cp \"\$CONFIG_FILE\" \"\$CONFIG_FILE.backup.\$(date +%Y%m%d_%H%M%S)\"
+                    # 更新端口
+                    sudo sed -i \"s/port: '8080'/port: '8124'/\" \"\$CONFIG_FILE\"
+                    echo \"✅ 配置文件已更新\"
+                    echo \"📋 更新后的端口配置:\"
+                    grep -A 5 \"server:\" \"\$CONFIG_FILE\"
+                  else
+                    echo \"✅ 配置文件端口已正确设置为 8124\"
+                  fi
+                else
+                  echo \"⚠️ 配置文件不存在: \$CONFIG_FILE\"
+                fi
+                
+                # 重新加载 systemd 配置
+                echo \"🔧 重新加载 systemd 配置...\"
+                sudo systemctl daemon-reload
+                
                 # 详细诊断信息
                 echo \"🔍 诊断信息:\"
                 echo \"- 当前目录: \$(pwd)\"
