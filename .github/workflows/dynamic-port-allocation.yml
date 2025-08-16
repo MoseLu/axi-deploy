@@ -157,43 +157,113 @@ jobs:
                return 1
              }
             
-            # 更新端口配置文件函数
-            update_port_config() {
-              local project=$1
-              local port=$2
-              local config_file="/srv/port-config.yml"
-              
-              echo "📝 更新端口配置文件: $config_file"
-              
-              # 创建配置目录
-              sudo mkdir -p "$(dirname "$config_file")"
-              
-              # 如果配置文件不存在，创建基础结构
-              if [ ! -f "$config_file" ]; then
-                echo "# 动态端口配置" | sudo tee "$config_file" > /dev/null
-                echo "# 自动生成和维护" | sudo tee -a "$config_file" > /dev/null
-                echo "# 最后更新: $(date)" | sudo tee -a "$config_file" > /dev/null
-                echo "" | sudo tee -a "$config_file" > /dev/null
-                echo "projects:" | sudo tee -a "$config_file" > /dev/null
-              fi
-              
-              # 检查项目是否已存在
-              if grep -q "^  $project:" "$config_file"; then
-                echo "🔄 更新现有项目端口配置"
-                # 更新现有项目的端口
-                sudo sed -i "/^  $project:/,/^  [^ ]/ { /^    port:/ s/:.*/: $port/ }" "$config_file"
-              else
-                echo "➕ 添加新项目端口配置"
-                # 在文件末尾添加新项目
-                echo "" | sudo tee -a "$config_file" > /dev/null
-                echo "  $project:" | sudo tee -a "$config_file" > /dev/null
-                echo "    port: $port" | sudo tee -a "$config_file" > /dev/null
-                echo "    description: \"自动分配 - $(date)\"" | sudo tee -a "$config_file" > /dev/null
-                echo "    allocated_at: \"$(date -Iseconds)\"" | sudo tee -a "$config_file" > /dev/null
-              fi
-              
-              echo "✅ 端口配置文件已更新"
-            }
+                         # 更新端口配置文件函数
+             update_port_config() {
+               local project=$1
+               local port=$2
+               local config_file="/srv/port-config.yml"
+               
+               echo "📝 更新端口配置文件: $config_file"
+               
+               # 创建配置目录
+               sudo mkdir -p "$(dirname "$config_file")"
+               
+               # 如果配置文件不存在，创建基础结构
+               if [ ! -f "$config_file" ]; then
+                 echo "# 动态端口配置" | sudo tee "$config_file" > /dev/null
+                 echo "# 自动生成和维护" | sudo tee -a "$config_file" > /dev/null
+                 echo "# 最后更新: $(date)" | sudo tee -a "$config_file" > /dev/null
+                 echo "" | sudo tee -a "$config_file" > /dev/null
+                 echo "projects:" | sudo tee -a "$config_file" > /dev/null
+               fi
+               
+               # 检查项目是否已存在
+               if grep -q "^  $project:" "$config_file"; then
+                 echo "🔄 更新现有项目端口配置"
+                 # 更新现有项目的端口
+                 sudo sed -i "/^  $project:/,/^  [^ ]/ { /^    port:/ s/:.*/: $port/ }" "$config_file"
+               else
+                 echo "➕ 添加新项目端口配置"
+                 # 在文件末尾添加新项目
+                 echo "" | sudo tee -a "$config_file" > /dev/null
+                 echo "  $project:" | sudo tee -a "$config_file" > /dev/null
+                 echo "    port: $port" | sudo tee -a "$config_file" > /dev/null
+                 echo "    description: \"自动分配 - $(date)\"" | sudo tee -a "$config_file" > /dev/null
+                 echo "    allocated_at: \"$(date -Iseconds)\"" | sudo tee -a "$config_file" > /dev/null
+               fi
+               
+               echo "✅ 端口配置文件已更新"
+             }
+             
+             # 更新应用程序配置文件函数
+             update_app_config() {
+               local project=$1
+               local port=$2
+               
+               echo "🔧 更新应用程序配置文件..."
+               
+               # 查找项目目录
+               local project_dir="/srv/apps/$project"
+               if [ ! -d "$project_dir" ]; then
+                 echo "⚠️ 项目目录不存在: $project_dir"
+                 return 0
+               fi
+               
+               echo "📁 项目目录: $project_dir"
+               
+               # 针对不同项目类型的配置文件更新
+               case "$project" in
+                 "axi-star-cloud")
+                   # 更新 Go 项目的配置文件
+                   local config_file="$project_dir/backend/config/config-prod.yaml"
+                   if [ -f "$config_file" ]; then
+                     echo "📝 更新 Go 配置文件: $config_file"
+                     # 备份原配置文件
+                     sudo cp "$config_file" "$config_file.backup.$(date +%Y%m%d_%H%M%S)"
+                     # 更新端口
+                     sudo sed -i "s/port: '8080'/port: '$port'/" "$config_file"
+                     echo "✅ Go 配置文件已更新: 8080 -> $port"
+                   else
+                     echo "⚠️ Go 配置文件不存在: $config_file"
+                   fi
+                   
+                   # 更新开发环境配置文件
+                   local dev_config_file="$project_dir/backend/config/config.yaml"
+                   if [ -f "$dev_config_file" ]; then
+                     echo "📝 更新开发环境配置文件: $dev_config_file"
+                     sudo sed -i "s/port: '8080'/port: '$port'/" "$dev_config_file"
+                     echo "✅ 开发环境配置文件已更新: 8080 -> $port"
+                   fi
+                   ;;
+                 "axi-project-dashboard")
+                   # 更新 Node.js 项目的配置文件
+                   local ecosystem_file="$project_dir/ecosystem.config.js"
+                   if [ -f "$ecosystem_file" ]; then
+                     echo "📝 更新 PM2 配置文件: $ecosystem_file"
+                     # 备份原配置文件
+                     sudo cp "$ecosystem_file" "$ecosystem_file.backup.$(date +%Y%m%d_%H%M%S)"
+                     # 更新端口
+                     sudo sed -i "s/port: 8090/port: $port/" "$ecosystem_file"
+                     echo "✅ PM2 配置文件已更新: 8090 -> $port"
+                   else
+                     echo "⚠️ PM2 配置文件不存在: $ecosystem_file"
+                   fi
+                   
+                   # 更新 package.json 中的端口（如果存在）
+                   local package_file="$project_dir/package.json"
+                   if [ -f "$package_file" ]; then
+                     echo "📝 更新 package.json 端口配置"
+                     sudo sed -i "s/\"PORT\": \"8090\"/\"PORT\": \"$port\"/" "$package_file"
+                     echo "✅ package.json 已更新: 8090 -> $port"
+                   fi
+                   ;;
+                 *)
+                   echo "⚠️ 未知项目类型: $project，跳过配置文件更新"
+                   ;;
+               esac
+               
+               echo "✅ 应用程序配置文件更新完成"
+             }
             
             # 主逻辑
             echo "📋 项目信息:"
@@ -205,16 +275,19 @@ jobs:
             # 查找可用端口
             ALLOCATED_PORT=$(find_available_port "$PORT_START" "$PORT_END" "$PREFERRED_PORT")
             
-            if [ $? -eq 0 ]; then
-              echo "🎉 端口分配成功: $ALLOCATED_PORT"
-              
-              # 更新端口配置文件
-              update_port_config "$PROJECT_NAME" "$ALLOCATED_PORT"
-              
-              # 输出结果到临时文件，供后续步骤读取
-              echo "$ALLOCATED_PORT" > /tmp/allocated_port.txt
-              echo "true" > /tmp/allocation_success.txt
-              echo "true" > /tmp/port_config_updated.txt
+                         if [ $? -eq 0 ]; then
+               echo "🎉 端口分配成功: $ALLOCATED_PORT"
+               
+               # 更新端口配置文件
+               update_port_config "$PROJECT_NAME" "$ALLOCATED_PORT"
+               
+               # 更新应用程序配置文件
+               update_app_config "$PROJECT_NAME" "$ALLOCATED_PORT"
+               
+               # 输出结果到临时文件，供后续步骤读取
+               echo "$ALLOCATED_PORT" > /tmp/allocated_port.txt
+               echo "true" > /tmp/allocation_success.txt
+               echo "true" > /tmp/port_config_updated.txt
               
               # 显示当前端口使用情况
               echo "📊 当前端口使用情况:"
