@@ -124,38 +124,38 @@ jobs:
                return 0  # 端口可用
              }
             
-            # 查找可用端口函数
-            find_available_port() {
-              local start_port=$1
-              local end_port=$2
-              local preferred_port=$3
-              
-              echo "🔍 在端口范围 $start_port-$end_port 中查找可用端口..."
-              
-              # 如果指定了首选端口，先检查
-              if [ -n "$preferred_port" ] && [ "$preferred_port" -ge "$start_port" ] && [ "$preferred_port" -le "$end_port" ]; then
-                echo "🎯 检查首选端口: $preferred_port"
-                if check_port_available "$preferred_port"; then
-                  echo "✅ 首选端口 $preferred_port 可用"
-                  echo "$preferred_port"
-                  return 0
-                else
-                  echo "❌ 首选端口 $preferred_port 不可用"
-                fi
-              fi
-              
-              # 从起始端口开始查找
-              for port in $(seq "$start_port" "$end_port"); do
-                if check_port_available "$port"; then
-                  echo "✅ 找到可用端口: $port"
-                  echo "$port"
-                  return 0
-                fi
-              done
-              
-              echo "❌ 在端口范围 $start_port-$end_port 中未找到可用端口"
-              return 1
-            }
+                         # 查找可用端口函数
+             find_available_port() {
+               local start_port=$1
+               local end_port=$2
+               local preferred_port=$3
+               
+               echo "🔍 在端口范围 $start_port-$end_port 中查找可用端口..." >&2
+               
+               # 如果指定了首选端口，先检查
+               if [ -n "$preferred_port" ] && [ "$preferred_port" -ge "$start_port" ] && [ "$preferred_port" -le "$end_port" ]; then
+                 echo "🎯 检查首选端口: $preferred_port" >&2
+                 if check_port_available "$preferred_port"; then
+                   echo "✅ 首选端口 $preferred_port 可用" >&2
+                   echo "$preferred_port"
+                   return 0
+                 else
+                   echo "❌ 首选端口 $preferred_port 不可用" >&2
+                 fi
+               fi
+               
+               # 从起始端口开始查找
+               for port in $(seq "$start_port" "$end_port"); do
+                 if check_port_available "$port"; then
+                   echo "✅ 找到可用端口: $port" >&2
+                   echo "$port"
+                   return 0
+                 fi
+               done
+               
+               echo "❌ 在端口范围 $start_port-$end_port 中未找到可用端口" >&2
+               return 1
+             }
             
             # 更新端口配置文件函数
             update_port_config() {
