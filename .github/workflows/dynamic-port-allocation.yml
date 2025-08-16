@@ -86,6 +86,11 @@ jobs:
           
           echo "✅ 输入参数验证通过"
 
+      - name: 创建SSH密钥
+        run: |
+          echo "${{ inputs.server_key }}" > /tmp/ssh_key
+          chmod 600 /tmp/ssh_key
+
       - name: 动态端口分配
         id: port-allocation
         uses: appleboy/ssh-action@v1.0.3
@@ -207,10 +212,10 @@ jobs:
               # 更新端口配置文件
               update_port_config "$PROJECT_NAME" "$ALLOCATED_PORT"
               
-              # 输出结果
-              echo "allocated_port=$ALLOCATED_PORT" >> $GITHUB_OUTPUT
-              echo "allocation_success=true" >> $GITHUB_OUTPUT
-              echo "port_config_updated=true" >> $GITHUB_OUTPUT
+              # 输出结果到临时文件，供后续步骤读取
+              echo "$ALLOCATED_PORT" > /tmp/allocated_port.txt
+              echo "true" > /tmp/allocation_success.txt
+              echo "true" > /tmp/port_config_updated.txt
               
               # 显示当前端口使用情况
               echo "📊 当前端口使用情况:"
@@ -218,24 +223,29 @@ jobs:
               
             else
               echo "❌ 端口分配失败"
-              echo "allocated_port=" >> $GITHUB_OUTPUT
-              echo "allocation_success=false" >> $GITHUB_OUTPUT
-              echo "port_config_updated=false" >> $GITHUB_OUTPUT
+              echo "" > /tmp/allocated_port.txt
+              echo "false" > /tmp/allocation_success.txt
+              echo "false" > /tmp/port_config_updated.txt
               exit 1
             fi
 
       - name: 设置输出
         id: set-outputs
         run: |
+          # 从服务器读取端口分配结果
+          ALLOCATED_PORT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "cat /tmp/allocated_port.txt 2>/dev/null || echo ''")
+          ALLOCATION_SUCCESS=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "cat /tmp/allocation_success.txt 2>/dev/null || echo 'false'")
+          PORT_CONFIG_UPDATED=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -p ${{ inputs.server_port }} ${{ inputs.server_user }}@${{ inputs.server_host }} "cat /tmp/port_config_updated.txt 2>/dev/null || echo 'false'")
+          
           echo "📋 端口分配结果:"
-          echo "- 分配端口: ${{ steps.port-allocation.outputs.allocated_port }}"
-          echo "- 分配成功: ${{ steps.port-allocation.outputs.allocation_success }}"
-          echo "- 配置更新: ${{ steps.port-allocation.outputs.port_config_updated }}"
+          echo "- 分配端口: $ALLOCATED_PORT"
+          echo "- 分配成功: $ALLOCATION_SUCCESS"
+          echo "- 配置更新: $PORT_CONFIG_UPDATED"
           
           # 设置输出变量
-          echo "allocated_port=${{ steps.port-allocation.outputs.allocated_port }}" >> $GITHUB_OUTPUT
-          echo "allocation_success=${{ steps.port-allocation.outputs.allocation_success }}" >> $GITHUB_OUTPUT
-          echo "port_config_updated=${{ steps.port-allocation.outputs.port_config_updated }}" >> $GITHUB_OUTPUT
+          echo "allocated_port=$ALLOCATED_PORT" >> $GITHUB_OUTPUT
+          echo "allocation_success=$ALLOCATION_SUCCESS" >> $GITHUB_OUTPUT
+          echo "port_config_updated=$PORT_CONFIG_UPDATED" >> $GITHUB_OUTPUT
 
       - name: 显示分配结果
         run: |
