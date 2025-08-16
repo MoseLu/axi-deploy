@@ -108,22 +108,21 @@ jobs:
             PREFERRED_PORT="${{ inputs.preferred_port }}"
             FORCE_REALLOCATE="${{ inputs.force_reallocate }}"
             
-            # 检查端口占用函数
-            check_port_available() {
-              local port=$1
-              # 检查端口是否被监听
-              if netstat -tlnp 2>/dev/null | grep -q ":$port "; then
-                return 1  # 端口被占用
-              fi
-              # 检查端口是否在防火墙中开放
-              if command -v firewall-cmd >/dev/null 2>&1; then
-                if ! firewall-cmd --list-ports | grep -q "$port"; then
-                  echo "⚠️ 端口 $port 未在防火墙中开放"
-                  return 1
-                fi
-              fi
-              return 0  # 端口可用
-            }
+                         # 检查端口占用函数
+             check_port_available() {
+               local port=$1
+               # 检查端口是否被监听
+               if netstat -tlnp 2>/dev/null | grep -q ":$port "; then
+                 return 1  # 端口被占用
+               fi
+               # 检查端口是否在防火墙中开放（静默检查，不输出信息）
+               if command -v firewall-cmd >/dev/null 2>&1; then
+                 if ! firewall-cmd --list-ports 2>/dev/null | grep -q "$port"; then
+                   return 1
+                 fi
+               fi
+               return 0  # 端口可用
+             }
             
             # 查找可用端口函数
             find_available_port() {
