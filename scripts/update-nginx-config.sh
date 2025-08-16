@@ -105,6 +105,8 @@ update_generic_nginx_config() {
         "$NGINX_CONF_DIR/${project_name}.conf"
         "$NGINX_CONF_DIR/${project_name}-*.conf"
         "$NGINX_CONF_DIR/*${project_name}*.conf"
+        "$NGINX_CONF_DIR/route-${project_name}.conf"
+        "$NGINX_CONF_DIR/nginx-${project_name}.conf"
     )
     
     for pattern in "${patterns[@]}"; do

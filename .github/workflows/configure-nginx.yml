@@ -251,7 +251,25 @@ jobs:
                     NGINX_CONFIG=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.nginx_config // ""')
                     if [ -n "$NGINX_CONFIG" ]; then
                       echo '✅ 从部署配置中提取到nginx_config'
-                      CLEANED_CONFIG="$NGINX_CONFIG"
+                      
+                      # 获取动态端口
+                      DYNAMIC_PORT=""
+                      if [ -f "/srv/port-config.yml" ]; then
+                        DYNAMIC_PORT=$(grep -A 1 "^  $PROJECT:" /srv/port-config.yml | grep "port:" | awk '{print $2}' 2>/dev/null)
+                        if [ -n "$DYNAMIC_PORT" ]; then
+                          echo "🔧 从端口配置文件获取端口: $DYNAMIC_PORT"
+                        fi
+                      fi
+                      
+                      # 如果没有找到端口，使用默认端口
+                      if [ -z "$DYNAMIC_PORT" ]; then
+                        DYNAMIC_PORT="8080"
+                        echo "⚠️ 未找到动态端口，使用默认端口: $DYNAMIC_PORT"
+                      fi
+                      
+                      # 替换模板中的动态端口占位符
+                      CLEANED_CONFIG=$(echo "$NGINX_CONFIG" | sed "s/{{DYNAMIC_PORT}}/$DYNAMIC_PORT/g")
+                      echo "🔧 已替换动态端口占位符为: $DYNAMIC_PORT"
                     else
                       echo '⚠️ 部署配置中没有找到nginx_config，使用默认配置'
                       # 使用默认配置逻辑

@@ -280,8 +280,8 @@ jobs:
           echo "- 分配端口: $ALLOCATED_PORT"
           echo "- 端口状态: $PORT_STATUS"
           
-          # 只有在端口重新分配时才更新Nginx配置
-          if [ "$PORT_STATUS" = "reallocated" ]; then
+          # 总是更新Nginx配置，确保端口一致
+          if [ "$PORT_STATUS" = "reallocated" ] || [ "$PORT_STATUS" = "available" ]; then
             echo "📤 上传Nginx配置更新脚本..."
             scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i /tmp/ssh_key -P ${{ inputs.server_port }} scripts/update-nginx-config.sh ${{ inputs.server_user }}@${{ inputs.server_host }}:/tmp/
             
