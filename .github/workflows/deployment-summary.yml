@@ -197,3 +197,37 @@ jobs:
             fi
           fi
           echo "=========================================="
+          
+          # 发送 webhook 事件到 axi-project-dashboard
+          echo "📤 发送部署状态到监控中心..."
+          
+          # 确定部署状态
+          if [ ${#CRITICAL_FAILURES[@]} -gt 0 ]; then
+            DEPLOY_STATUS="failed"
+            DEPLOY_MESSAGE="部署失败"
+          elif [ -n "$TEST_FAILURE" ]; then
+            DEPLOY_STATUS="success"
+            DEPLOY_MESSAGE="部署成功但测试失败"
+          else
+            DEPLOY_STATUS="success"
+            DEPLOY_MESSAGE="部署成功"
+          fi
+          
+          # 构建 webhook 数据
+          WEBHOOK_DATA='{"project":"${{ inputs.project }}","repository":"${{ inputs.source_repo }}","branch":"main","commit_hash":"latest","status":"'$DEPLOY_STATUS'","triggered_by":"axi-deploy","trigger_type":"manual","deploy_type":"${{ inputs.deploy_type }}","deploy_path":"${{ inputs.deploy_path }}","test_url":"${{ inputs.test_url }}","message":"'$DEPLOY_MESSAGE'","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}'
+          
+          # 发送 webhook 到 axi-project-dashboard
+          echo "📤 发送 webhook 到监控中心..."
+          WEBHOOK_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/webhook_response.json -X POST -H "Content-Type: application/json" -H "User-Agent: axi-deploy/1.0" -d "$WEBHOOK_DATA" "https://redamancy.com.cn/project-dashboard/api/webhook/deployment")
+          
+          WEBHOOK_STATUS_CODE="${WEBHOOK_RESPONSE: -3}"
+          WEBHOOK_BODY=$(cat /tmp/webhook_response.json 2>/dev/null || echo "{}")
+          
+          if [ "$WEBHOOK_STATUS_CODE" = "200" ]; then
+            echo "✅ Webhook 发送成功"
+            echo "📋 Webhook 响应: $WEBHOOK_BODY"
+          else
+            echo "⚠️ Webhook 发送失败 (HTTP $WEBHOOK_STATUS_CODE)"
+            echo "📋 Webhook 响应: $WEBHOOK_BODY"
+            echo "📋 发送的数据: $WEBHOOK_DATA"
+          fi
