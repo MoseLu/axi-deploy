@@ -214,7 +214,7 @@ jobs:
           fi
           
           # 构建 webhook 数据
-          WEBHOOK_DATA='{"project":"${{ inputs.project }}","repository":"${{ inputs.source_repo }}","branch":"main","commit_hash":"latest","status":"'$DEPLOY_STATUS'","triggered_by":"axi-deploy","trigger_type":"manual","deploy_type":"${{ inputs.deploy_type }}","deploy_path":"${{ inputs.deploy_path }}","test_url":"${{ inputs.test_url }}","message":"'$DEPLOY_MESSAGE'","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}'
+          WEBHOOK_DATA='{"project":"${{ inputs.project }}","repository":"${{ inputs.source_repo }}","branch":"main","commit_hash":"latest","status":"'$DEPLOY_STATUS'","triggered_by":"axi-deploy","trigger_type":"manual","deploy_type":"${{ inputs.deploy_type }}","deploy_path":"${{ inputs.deploy_path }}","test_url":"${{ inputs.test_url }}","message":"'$DEPLOY_MESSAGE'","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","step_details":{"validate_artifact":"'${{ inputs.validate_artifact_result }}'","parse_secrets":"'${{ inputs.parse_secrets_result }}'","server_init":"'${{ inputs.server_init_result || 'skipped' }}'","deploy_project":"'${{ inputs.deploy_project_result }}'","configure_nginx":"'${{ inputs.configure_nginx_result || 'skipped' }}'","start_service":"'${{ inputs.start_service_result || 'skipped' }}'","test_website_static":"'${{ inputs.test_website_static_result || 'skipped' }}'","test_website_backend":"'${{ inputs.test_website_backend_result || 'skipped' }}'"}}'
           
           # 发送 webhook 到 axi-project-dashboard
           echo "📤 发送 webhook 到监控中心..."

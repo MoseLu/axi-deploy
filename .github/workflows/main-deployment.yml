@@ -58,70 +58,25 @@ jobs:
 
   # 步骤2.5: 解析部署配置
   parse-deploy-config:
-    needs: [validate-artifact]
-    runs-on: ubuntu-latest
-    outputs:
-      has_nginx_config: ${{ steps.parse-config.outputs.has_nginx_config }}
-      test_url: ${{ steps.parse-config.outputs.test_url }}
-      start_cmd: ${{ steps.parse-config.outputs.start_cmd }}
-      service_port: ${{ steps.parse-config.outputs.service_port }}
-      mysql_config: ${{ steps.parse-config.outputs.mysql_config }}
-      skip_init: ${{ steps.parse-config.outputs.skip_init }}
-    steps:
-      - name: 解析部署配置
-        id: parse-config
-        run: |
-          if [ -n "${{ inputs.deploy_config }}" ]; then
-            echo "🔍 解析部署配置..."
-            DEPLOY_CONFIG_JSON=$(echo "${{ inputs.deploy_config }}" | base64 -d)
-            echo "📄 部署配置: $DEPLOY_CONFIG_JSON"
-            
-            # 提取各个参数
-            NGINX_CONFIG=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.nginx_config // ""')
-            TEST_URL=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.test_url // ""')
-            START_CMD=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.start_cmd // ""')
-            SERVICE_PORT=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.service_port // ""')
-            MYSQL_CONFIG=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.mysql_config // ""')
-            SKIP_INIT=$(echo "$DEPLOY_CONFIG_JSON" | jq -r '.skip_init // false')
-            
-            # 检查是否有nginx配置，但不直接输出长配置
-            if [ -n "$NGINX_CONFIG" ]; then
-              echo "has_nginx_config=true" >> $GITHUB_OUTPUT
-              # 将nginx配置保存到文件，避免输出过长
-              echo "$NGINX_CONFIG" > /tmp/nginx_config.txt
-            else
-              echo "has_nginx_config=false" >> $GITHUB_OUTPUT
-            fi
-            
-            echo "test_url=$TEST_URL" >> $GITHUB_OUTPUT
-            echo "start_cmd=$START_CMD" >> $GITHUB_OUTPUT
-            echo "service_port=$SERVICE_PORT" >> $GITHUB_OUTPUT
-            echo "mysql_config=$MYSQL_CONFIG" >> $GITHUB_OUTPUT
-            echo "skip_init=$SKIP_INIT" >> $GITHUB_OUTPUT
-            
-            echo "✅ 部署配置解析完成"
-          else
-            echo "📋 未提供部署配置，使用默认值"
-            echo "has_nginx_config=false" >> $GITHUB_OUTPUT
-            echo "test_url=" >> $GITHUB_OUTPUT
-            echo "start_cmd=" >> $GITHUB_OUTPUT
-            echo "service_port=" >> $GITHUB_OUTPUT
-            echo "mysql_config=" >> $GITHUB_OUTPUT
-            echo "skip_init=false" >> $GITHUB_OUTPUT
-          fi
+    needs: [parse-secrets, validate-artifact]
+    uses: MoseLu/axi-deploy/.github/workflows/parse-deploy-config.yml@master
+    with:
+      # 部署配置 (base64编码的JSON)
+      deploy_config: ${{ inputs.deploy_config }}
 
-  # 步骤3: 服务器初始化（可选，使用可复用工作流）
+  # 步骤3: 服务器初始化（可选）
   server-init:
     needs: [parse-secrets, validate-artifact, parse-deploy-config]
     if: ${{ needs.parse-deploy-config.outputs.skip_init != 'true' }}
     uses: MoseLu/axi-deploy/.github/workflows/server-init.yml@master
     with:
+      # 项目名称
+      project: ${{ inputs.project }}
       # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
       server_key: ${{ needs.parse-secrets.outputs.server_key }}
       server_port: ${{ needs.parse-secrets.outputs.server_port }}
-
 
   # 步骤4: 动态端口分配（仅后端项目）
   dynamic-port-allocation:
@@ -168,7 +123,7 @@ jobs:
   # 步骤5: 配置Nginx（可选）
   configure-nginx:
     needs: [parse-secrets, deploy-project, parse-deploy-config]
-    if: ${{ needs.parse-deploy-config.outputs.has_nginx_config == 'true' }}
+    if: ${{ needs.parse-deploy-config.outputs.nginx_config != '' }}
     uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
     with:
       # 项目名称

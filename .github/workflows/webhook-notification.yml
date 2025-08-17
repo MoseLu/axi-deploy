@@ -1,0 +1,104 @@
+name: Webhook Notification
+
+description: "发送 webhook 通知到监控中心 - 支持每个步骤的实时汇报"
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: "项目名称"
+      step_name:
+        required: true
+        type: string
+        description: "步骤名称"
+      step_status:
+        required: true
+        type: string
+        description: "步骤状态 (running, success, failed, skipped)"
+      deploy_type:
+        required: true
+        type: string
+        description: "部署类型"
+      source_repo:
+        required: true
+        type: string
+        description: "源仓库"
+      run_id:
+        required: true
+        type: string
+        description: "构建运行ID"
+      step_duration:
+        required: false
+        type: string
+        description: "步骤执行时长(秒)"
+        default: "0"
+      step_logs:
+        required: false
+        type: string
+        description: "步骤日志"
+        default: ""
+      error_message:
+        required: false
+        type: string
+        description: "错误信息"
+        default: ""
+      deploy_path:
+        required: false
+        type: string
+        description: "部署路径"
+        default: ""
+      test_url:
+        required: false
+        type: string
+        description: "测试URL"
+        default: ""
+
+jobs:
+  send-webhook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: 发送步骤状态到监控中心
+        run: |
+          echo "📤 发送步骤状态到监控中心..."
+          echo "项目: ${{ inputs.project }}"
+          echo "步骤: ${{ inputs.step_name }}"
+          echo "状态: ${{ inputs.step_status }}"
+          
+          # 构建 webhook 数据
+          WEBHOOK_DATA='{
+            "project":"${{ inputs.project }}",
+            "repository":"${{ inputs.source_repo }}",
+            "branch":"main",
+            "commit_hash":"latest",
+            "status":"${{ inputs.step_status }}",
+            "triggered_by":"axi-deploy",
+            "trigger_type":"manual",
+            "deploy_type":"${{ inputs.deploy_type }}",
+            "deploy_path":"${{ inputs.deploy_path }}",
+            "test_url":"${{ inputs.test_url }}",
+            "step_name":"${{ inputs.step_name }}",
+            "step_duration":"${{ inputs.step_duration }}",
+            "step_logs":"${{ inputs.step_logs }}",
+            "error_message":"${{ inputs.error_message }}",
+            "message":"步骤 ${{ inputs.step_name }} ${{ inputs.step_status }}",
+            "timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+          }'
+          
+          # 发送 webhook 到 axi-project-dashboard
+          echo "📤 发送 webhook 到监控中心..."
+          WEBHOOK_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/webhook_response.json -X POST -H "Content-Type: application/json" -H "User-Agent: axi-deploy/1.0" -d "$WEBHOOK_DATA" "https://redamancy.com.cn/project-dashboard/api/webhook/step")
+          
+          WEBHOOK_STATUS_CODE="${WEBHOOK_RESPONSE: -3}"
+          WEBHOOK_BODY=$(cat /tmp/webhook_response.json 2>/dev/null || echo "{}")
+          
+          if [ "$WEBHOOK_STATUS_CODE" = "200" ]; then
+            echo "✅ Webhook 发送成功"
+            echo "📋 Webhook 响应: $WEBHOOK_BODY"
+          else
+            echo "⚠️ Webhook 发送失败 (HTTP $WEBHOOK_STATUS_CODE)"
+            echo "📋 Webhook 响应: $WEBHOOK_BODY"
+            echo "📋 发送的数据: $WEBHOOK_DATA"
+          fi
