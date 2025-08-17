@@ -124,7 +124,7 @@ jobs:
   configure-nginx:
     needs: [parse-secrets, deploy-project, parse-deploy-config]
     if: ${{ needs.parse-deploy-config.outputs.nginx_config != '' }}
-    uses: MoseLu/axi-deploy/.github/workflows/configure-nginx.yml@master
+    uses: ./.github/workflows/configure-nginx.yml
     with:
       # 项目名称
       project: ${{ inputs.project }}
@@ -142,7 +142,7 @@ jobs:
   start-service:
     needs: [parse-secrets, deploy-project, configure-nginx, parse-deploy-config, dynamic-port-allocation]
     if: ${{ needs.parse-deploy-config.outputs.start_cmd != '' && inputs.deploy_type == 'backend' }}
-    uses: MoseLu/axi-deploy/.github/workflows/start-service.yml@master
+    uses: ./.github/workflows/start-service.yml
     with:
       # 项目名称
       project: ${{ inputs.project }}
@@ -162,7 +162,7 @@ jobs:
   test-website-static:
     needs: [parse-secrets, deploy-project, configure-nginx, parse-deploy-config]
     if: ${{ needs.parse-deploy-config.outputs.test_url != '' && inputs.deploy_type == 'static' }}
-    uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
+    uses: ./.github/workflows/test-website.yml
     with:
       # 项目名称
       project: ${{ inputs.project }}
@@ -184,7 +184,7 @@ jobs:
   test-website-backend:
     needs: [parse-secrets, deploy-project, configure-nginx, start-service, parse-deploy-config]
     if: ${{ needs.parse-deploy-config.outputs.test_url != '' && inputs.deploy_type == 'backend' }}
-    uses: MoseLu/axi-deploy/.github/workflows/test-website.yml@master
+    uses: ./.github/workflows/test-website.yml
     with:
       # 项目名称
       project: ${{ inputs.project }}
@@ -206,7 +206,7 @@ jobs:
   deployment-summary:
     needs: [parse-secrets, server-init, validate-artifact, deploy-project, configure-nginx, start-service, test-website-static, test-website-backend, parse-deploy-config]
     if: always()
-    uses: MoseLu/axi-deploy/.github/workflows/deployment-summary.yml@master
+    uses: ./.github/workflows/deployment-summary.yml
     with:
       # 项目信息
       project: ${{ inputs.project }}
