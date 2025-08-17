@@ -110,15 +110,26 @@ jobs:
                 throw new Error('缺少必需的部署参数，包括deploy_secrets');
               }
               
+              // 构建部署配置
+              const deployConfig = {
+                nginx_config: '${{ github.event.client_payload.nginx_config || '' }}',
+                test_url: '${{ github.event.client_payload.test_url || '' }}',
+                start_cmd: '${{ github.event.client_payload.start_cmd || '' }}',
+                service_port: '${{ github.event.client_payload.service_port || '' }}',
+                mysql_config: '${{ github.event.client_payload.mysql_config || '' }}',
+                skip_init: false
+              };
+              
+              // 将部署配置编码为base64
+              const deployConfigBase64 = Buffer.from(JSON.stringify(deployConfig)).toString('base64');
+              
               // 构建输入参数
               const inputs = {
                 project: project,
                 source_repo: sourceRepo,
                 run_id: runId,
                 deploy_type: '${{ github.event.client_payload.deploy_type || 'static' }}',
-                nginx_config: '${{ github.event.client_payload.nginx_config || '' }}',
-                test_url: '${{ github.event.client_payload.test_url || '' }}',
-                start_cmd: '${{ github.event.client_payload.start_cmd || '' }}',
+                deploy_config: deployConfigBase64,
                 deploy_secrets: deploySecrets
               };
               
