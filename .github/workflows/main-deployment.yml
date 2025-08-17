@@ -70,8 +70,6 @@ jobs:
     if: ${{ needs.parse-deploy-config.outputs.skip_init != 'true' }}
     uses: ./.github/workflows/server-init.yml
     with:
-      # 项目名称
-      project: ${{ inputs.project }}
       # 服务器配置
       server_host: ${{ needs.parse-secrets.outputs.server_host }}
       server_user: ${{ needs.parse-secrets.outputs.server_user }}
