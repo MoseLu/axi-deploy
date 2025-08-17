@@ -1,0 +1,101 @@
+name: Parse Deploy Config
+
+on:
+  workflow_call:
+    inputs:
+      deploy_config:
+        description: '部署配置 (base64编码的JSON)'
+        required: true
+        type: string
+    outputs:
+      service_port:
+        description: '服务端口'
+        value: ${{ jobs.parse-config.outputs.service_port }}
+      start_cmd:
+        description: '启动命令'
+        value: ${{ jobs.parse-config.outputs.start_cmd }}
+      nginx_config:
+        description: 'Nginx配置'
+        value: ${{ jobs.parse-config.outputs.nginx_config }}
+      mysql_config:
+        description: 'MySQL配置'
+        value: ${{ jobs.parse-config.outputs.mysql_config }}
+      skip_init:
+        description: '是否跳过服务器初始化'
+        value: ${{ jobs.parse-config.outputs.skip_init }}
+
+jobs:
+  parse-config:
+    runs-on: ubuntu-latest
+    outputs:
+      service_port: ${{ steps.parse.outputs.service_port }}
+      start_cmd: ${{ steps.parse.outputs.start_cmd }}
+      nginx_config: ${{ steps.parse.outputs.nginx_config }}
+      mysql_config: ${{ steps.parse.outputs.mysql_config }}
+      skip_init: ${{ steps.parse.outputs.skip_init }}
+    steps:
+      - name: 解析部署配置
+        id: parse
+        run: |
+          # 解码base64配置
+          if [ -n "${{ inputs.deploy_config }}" ]; then
+            echo "正在解析部署配置..."
+            
+            # 尝试解码base64
+            if echo "${{ inputs.deploy_config }}" | base64 -d > /tmp/deploy_config.json 2>/dev/null; then
+              CONFIG_FILE="/tmp/deploy_config.json"
+            else
+              # 如果不是base64，直接使用
+              echo "${{ inputs.deploy_config }}" > /tmp/deploy_config.json
+              CONFIG_FILE="/tmp/deploy_config.json"
+            fi
+            
+            # 检查文件是否存在且有效
+            if [ -f "$CONFIG_FILE" ] && [ -s "$CONFIG_FILE" ]; then
+              echo "✅ 配置文件解析成功"
+              
+              # 提取服务端口
+              SERVICE_PORT=$(jq -r '.service_port // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
+              if [ -n "$SERVICE_PORT" ]; then
+                echo "service_port=$SERVICE_PORT" >> $GITHUB_OUTPUT
+                echo "🔧 服务端口: $SERVICE_PORT"
+              fi
+              
+              # 提取启动命令
+              START_CMD=$(jq -r '.start_cmd // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
+              if [ -n "$START_CMD" ]; then
+                echo "start_cmd=$START_CMD" >> $GITHUB_OUTPUT
+                echo "🚀 启动命令: $START_CMD"
+              fi
+              
+              # 提取Nginx配置
+              NGINX_CONFIG=$(jq -r '.nginx_config // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
+              if [ -n "$NGINX_CONFIG" ]; then
+                echo "nginx_config=$NGINX_CONFIG" >> $GITHUB_OUTPUT
+                echo "🌐 Nginx配置已设置"
+              fi
+              
+              # 提取MySQL配置
+              MYSQL_CONFIG=$(jq -r '.mysql_config // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
+              if [ -n "$MYSQL_CONFIG" ]; then
+                echo "mysql_config=$MYSQL_CONFIG" >> $GITHUB_OUTPUT
+                echo "🗄️ MySQL配置已设置"
+              fi
+              
+              # 检查是否跳过初始化
+              SKIP_INIT=$(jq -r '.skip_init // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
+              echo "skip_init=$SKIP_INIT" >> $GITHUB_OUTPUT
+              if [ "$SKIP_INIT" = "true" ]; then
+                echo "⏭️ 跳过服务器初始化"
+              fi
+              
+            else
+              echo "⚠️ 配置文件为空或无效，使用默认配置"
+              echo "skip_init=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️ 未提供部署配置，使用默认配置"
+            echo "skip_init=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "✅ 部署配置解析完成"

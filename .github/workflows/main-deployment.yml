@@ -39,7 +39,7 @@ on:
 jobs:
   # 步骤1: 验证构建产物可用性
   validate-artifact:
-    uses: MoseLu/axi-deploy/.github/workflows/validate-artifact.yml@master
+    uses: ./.github/workflows/validate-artifact.yml
     with:
       # 项目名称
       project: ${{ inputs.project }}
@@ -51,7 +51,7 @@ jobs:
   # 步骤2: 解析部署密钥
   parse-secrets:
     needs: [validate-artifact]
-    uses: MoseLu/axi-deploy/.github/workflows/parse-secrets.yml@master
+    uses: ./.github/workflows/parse-secrets.yml
     with:
       # 部署密钥 (JSON格式或base64编码的JSON)
       deploy_secrets: ${{ inputs.deploy_secrets }}
@@ -59,7 +59,7 @@ jobs:
   # 步骤2.5: 解析部署配置
   parse-deploy-config:
     needs: [parse-secrets, validate-artifact]
-    uses: MoseLu/axi-deploy/.github/workflows/parse-deploy-config.yml@master
+    uses: ./.github/workflows/parse-deploy-config.yml
     with:
       # 部署配置 (base64编码的JSON)
       deploy_config: ${{ inputs.deploy_config }}
@@ -68,7 +68,7 @@ jobs:
   server-init:
     needs: [parse-secrets, validate-artifact, parse-deploy-config]
     if: ${{ needs.parse-deploy-config.outputs.skip_init != 'true' }}
-    uses: MoseLu/axi-deploy/.github/workflows/server-init.yml@master
+    uses: ./.github/workflows/server-init.yml
     with:
       # 项目名称
       project: ${{ inputs.project }}
@@ -100,7 +100,7 @@ jobs:
   # 步骤5: 部署项目
   deploy-project:
     needs: [parse-secrets, validate-artifact, parse-deploy-config, dynamic-port-allocation]
-    uses: MoseLu/axi-deploy/.github/workflows/deploy-project.yml@master
+    uses: ./.github/workflows/deploy-project.yml
     with:
       # 项目名称
       project: ${{ inputs.project }}
