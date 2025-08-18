@@ -58,7 +58,7 @@ jobs:
 
   # 步骤2.5: 解析部署配置
   parse-deploy-config:
-    needs: [parse-secrets, validate-artifact]
+    needs: [validate-artifact]
     uses: ./.github/workflows/parse-deploy-config.yml
     with:
       # 部署配置 (base64编码的JSON)
