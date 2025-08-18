@@ -97,7 +97,7 @@ jobs:
 
   # 步骤5: 部署项目
   deploy-project:
-    needs: [parse-secrets, validate-artifact, parse-deploy-config, dynamic-port-allocation]
+    needs: [parse-secrets, validate-artifact, parse-deploy-config]
     uses: ./.github/workflows/deploy-project.yml
     with:
       # 项目名称
