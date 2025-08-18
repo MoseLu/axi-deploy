@@ -23,6 +23,9 @@ on:
       skip_init:
         description: '是否跳过服务器初始化'
         value: ${{ jobs.parse-config.outputs.skip_init }}
+      test_url:
+        description: '测试URL'
+        value: ${{ jobs.parse-config.outputs.test_url }}
 
 jobs:
   parse-config:
@@ -33,6 +36,7 @@ jobs:
       nginx_config: ${{ steps.parse.outputs.nginx_config }}
       mysql_config: ${{ steps.parse.outputs.mysql_config }}
       skip_init: ${{ steps.parse.outputs.skip_init }}
+      test_url: ${{ steps.parse.outputs.test_url }}
     steps:
       - name: 解析部署配置
         id: parse
@@ -80,6 +84,13 @@ jobs:
               if [ -n "$MYSQL_CONFIG" ]; then
                 echo "mysql_config=$MYSQL_CONFIG" >> $GITHUB_OUTPUT
                 echo "🗄️ MySQL配置已设置"
+              fi
+              
+              # 提取测试URL
+              TEST_URL=$(jq -r '.test_url // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
+              if [ -n "$TEST_URL" ]; then
+                echo "test_url=$TEST_URL" >> $GITHUB_OUTPUT
+                echo "🔗 测试URL: $TEST_URL"
               fi
               
               # 检查是否跳过初始化
