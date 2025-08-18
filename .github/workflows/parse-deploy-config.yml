@@ -68,22 +68,28 @@ jobs:
               # 提取启动命令
               START_CMD=$(jq -r '.start_cmd // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
               if [ -n "$START_CMD" ]; then
-                echo "start_cmd=$START_CMD" >> $GITHUB_OUTPUT
-                echo "🚀 启动命令: $START_CMD"
+                # 使用base64编码避免特殊字符问题
+                START_CMD_B64=$(echo "$START_CMD" | base64 -w 0)
+                echo "start_cmd=$START_CMD_B64" >> $GITHUB_OUTPUT
+                echo "🚀 启动命令已设置 (base64编码)"
               fi
               
               # 提取Nginx配置
               NGINX_CONFIG=$(jq -r '.nginx_config // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
               if [ -n "$NGINX_CONFIG" ]; then
-                echo "nginx_config=$NGINX_CONFIG" >> $GITHUB_OUTPUT
-                echo "🌐 Nginx配置已设置"
+                # 使用base64编码避免特殊字符问题
+                NGINX_CONFIG_B64=$(echo "$NGINX_CONFIG" | base64 -w 0)
+                echo "nginx_config=$NGINX_CONFIG_B64" >> $GITHUB_OUTPUT
+                echo "🌐 Nginx配置已设置 (base64编码)"
               fi
               
               # 提取MySQL配置
               MYSQL_CONFIG=$(jq -r '.mysql_config // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
               if [ -n "$MYSQL_CONFIG" ]; then
-                echo "mysql_config=$MYSQL_CONFIG" >> $GITHUB_OUTPUT
-                echo "🗄️ MySQL配置已设置"
+                # 使用base64编码避免特殊字符问题
+                MYSQL_CONFIG_B64=$(echo "$MYSQL_CONFIG" | base64 -w 0)
+                echo "mysql_config=$MYSQL_CONFIG_B64" >> $GITHUB_OUTPUT
+                echo "🗄️ MySQL配置已设置 (base64编码)"
               fi
               
               # 提取测试URL
